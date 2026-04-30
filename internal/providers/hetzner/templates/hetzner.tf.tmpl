@@ -1,0 +1,197 @@
+terraform {
+  required_providers {
+    hcloud = {
+      source  = "hetznercloud/hcloud"
+      version = "~> 1.48"
+    }
+  }
+{{- if .Backend }}
+
+  # Remote state — provisioned + creds resolved by internal/state
+  # before this template was rendered. Auto-migrates from local on
+  # first deploy with providers.storage set.
+  backend "s3" {
+    bucket    = {{ .Backend.Bucket | hcl }}
+    key       = "terraform.tfstate"
+    endpoints = { s3 = {{ .Backend.Endpoint | hcl }} }
+    region    = {{ .Backend.Region | hcl }}
+    access_key = {{ .Backend.AccessKey | hcl }}
+    secret_key = {{ .Backend.SecretKey | hcl }}
+    skip_credentials_validation = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_region_validation      = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+  }
+{{- end }}
+}
+
+provider "hcloud" {}
+
+locals {
+  app    = {{ .App | hcl }}
+  env    = {{ .Env | hcl }}
+  prefix = {{ .Prefix | hcl }}
+}
+
+# ── Private network ────────────────────────────────────────────────────
+
+resource "hcloud_network" "default" {
+  name     = "${local.prefix}-net"
+  ip_range = {{ .NetworkCIDR | hcl }}
+  labels = {
+    nvoi_app = local.app
+    nvoi_env = local.env
+  }
+}
+
+resource "hcloud_network_subnet" "default" {
+  network_id   = hcloud_network.default.id
+  type         = "cloud"
+  network_zone = {{ .NetworkZone | hcl }}
+  ip_range     = {{ .NetworkSubnet | hcl }}
+}
+
+# ── Firewall ───────────────────────────────────────────────────────────
+# Baseline rules: SSH public, k3s control-plane + kubelet + flannel + registry private.
+
+resource "hcloud_firewall" "default" {
+  name = "${local.prefix}-fw"
+  labels = {
+    nvoi_app = local.app
+    nvoi_env = local.env
+  }
+
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "22"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "6443"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "10250"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "udp"
+    port       = "8472"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "5000"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
+  }
+}
+
+# ── Servers ────────────────────────────────────────────────────────────
+{{ range .Servers }}
+resource "hcloud_server" {{ .Key | hcl }} {
+  name         = {{ .Hostname | hcl }}
+  server_type  = {{ .Type | hcl }}
+  image        = {{ .Image | hcl }}
+  location     = {{ .Region | hcl }}
+  user_data    = {{ .UserData | hcl }}
+  firewall_ids = [hcloud_firewall.default.id]
+
+  network {
+    network_id = hcloud_network.default.id
+  }
+
+  labels = {
+    nvoi_app  = local.app
+    nvoi_env  = local.env
+    nvoi_role = {{ .Role | hcl }}
+  }
+
+  depends_on = [hcloud_network_subnet.default]
+
+  lifecycle {
+    # user_data: ForceNew + the hcloud provider's stored hash isn't always
+    #   stable across reads. Without this, every plan that produces a slightly
+    #   different bytewise user_data would trigger a server replacement —
+    #   destroying the running cluster on a no-op cosmetic change. Cloud-init
+    #   only runs at first boot anyway, so changing user_data has no semantic
+    #   effect on a running server.
+    # network: hcloud provider has a Set-hashing quirk on the inline `network`
+    #   block — state stores computed fields (ip, mac_address) that config
+    #   doesn't have, and terraform reports drift on every plan. The actual
+    #   attachment is stable; ignoring drift keeps applies idempotent.
+    ignore_changes = [user_data, network]
+  }
+}
+{{ end }}
+{{ if .HA }}
+# ── HA control-plane load balancer ─────────────────────────────────────
+# Auto-emitted because Servers has ≥2 masters. Public IPv4 for kubectl;
+# backend traffic stays on the private network (use_private_ip=true).
+# Targets enroll via label selector — adding/removing masters in the
+# YAML re-targets the LB without changing this block.
+
+resource "hcloud_load_balancer" "cp" {
+  name               = "${local.prefix}-cp"
+  load_balancer_type = "lb11"
+  network_zone       = {{ .NetworkZone | hcl }}
+  labels = {
+    nvoi_app = local.app
+    nvoi_env = local.env
+  }
+}
+
+resource "hcloud_load_balancer_network" "cp" {
+  load_balancer_id = hcloud_load_balancer.cp.id
+  subnet_id        = hcloud_network_subnet.default.id
+}
+
+resource "hcloud_load_balancer_target" "cp" {
+  type             = "label_selector"
+  load_balancer_id = hcloud_load_balancer.cp.id
+  label_selector   = "nvoi_app=${local.app},nvoi_env=${local.env},nvoi_role=master"
+  use_private_ip   = true
+  depends_on       = [hcloud_load_balancer_network.cp]
+}
+
+resource "hcloud_load_balancer_service" "cp" {
+  load_balancer_id = hcloud_load_balancer.cp.id
+  protocol         = "tcp"
+  listen_port      = 6443
+  destination_port = 6443
+}
+{{ end }}
+
+# ── Outputs ────────────────────────────────────────────────────────────
+# Uniform schema across providers — runner.Endpoints parses this.
+
+output "servers" {
+  value = {
+{{- range .Servers }}
+    {{ .Key | hcl }} = {
+      role    = {{ .Role | hcl }}
+      ipv4    = hcloud_server.{{ .Key }}.ipv4_address
+      private = one([for n in hcloud_server.{{ .Key }}.network : n.ip])
+    }
+{{- end }}
+  }
+}
+
+output "api_endpoint" {
+  value = {
+    public  = {{ if .HA }}hcloud_load_balancer.cp.ipv4{{ else }}hcloud_server.{{ .PrimaryMaster }}.ipv4_address{{ end }}
+    private = {{ if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}one([for n in hcloud_server.{{ .PrimaryMaster }}.network : n.ip]){{ end }}
+  }
+}
+
+output "ha" {
+  value = {{ if .HA }}true{{ else }}false{{ end }}
+}

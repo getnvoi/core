@@ -1,0 +1,8 @@
+app: hello
+env: dev
+providers:
+  infra: hetzner
+  storage: cloudflare
+ssh_key: ~/.ssh/id_rsa.pub
+servers:
+  master: {type: cax11, region: nbg1, role: master}

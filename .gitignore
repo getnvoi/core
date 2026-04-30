@@ -1,0 +1,4 @@
+.env
+.tf/
+bin/tf
+.DS_Store

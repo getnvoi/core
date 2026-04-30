@@ -1,0 +1,10 @@
+app: hello
+env: ha
+providers: {infra: hetzner}
+ssh_key: ~/.ssh/id_rsa.pub
+servers:
+  master-1: {type: cax21, region: nbg1, role: master, primary: true}
+  master-2: {type: cax21, region: nbg1, role: master}
+  master-3: {type: cax21, region: nbg1, role: master}
+  worker-1: {type: cax11, region: nbg1, role: worker}
+  worker-2: {type: cax11, region: nbg1, role: worker}
