@@ -162,6 +162,150 @@ func TestValidate(t *testing.T) {
 				c.Services = map[string]ServiceSpec{"api": {Image: "nginx:1.27-alpine", Port: 80}}
 			},
 		},
+
+		// build with single-registry inference
+		{
+			name: "build with single registry infers host",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{"docker.io": {Username: "u", Password: "p"}}
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nvoi/web", // host-less; inferred from the single registry entry
+					Port:  8080,
+					Build: &BuildSpec{Context: ".", Dockerfile: "Dockerfile"},
+				}}
+			},
+		},
+		{
+			name: "build with multiple registries and host-less image is ambiguous",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{
+					"docker.io": {Username: "u", Password: "p"},
+					"ghcr.io":   {Username: "u", Password: "p"},
+				}
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nvoi/web",
+					Port:  8080,
+					Build: &BuildSpec{Context: ".", Dockerfile: "Dockerfile"},
+				}}
+			},
+			wantErr: "no host prefix but multiple registries",
+		},
+
+		// secrets — top-level
+		{
+			name:   "valid top-level secrets",
+			mutate: func(c *Config) { c.Secrets = []string{"DATABASE_URL", "API_KEY"} },
+		},
+		{
+			name:    "empty secret entry rejected",
+			mutate:  func(c *Config) { c.Secrets = []string{"", "API_KEY"} },
+			wantErr: "empty entry",
+		},
+		{
+			name:    "invalid env var name rejected",
+			mutate:  func(c *Config) { c.Secrets = []string{"foo-bar"} },
+			wantErr: "not a valid env var name",
+		},
+		{
+			name:    "duplicate secret rejected",
+			mutate:  func(c *Config) { c.Secrets = []string{"X", "X"} },
+			wantErr: "duplicate entry",
+		},
+
+		// secrets — service whitelist
+		{
+			name: "service secrets ref to declared name passes",
+			mutate: func(c *Config) {
+				c.Secrets = []string{"DATABASE_URL"}
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nginx", Port: 80, Secrets: []string{"DATABASE_URL"},
+				}}
+			},
+		},
+		{
+			name: "service secrets ref to undeclared name rejected",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nginx", Port: 80, Secrets: []string{"NOPE"},
+				}}
+			},
+			wantErr: `"NOPE" is not declared in top-level secrets`,
+		},
+
+		// storage
+		{
+			name: "service with storage passes",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"pg": {
+					Image:   "postgres:16",
+					Port:    5432,
+					Storage: &StorageSpec{Size: "10Gi", MountPath: "/var/lib/postgresql/data"},
+				}}
+			},
+		},
+		{
+			name: "storage requires size",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"pg": {
+					Image:   "postgres:16",
+					Port:    5432,
+					Storage: &StorageSpec{MountPath: "/data"},
+				}}
+			},
+			wantErr: "storage.size: required",
+		},
+		{
+			name: "storage requires mountPath",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"pg": {
+					Image:   "postgres:16",
+					Port:    5432,
+					Storage: &StorageSpec{Size: "10Gi"},
+				}}
+			},
+			wantErr: "storage.mountPath: required",
+		},
+
+		// servers (placement)
+		{
+			name: "single server pin passes",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nginx", Port: 80, Servers: []string{"master"},
+				}}
+			},
+		},
+		{
+			name: "unknown server key rejected",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nginx", Port: 80, Servers: []string{"ghost"},
+				}}
+			},
+			wantErr: `"ghost" is not a defined server`,
+		},
+		{
+			name: "multi-server with storage rejected",
+			mutate: func(c *Config) {
+				c.Servers["w1"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "worker"}
+				c.Services = map[string]ServiceSpec{"pg": {
+					Image:   "postgres:16",
+					Port:    5432,
+					Storage: &StorageSpec{Size: "10Gi", MountPath: "/data"},
+					Servers: []string{"master", "w1"},
+				}}
+			},
+			wantErr: "single PV can't span nodes",
+		},
+		{
+			name: "multi-server stateless passes",
+			mutate: func(c *Config) {
+				c.Servers["w1"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "worker"}
+				c.Services = map[string]ServiceSpec{"web": {
+					Image: "nginx", Port: 80, Servers: []string{"master", "w1"},
+				}}
+			},
+		},
 	}
 
 	for _, tc := range cases {

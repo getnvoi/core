@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/runtime"
 )
@@ -33,26 +32,17 @@ func Plan(rt *runtime.Runtime) []Request {
 	return out
 }
 
-// HostsToPush extracts the unique registry hosts every Request pushes
-// to. Used to drive the per-host docker login loop.
-func HostsToPush(reqs []Request, services map[string]config.ServiceSpec) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, r := range reqs {
-		host := services[r.ServiceName].ImageHost()
-		if host == "" || seen[host] {
-			continue
-		}
-		seen[host] = true
-		out = append(out, host)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// All runs the full build phase: preflight, login per host using
-// YAML-supplied credentials, then per-service build. Aborts on first
-// failure — we never half-build.
+// All runs the full build phase: preflight, then a `docker login`
+// for every host declared in `registry:`, then per-service build.
+// Aborts on first failure — we never half-build.
+//
+// Login policy: the operator wrote the creds down, we use them. We
+// do NOT inspect image strings to "decide" which registries to
+// authenticate against — declared creds are the contract, full stop.
+// Anything weirder than that is a footgun: a host-less image
+// (`nvoi/web`) would otherwise silently fall through to whatever the
+// operator's local ~/.docker/config.json carries, which is almost
+// never the auth they intended to ship the deploy with.
 func All(ctx context.Context, rt *runtime.Runtime, runner Runner, lg log.Log) error {
 	reqs := Plan(rt)
 	if len(reqs) == 0 {
@@ -64,13 +54,15 @@ func All(ctx context.Context, rt *runtime.Runtime, runner Runner, lg log.Log) er
 		return fmt.Errorf("build preflight: %w", err)
 	}
 
-	hosts := HostsToPush(reqs, rt.Cfg.Services)
+	// Sorted iteration → deterministic log order across runs.
+	hosts := make([]string, 0, len(rt.Cfg.Registry))
+	for h := range rt.Cfg.Registry {
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+
 	for _, host := range hosts {
-		reg, ok := rt.Cfg.Registry[host]
-		if !ok {
-			// Validator should have rejected this; defensive guard.
-			return fmt.Errorf("no registry: entry for host %s — validator should have caught this", host)
-		}
+		reg := rt.Cfg.Registry[host]
 		lg.Step("docker-login-" + host)
 		if err := runner.Login(ctx, host, reg.Username, reg.Password); err != nil {
 			return fmt.Errorf("docker login %s: %w", host, err)

@@ -84,24 +84,6 @@ func TestPlan_NoServices_Empty(t *testing.T) {
 	}
 }
 
-// ── HostsToPush ───────────────────────────────────────────────────
-
-func TestHostsToPush_Deduped(t *testing.T) {
-	services := map[string]config.ServiceSpec{
-		"a": {Image: "ghcr.io/o/a"},
-		"b": {Image: "ghcr.io/o/b"},
-		"c": {Image: "registry.example.com:5000/o/c"},
-	}
-	reqs := []build.Request{
-		{ServiceName: "a"}, {ServiceName: "b"}, {ServiceName: "c"},
-	}
-	got := build.HostsToPush(reqs, services)
-	want := []string{"ghcr.io", "registry.example.com:5000"}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("got %v want %v", got, want)
-	}
-}
-
 // ── All — full flow ───────────────────────────────────────────────
 
 func TestAll_NoBuilds_NothingInvoked(t *testing.T) {
@@ -162,9 +144,30 @@ func TestAll_MultiHostLoginEach(t *testing.T) {
 	if len(r.logins) != 2 {
 		t.Fatalf("logins: got %d want 2", len(r.logins))
 	}
-	// HostsToPush sorts alphabetically → ghcr.io first
+	// All() sorts registry keys alphabetically → ghcr.io first.
 	if r.logins[0].host != "ghcr.io" || r.logins[1].host != "registry.example.com:5000" {
 		t.Errorf("login order: %v", []string{r.logins[0].host, r.logins[1].host})
+	}
+}
+
+// Host-less image with a single declared registry: login fires on
+// the declared host. Asserts the user-stated rule — declared creds
+// are the contract, no image-name inspection.
+func TestAll_HostlessImageStillLogsInToDeclaredRegistry(t *testing.T) {
+	r := &fakeRunner{}
+	err := build.All(context.Background(), rt(
+		map[string]config.ServiceSpec{
+			"web": {Image: "nvoi/web", Build: &config.BuildSpec{Context: ".", Dockerfile: "Dockerfile"}},
+		},
+		map[string]config.RegistryDef{
+			"docker.io": {Username: "nvoi", Password: "tok"},
+		},
+	), r, silentLog())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(r.logins) != 1 || r.logins[0].host != "docker.io" {
+		t.Errorf("expected one login to docker.io, got %+v", r.logins)
 	}
 }
 
@@ -223,17 +226,27 @@ func TestAll_FirstBuildFailureAborts(t *testing.T) {
 	}
 }
 
-func TestAll_MissingRegistryEntryIsDefensiveError(t *testing.T) {
-	// Validator should catch this, but test the defensive guard in
-	// All() too.
+// No defensive "missing registry for image host" check — the
+// validator owns that gate (build set + no registry: block →
+// validate error). The build phase trusts the validator and just
+// logs in to whatever's declared. This test asserts that the
+// validator-passed-but-empty-registry path runs build without
+// touching login (no creds to use).
+func TestAll_NoDeclaredRegistry_BuildStillRuns(t *testing.T) {
 	r := &fakeRunner{}
 	err := build.All(context.Background(), rt(
 		map[string]config.ServiceSpec{
-			"api": {Image: "ghcr.io/x/api", Build: &config.BuildSpec{Context: ".", Dockerfile: "Dockerfile"}},
+			"api": {Image: "public.io/x/api", Build: &config.BuildSpec{Context: ".", Dockerfile: "Dockerfile"}},
 		},
-		nil, // no registry: at all
+		nil, // no registry: at all — only valid for public/anonymous push targets
 	), r, silentLog())
-	if err == nil {
-		t.Fatal("expected defensive error when registry: missing for build host")
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(r.logins) != 0 {
+		t.Errorf("no declared registry → no login attempts, got %+v", r.logins)
+	}
+	if len(r.builds) != 1 {
+		t.Errorf("build should still fire, got %d", len(r.builds))
 	}
 }

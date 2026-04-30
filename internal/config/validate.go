@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/getnvoi/core/internal/providers"
 )
@@ -83,24 +84,81 @@ func (c *Config) Validate() error {
 	// explicitly is allowed (forward-compat for adding masters later)
 	// but redundant.
 
+	if err := validateSecrets(c); err != nil {
+		return err
+	}
 	if err := validateServices(c); err != nil {
 		return err
 	}
 	return nil
 }
 
+// validateSecrets enforces the top-level `secrets:` shape:
+//   - non-empty entries
+//   - each entry is a valid POSIX env var name (matches what
+//     `os.Getenv` and a k8s Secret key both accept without ceremony)
+//   - no duplicates
+//
+// Resolution against the operator's environment happens at the cmd/
+// boundary, NOT here. Validate is pure.
+func validateSecrets(c *Config) error {
+	seen := map[string]bool{}
+	for i, name := range c.Secrets {
+		if name == "" {
+			return fmt.Errorf("secrets[%d]: empty entry", i)
+		}
+		if !isValidEnvVarName(name) {
+			return fmt.Errorf("secrets[%d]: %q is not a valid env var name (must match [A-Za-z_][A-Za-z0-9_]*)", i, name)
+		}
+		if seen[name] {
+			return fmt.Errorf("secrets: duplicate entry %q", name)
+		}
+		seen[name] = true
+	}
+	return nil
+}
+
+// isValidEnvVarName mirrors the POSIX env var rule: leading letter or
+// underscore, followed by letters/digits/underscores. Tight enough
+// that the same string flows safely into both os.Getenv and a k8s
+// Secret data key.
+func isValidEnvVarName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r == '_':
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // validateServices enforces the YAML shape for services + registry:
 //
 //   - every service requires `image`
 //   - every service requires `port`
-//   - if `build:` is set: image must be fully qualified (host/...)
-//     AND that host must appear under registry: (so cluster can pull
-//     the image we're about to push)
-//   - replicas, when set, must be > 0
+//   - if `build:` is set: image must be fully qualified (host/...) OR
+//     the registry: block must declare exactly one host (which we infer)
+//   - replicas, when set, must be >= 1
+//   - storage, when set, requires size + mountPath
+//   - servers, when set, must reference declared servers; len > 1 +
+//     storage = error (a hostPath PV can't span nodes)
+//   - secrets refs must exist in the top-level secrets: list
 //
 // Push-side auth (operator's ~/.docker/config.json) is checked at the
 // cmd/ boundary, not here — that's I/O.
 func validateServices(c *Config) error {
+	declaredSecrets := make(map[string]bool, len(c.Secrets))
+	for _, name := range c.Secrets {
+		declaredSecrets[name] = true
+	}
+
 	for name, svc := range c.Services {
 		if svc.Image == "" {
 			return fmt.Errorf("services.%s.image: required", name)
@@ -113,11 +171,48 @@ func validateServices(c *Config) error {
 		}
 		if svc.HasBuild() {
 			host := svc.ImageHost()
-			if host == "" {
-				return fmt.Errorf("services.%s: build set but image %q is a bare shortname; use a fully qualified tag (e.g. ghcr.io/org/%s)", name, svc.Image, name)
+			if host != "" {
+				if _, ok := c.Registry[host]; !ok {
+					return fmt.Errorf("services.%s: build pushes to %s, but no registry: entry for that host", name, host)
+				}
+			} else {
+				// No host in image — try inference from a single
+				// registry: entry. With multiple registries this is
+				// ambiguous; with none it's broken.
+				if !strings.Contains(svc.Image, "/") {
+					return fmt.Errorf("services.%s: build set but image %q is a bare shortname; use `<org>/<name>` or a fully qualified tag", name, svc.Image)
+				}
+				if len(c.Registry) == 0 {
+					return fmt.Errorf("services.%s: build set but no registry: block to push to", name)
+				}
+				if len(c.Registry) > 1 {
+					return fmt.Errorf("services.%s: image %q has no host prefix but multiple registries are declared — write a fully qualified tag (e.g. ghcr.io/%s) to disambiguate", name, svc.Image, svc.Image)
+				}
 			}
-			if _, ok := c.Registry[host]; !ok {
-				return fmt.Errorf("services.%s: build pushes to %s, but no registry: entry for that host", name, host)
+		}
+		if svc.Storage != nil {
+			if svc.Storage.Size == "" {
+				return fmt.Errorf("services.%s.storage.size: required", name)
+			}
+			if svc.Storage.MountPath == "" {
+				return fmt.Errorf("services.%s.storage.mountPath: required", name)
+			}
+		}
+		// Server placement
+		for _, s := range svc.Servers {
+			if _, ok := c.Servers[s]; !ok {
+				return fmt.Errorf("services.%s.servers: %q is not a defined server", name, s)
+			}
+		}
+		// Multi-server + storage is impossible — a hostPath PV is
+		// pinned to one node, can't span.
+		if len(svc.Servers) > 1 && svc.Storage != nil {
+			return fmt.Errorf("services.%s: multiple servers with storage — a single PV can't span nodes; pick one server", name)
+		}
+		// Secret refs
+		for _, ref := range svc.Secrets {
+			if !declaredSecrets[ref] {
+				return fmt.Errorf("services.%s.secrets: %q is not declared in top-level secrets:", name, ref)
 			}
 		}
 	}

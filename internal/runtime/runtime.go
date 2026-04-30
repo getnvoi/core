@@ -54,6 +54,18 @@ type Inputs struct {
 	// terraform stores state locally in .tf/<app>-<env>/terraform.tfstate.
 	// Set means terraform's s3 backend points at the bucket.
 	Backend *state.Backend
+
+	// Secrets is the resolved name→value map for every entry in
+	// `cfg.Secrets`. Populated at the cmd/ boundary against
+	// os.Getenv (today's only source — CredentialSource backends are
+	// upper-layer). Missing or empty values cause the boundary to
+	// hard-error before runtime.Build runs; downstream code can
+	// trust every requested name has a non-empty literal here.
+	//
+	// Workload apply renders this into a single Opaque Secret named
+	// `nvoi-secrets`; per-service `secrets:` lists drive
+	// secretKeyRef-based env injection into each PodSpec.
+	Secrets map[string]string
 }
 
 // Runtime is the bag every internal package accepts when it needs more
@@ -68,7 +80,8 @@ type Runtime struct {
 	CacheDir   string
 	WorkDir    string
 	DeployHash string
-	Backend    *state.Backend // nil = local state; non-nil = remote on configured bucket
+	Backend    *state.Backend    // nil = local state; non-nil = remote on configured bucket
+	Secrets    map[string]string // resolved top-level secrets — see Inputs.Secrets
 }
 
 // Build is pure assembly. ctx is accepted for future callers
@@ -86,5 +99,6 @@ func Build(ctx context.Context, in Inputs) (*Runtime, error) {
 		WorkDir:    naming.WorkDir(in.Cfg.App, in.Cfg.Env),
 		DeployHash: in.DeployHash,
 		Backend:    in.Backend,
+		Secrets:    in.Secrets,
 	}, nil
 }

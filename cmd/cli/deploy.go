@@ -85,8 +85,11 @@ func deployCmd(r *rt) *cobra.Command {
 				}
 
 				// ── workloads: kube tunnel via primary's shell ──
-				// Skipped when nothing to deploy.
-				if len(r.runtime.Cfg.Services) == 0 && len(r.runtime.Cfg.Registry) == 0 {
+				// Skipped when nothing to deploy AND no top-level
+				// secrets to publish AND no registry: block to set up.
+				if len(r.runtime.Cfg.Services) == 0 &&
+					len(r.runtime.Cfg.Registry) == 0 &&
+					len(r.runtime.Cfg.Secrets) == 0 {
 					return nil
 				}
 				return deployWorkloads(ctx, r.runtime, shells)
@@ -115,11 +118,11 @@ func openShells(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints)
 }
 
 // installCluster is the post-terraform bootstrap pipeline:
-//   1. ensure swap on every node
-//   2. discover any existing k3s cluster (idempotency)
-//   3. cold start: install --cluster-init on the primary master
-//   4. join secondary masters via --server <primary>:6443
-//   5. join workers via the LB private IP (or primary's private IP if N=1)
+//  1. ensure swap on every node
+//  2. discover any existing k3s cluster (idempotency)
+//  3. cold start: install --cluster-init on the primary master
+//  4. join secondary masters via --server <primary>:6443
+//  5. join workers via the LB private IP (or primary's private IP if N=1)
 //
 // Takes pre-opened shells from the caller — the same connections
 // stay alive through the workloads phase via deployWorkloads(shells).
@@ -301,10 +304,16 @@ func closeShells(shells map[string]*ssh.Client) {
 
 // deployWorkloads builds the typed kube client over the primary's
 // existing SSH connection (the same one that installed k3s — kept
-// alive by the caller's `defer closeShells`), then applies every
-// nvoi-managed manifest and reconciles removal.
+// alive by the caller's `defer closeShells`), labels every node with
+// `nvoi-role=<yaml-key>` so workload nodeSelector / nodeAffinity
+// match, then applies every nvoi-managed manifest and reconciles
+// removal.
 //
 // Single SSH per server per deploy — no fresh dial here.
+//
+// Order matters: labels MUST land before workloads. New pods
+// scheduled with a nodeSelector on a not-yet-labeled node hang
+// Pending until the label arrives.
 func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string]*ssh.Client) error {
 	primaryName := rt.Cfg.PrimaryMaster()
 	primaryShell, ok := shells[primaryName]
@@ -319,8 +328,35 @@ func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string
 	}
 	defer kc.Close()
 
+	rt.Log.Step("node-labels")
+	for _, key := range sortedConfigServerKeys(rt.Cfg.Servers) {
+		hostname := naming.Server(rt.Cfg.App, rt.Cfg.Env, key)
+		if err := kc.LabelNode(ctx, hostname, workload.LabelNvoiRole, key); err != nil {
+			return fmt.Errorf("label node %s: %w", key, err)
+		}
+		rt.Log.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
+	}
+
 	rt.Log.Step("workloads")
 	return workload.ApplyAll(ctx, rt, kc, rt.Log)
+}
+
+// sortedConfigServerKeys returns the YAML keys of cfg.Servers in
+// stable lexicographic order — node labeling needs determinism for
+// reproducible logs and test fixtures.
+func sortedConfigServerKeys(servers map[string]config.ServerSpec) []string {
+	keys := make([]string, 0, len(servers))
+	for k := range servers {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		j := i
+		for j > 0 && keys[j-1] > keys[j] {
+			keys[j-1], keys[j] = keys[j], keys[j-1]
+			j--
+		}
+	}
+	return keys
 }
 
 // detachNode inspects the saved plan, identifies servers about to be

@@ -1,0 +1,58 @@
+app: nvoi
+env: production
+
+providers:
+  infra: hetzner
+  storage: cloudflare
+
+ssh_key: ~/.ssh/id_rsa.pub
+
+servers:
+  master:
+    type: cax21
+    region: nbg1
+    role: master
+
+registry:
+  docker.io:
+    username: $DOCKER_REGISTRY_USER
+    password: $DOCKER_REGISTRY_PASSWORD
+
+# Top-level secrets — names only; resolved at the cmd/cli boundary
+# from the operator's environment (`.env`). Rendered into a single
+# `nvoi-secrets` Opaque Secret in the cluster; per-service
+# `secrets:` lists drive secretKeyRef-based env injection.
+secrets:
+  - DATABASE_URL
+  - POSTGRES_USER
+  - POSTGRES_PASSWORD
+  - POSTGRES_DB
+
+services:
+  # In-cluster Postgres. `storage:` flips it to a StatefulSet with a
+  # PVC backed by k3s's default `local-path` storage class (hostPath
+  # provisioner). Pinned to master because hostPath is node-local
+  # and we have one node.
+  postgres:
+    image: postgres:16
+    port: 5432
+    storage:
+      size: 10Gi
+      mountPath: /var/lib/postgresql/data
+    servers: [master]
+    secrets:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+
+  # Public site for the CLI. Built locally and pushed to Docker Hub
+  # under nvoi/web; resolved tag carries the deploy hash so every
+  # deploy triggers a rolling update.
+  web:
+    image: nvoi/web
+    build:
+      context: .
+      dockerfile: cmd/web/Dockerfile
+    port: 8080
+    secrets:
+      - DATABASE_URL

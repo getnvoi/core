@@ -85,3 +85,40 @@ func TestBuildDeployment_ExplicitReplicas(t *testing.T) {
 		t.Errorf("replicas: got %d want 3", got)
 	}
 }
+
+func TestBuildDeployment_SecretEnvInjected(t *testing.T) {
+	d := BuildDeployment(rt(nil, "h"), "web", config.ServiceSpec{
+		Image:   "nvoi/web",
+		Port:    8080,
+		Secrets: []string{"DATABASE_URL"},
+	})
+	env := d.Spec.Template.Spec.Containers[0].Env
+	if len(env) != 1 {
+		t.Fatalf("env count: got %d want 1", len(env))
+	}
+	if env[0].Name != "DATABASE_URL" {
+		t.Errorf("env name: got %q want DATABASE_URL", env[0].Name)
+	}
+	ref := env[0].ValueFrom.SecretKeyRef
+	if ref.Name != AppSecretName || ref.Key != "DATABASE_URL" {
+		t.Errorf("secretKeyRef: %+v", ref)
+	}
+}
+
+func TestBuildDeployment_DefaultPlacementIsMaster(t *testing.T) {
+	d := BuildDeployment(rt(nil, "h"), "web", config.ServiceSpec{Image: "nginx", Port: 80})
+	if got := d.Spec.Template.Spec.NodeSelector[LabelNvoiRole]; got != "master" {
+		t.Errorf("default placement: got %v want %s=master", d.Spec.Template.Spec.NodeSelector, LabelNvoiRole)
+	}
+}
+
+func TestBuildDeployment_ServersPin(t *testing.T) {
+	d := BuildDeployment(rt(nil, "h"), "web", config.ServiceSpec{
+		Image:   "nginx",
+		Port:    80,
+		Servers: []string{"worker-1"},
+	})
+	if got := d.Spec.Template.Spec.NodeSelector[LabelNvoiRole]; got != "worker-1" {
+		t.Errorf("placement: got %v want %s=worker-1", d.Spec.Template.Spec.NodeSelector, LabelNvoiRole)
+	}
+}

@@ -148,6 +148,119 @@ func TestApplyAll_DoesNotTouchUnmanagedDeployments(t *testing.T) {
 	}
 }
 
+// orphanStatefulSet creates an existing nvoi-managed StatefulSet that
+// would be detected as "stale" if not in cfg.Services.
+func orphanStatefulSet(name string) *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: "default",
+			Labels:    map[string]string{"nvoi/owner": "nvoi", "nvoi/service": name},
+		},
+	}
+}
+
+func TestApplyAll_StatefulServiceCreatesStatefulSet(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"postgres": {
+			Image:   "postgres:16",
+			Port:    5432,
+			Storage: &config.StorageSpec{Size: "10Gi", MountPath: "/var/lib/postgresql/data"},
+		},
+	}, nil)
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+
+	if _, err := cs.AppsV1().StatefulSets("default").Get(context.Background(), "postgres", metav1.GetOptions{}); err != nil {
+		t.Errorf("StatefulSet postgres should exist: %v", err)
+	}
+	if _, err := cs.AppsV1().Deployments("default").Get(context.Background(), "postgres", metav1.GetOptions{}); err == nil {
+		t.Error("Deployment must NOT exist for stateful service")
+	}
+	svc, err := cs.CoreV1().Services("default").Get(context.Background(), "postgres", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Service postgres should exist: %v", err)
+	}
+	if svc.Spec.ClusterIP != "None" {
+		t.Errorf("stateful Service must be headless, got ClusterIP=%q", svc.Spec.ClusterIP)
+	}
+}
+
+func TestApplyAll_AppliesTopLevelSecrets(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	kc := kube.NewForTest(cs)
+
+	rt := &runtime.Runtime{
+		Cfg: &config.Config{
+			App: "hello",
+			Env: "dev",
+			Services: map[string]config.ServiceSpec{
+				"web": {Image: "nginx", Port: 80, Secrets: []string{"DATABASE_URL"}},
+			},
+		},
+		DeployHash: "20260430-120000",
+		Secrets:    map[string]string{"DATABASE_URL": "postgres://u:p@db/x"},
+	}
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+
+	sec, err := cs.CoreV1().Secrets("default").Get(context.Background(), "nvoi-secrets", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("nvoi-secrets should exist: %v", err)
+	}
+	if got := string(sec.Data["DATABASE_URL"]); got != "postgres://u:p@db/x" {
+		t.Errorf("Secret data: got %q", got)
+	}
+}
+
+func TestApplyAll_ReconcilesRemovalOfOrphanedStatefulSet(t *testing.T) {
+	cs := fake.NewSimpleClientset(orphanStatefulSet("old-pg"))
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"web": {Image: "nginx", Port: 80},
+	}, nil)
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+	if _, err := cs.AppsV1().StatefulSets("default").Get(context.Background(), "old-pg", metav1.GetOptions{}); err == nil {
+		t.Error("orphan StatefulSet should have been deleted")
+	}
+}
+
+func TestApplyAll_KindFlipFromDeploymentToStatefulSet(t *testing.T) {
+	// Pre-state: cluster has a Deployment for `pg`. YAML adds storage:
+	// to the same name → expected: StatefulSet created, Deployment deleted.
+	cs := fake.NewSimpleClientset(orphanDeployment("pg"))
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"pg": {
+			Image:   "postgres:16",
+			Port:    5432,
+			Storage: &config.StorageSpec{Size: "1Gi", MountPath: "/data"},
+		},
+	}, nil)
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+	if _, err := cs.AppsV1().StatefulSets("default").Get(context.Background(), "pg", metav1.GetOptions{}); err != nil {
+		t.Errorf("StatefulSet pg should be created: %v", err)
+	}
+	if _, err := cs.AppsV1().Deployments("default").Get(context.Background(), "pg", metav1.GetOptions{}); err == nil {
+		t.Error("orphan Deployment pg should be deleted (replaced by StatefulSet)")
+	}
+}
+
 func TestApplyAll_Idempotent(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	kc := kube.NewForTest(cs)

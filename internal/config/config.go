@@ -25,7 +25,17 @@ type Config struct {
 	SSHKey    string                 `yaml:"ssh_key"` // path to public key — resolved + read at the cmd/ boundary
 	Servers   map[string]ServerSpec  `yaml:"servers"`
 	Registry  map[string]RegistryDef `yaml:"registry,omitempty"`
-	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+
+	// Secrets is the top-level list of secret NAMES. Each name resolves
+	// at the cmd/ boundary against os.Getenv (one source today —
+	// CredentialSource backends are an upper-layer concern). Resolved
+	// values land in `runtime.Runtime.Secrets` and are rendered into a
+	// single Opaque Secret named `nvoi-secrets` in the app namespace
+	// during workload apply. Per-service `secrets:` whitelists which
+	// names that service consumes via env-via-secretKeyRef injection.
+	Secrets []string `yaml:"secrets,omitempty"`
+
+	Services map[string]ServiceSpec `yaml:"services,omitempty"`
 }
 
 // RegistryDef holds pull credentials for a single private container
@@ -39,11 +49,41 @@ type RegistryDef struct {
 // ServiceSpec describes one workload to deploy. Image is required —
 // either pre-built (`image: nginx:1.27-alpine`) or paired with `build:`
 // for code we compile locally and push.
+//
+// Storage presence is the implicit StatefulSet discriminator: when set,
+// the workload becomes a StatefulSet with a VolumeClaimTemplate (k3s
+// `local-path` storage class on hostPath) and the corresponding Service
+// becomes headless. Without storage, the workload is a Deployment with
+// a ClusterIP Service.
+//
+// Servers controls node placement:
+//   - empty       → defaults to ["master"] inside applyNodePlacement
+//   - 1 entry     → nodeSelector on nvoi-role=<key>
+//   - 2+ entries  → nodeAffinity (Required, In) + topologySpreadConstraints
+//
+// Secrets is the per-service whitelist of names from the top-level
+// `secrets:` list that get injected into Container.Env via
+// secretKeyRef pointing at the shared `nvoi-secrets` Secret.
 type ServiceSpec struct {
-	Image    string     `yaml:"image"`
-	Build    *BuildSpec `yaml:"build,omitempty"`
-	Port     int        `yaml:"port"`
-	Replicas *int       `yaml:"replicas,omitempty"` // nil → default 1
+	Image    string       `yaml:"image"`
+	Build    *BuildSpec   `yaml:"build,omitempty"`
+	Port     int          `yaml:"port"`
+	Replicas *int         `yaml:"replicas,omitempty"` // nil → default 1
+	Storage  *StorageSpec `yaml:"storage,omitempty"`
+	Servers  []string     `yaml:"servers,omitempty"`
+	Secrets  []string     `yaml:"secrets,omitempty"`
+}
+
+// StorageSpec is the per-service persistent volume request. Two fields
+// only — size + mountPath. StorageClass is intentionally absent: k3s
+// ships with `local-path` as the default class (Rancher's
+// local-path-provisioner, hostPath-backed), so leaving the class
+// unspecified picks it up implicitly. The day a different class lands
+// (longhorn, scaleway-csi, …) we add a tiny `class:` field; until
+// then the surface stays minimal.
+type StorageSpec struct {
+	Size      string `yaml:"size"`      // e.g. "10Gi" — passed verbatim to resource.MustParse
+	MountPath string `yaml:"mountPath"` // e.g. "/var/lib/postgresql/data"
 }
 
 type Providers struct {
@@ -137,6 +177,10 @@ func (b *BuildSpec) UnmarshalYAML(node *yaml.Node) error {
 // HasBuild reports whether this service should be built locally.
 // True when build: is set with a non-empty context.
 func (s ServiceSpec) HasBuild() bool { return s.Build != nil && s.Build.Context != "" }
+
+// IsStateful reports whether the service requires a StatefulSet.
+// Implicit discriminator: storage presence flips the kind.
+func (s ServiceSpec) IsStateful() bool { return s.Storage != nil }
 
 // ImageHost returns the registry host of the service's image
 // (e.g. "ghcr.io" for "ghcr.io/myorg/api:v1"). Returns "" for bare

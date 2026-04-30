@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>nvoi</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0a0a;
+      --fg: #f5f5f5;
+      --dim: #888;
+      --accent: #5eead4;
+      --line: #1f1f1f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 4rem 1.5rem;
+      background: var(--bg);
+      color: var(--fg);
+      font: 15px/1.5 ui-monospace, Menlo, Monaco, "SF Mono", Consolas, monospace;
+      max-width: 720px;
+      margin-inline: auto;
+    }
+    h1 { margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 600; }
+    p.lead { margin: 0 0 2rem; color: var(--dim); }
+    code.cmd {
+      display: inline-block;
+      padding: 0.6rem 0.9rem;
+      background: #111;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--accent);
+      user-select: all;
+    }
+    h2 {
+      margin: 3rem 0 1rem;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--dim);
+      font-weight: 500;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td {
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+    }
+    th { color: var(--dim); font-weight: 500; }
+    td.ua { color: var(--dim); word-break: break-all; }
+    td.at { white-space: nowrap; color: var(--dim); }
+    footer { margin-top: 3rem; color: var(--dim); font-size: 0.8rem; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>nvoi</h1>
+  <p class="lead">YAML → Terraform → k3s. Single-binary CLI.</p>
+  <code class="cmd">curl -sfL https://nvoi.to/install.sh | sh</code>
+
+  <h2>Visits ({{ .Count }})</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>path</th><th>user-agent</th><th class="at">at</th></tr>
+    </thead>
+    <tbody>
+      {{ range .Visits }}
+      <tr>
+        <td>{{ .ID }}</td>
+        <td>{{ .Path }}</td>
+        <td class="ua">{{ .UA }}</td>
+        <td class="at">{{ .At.UTC.Format "2006-01-02 15:04:05Z" }}</td>
+      </tr>
+      {{ else }}
+      <tr><td colspan="4" class="ua">no visits yet</td></tr>
+      {{ end }}
+    </tbody>
+  </table>
+
+  <footer>
+    rendered {{ .Now }} · <a href="https://github.com/getnvoi/core">github.com/getnvoi/core</a>
+  </footer>
+</body>
+</html>

@@ -4,10 +4,10 @@
 //
 // Layering — three structs, one direction:
 //
-//   internal/config   *Config   parsed YAML, read-only after Load
-//   internal/runtime  *Runtime  per-invocation state, read-only after Build
-//   per-stage         Bundle, Runner, soon SSH/Kube — locals in the lifecycle, never
-//                     stashed on Config or Runtime
+//	internal/config   *Config   parsed YAML, read-only after Load
+//	internal/runtime  *Runtime  per-invocation state, read-only after Build
+//	per-stage         Bundle, Runner, soon SSH/Kube — locals in the lifecycle, never
+//	                  stashed on Config or Runtime
 //
 // ctx is a function parameter end-to-end. Never a struct field.
 // signal.NotifyContext binds SIGINT/SIGTERM in main(); cobra carries
@@ -59,7 +59,7 @@ func newRoot(r *rt) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.PersistentFlags().StringVarP(&r.flags.ConfigPath, "config", "c", "tf.yaml", "path to YAML config")
+	root.PersistentFlags().StringVarP(&r.flags.ConfigPath, "config", "c", "nvoi.yaml", "path to YAML config")
 	root.PersistentFlags().BoolVar(&r.flags.JSON, "json", false, "stream machine-readable JSONL output")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
@@ -94,6 +94,14 @@ func newRoot(r *rt) *cobra.Command {
 		// sees literal usernames + passwords.
 		cfg.Registry = workload.ResolveRegistryCreds(cfg.Registry, os.Getenv)
 
+		// Resolve top-level secrets: against the operator's environment.
+		// Empty values = hard error; the deploy can't continue without
+		// them and we'd rather fail at the boundary than mid-apply.
+		secrets, err := resolveSecrets(cfg.Secrets, os.Getenv)
+		if err != nil {
+			return err
+		}
+
 		// Optional remote-state backend. Validator already verified
 		// the provider name is registered; here we resolve creds and
 		// upsert the bucket.
@@ -120,6 +128,7 @@ func newRoot(r *rt) *cobra.Command {
 			CacheDir:   filepath.Join(home, ".cache", naming.CacheDirSegment),
 			DeployHash: time.Now().UTC().Format("20060102-150405"),
 			Backend:    backend,
+			Secrets:    secrets,
 		})
 		if err != nil {
 			return err

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# bin/deploy — build the CLI and run `nvoi deploy` from the repo root.
+# Shorthand for: go build -o bin/nvoi ./cmd/cli && bin/nvoi deploy "$@"
+#
+# .env loading happens inside the binary (cmd/cli/main.go::loadDotEnv),
+# so this script does not need to source it.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+go build -o bin/nvoi ./cmd/cli
+exec bin/nvoi deploy "$@"

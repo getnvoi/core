@@ -2,26 +2,44 @@ package workload
 
 import (
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
-// namespace is where every nvoi-managed workload lands today. Single
-// namespace keeps the substrate simple; per-app namespaces lift in
-// when we need isolation.
-const namespace = "default"
-
-// BuildService turns a ServiceSpec into a typed ClusterIP Service.
-// Selector matches the Deployment via LabelOwner + LabelService.
-// Port name "http" matches the container port; downstream Caddy /
-// ingress can target it by name.
+// BuildService turns a ServiceSpec into a typed Service. ClusterIP
+// for stateless workloads (Deployment), headless (ClusterIP="None")
+// when the service is stateful (storage set → StatefulSet). Headless
+// is what gives each StatefulSet pod its stable
+// `<pod>.<service>.<ns>.svc.cluster.local` DNS — required for
+// pod-identity guarantees the StatefulSet contract makes.
+//
+// Selector matches the pod template via LabelOwner+LabelService —
+// stable across deploys. Port name "http" matches the container
+// port; downstream consumers (Caddy / ingress / sibling services)
+// can target it by name.
 func BuildService(_ *runtime.Runtime, name string, svc config.ServiceSpec) *corev1.Service {
 	labels := map[string]string{
 		LabelOwner:   "nvoi",
 		LabelService: name,
+	}
+	spec := corev1.ServiceSpec{
+		Type:     corev1.ServiceTypeClusterIP,
+		Selector: labels,
+		Ports: []corev1.ServicePort{{
+			Name:       "http",
+			Port:       int32(svc.Port),
+			TargetPort: intstr.FromString("http"),
+			Protocol:   corev1.ProtocolTCP,
+		}},
+	}
+	if svc.IsStateful() {
+		// "None" is the documented sentinel for headless mode. No typed
+		// constant in corev1; the literal is part of the apiserver
+		// contract.
+		spec.ClusterIP = "None"
 	}
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
@@ -29,15 +47,6 @@ func BuildService(_ *runtime.Runtime, name string, svc config.ServiceSpec) *core
 			Namespace: namespace,
 			Labels:    labels,
 		},
-		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeClusterIP,
-			Selector: labels,
-			Ports: []corev1.ServicePort{{
-				Name:       "http",
-				Port:       int32(svc.Port),
-				TargetPort: intstr.FromString("http"),
-				Protocol:   corev1.ProtocolTCP,
-			}},
-		},
+		Spec: spec,
 	}
 }

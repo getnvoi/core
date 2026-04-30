@@ -40,3 +40,23 @@ func TestBuildService_Shape(t *testing.T) {
 		t.Errorf("targetPort: got %v want \"http\"", svc.Spec.Ports[0].TargetPort)
 	}
 }
+
+func TestBuildService_StatefulIsHeadless(t *testing.T) {
+	svc := BuildService(&runtime.Runtime{}, "postgres", config.ServiceSpec{
+		Port:    5432,
+		Storage: &config.StorageSpec{Size: "1Gi", MountPath: "/data"},
+	})
+	if svc.Spec.ClusterIP != "None" {
+		t.Errorf("stateful service must be headless (ClusterIP=None), got %q", svc.Spec.ClusterIP)
+	}
+}
+
+func TestBuildService_StatelessIsClusterIP(t *testing.T) {
+	svc := BuildService(&runtime.Runtime{}, "web", config.ServiceSpec{Port: 8080})
+	if svc.Spec.ClusterIP == "None" {
+		t.Error("stateless service must NOT be headless")
+	}
+	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
+		t.Errorf("type: got %s want ClusterIP", svc.Spec.Type)
+	}
+}

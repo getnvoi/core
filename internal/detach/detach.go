@@ -1,10 +1,10 @@
 // Package detach removes k3s nodes from the cluster cleanly:
 //
-//   1. drain     — cordon + evict pods (workloads reschedule to surviving nodes)
-//   2. etcd-rm   — for masters only; removes the etcd member so the
-//                  cluster doesn't keep trying to reach the dead one
-//   3. delete    — `kubectl delete node` so the apiserver no longer
-//                  tracks it (no ghost entries in `kubectl get nodes`)
+//  1. drain     — cordon + evict pods (workloads reschedule to surviving nodes)
+//  2. etcd-rm   — for masters only; removes the etcd member so the
+//     cluster doesn't keep trying to reach the dead one
+//  3. delete    — `kubectl delete node` so the apiserver no longer
+//     tracks it (no ghost entries in `kubectl get nodes`)
 //
 // Sits between `terraform plan` and `terraform apply` in the deploy pipeline —
 // guarantees workloads, etcd quorum, and the apiserver's node list
