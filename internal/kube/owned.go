@@ -46,14 +46,23 @@ const (
 	KindPVC         Kind = "PersistentVolumeClaim"
 )
 
-// ApplyOwned upserts obj in ns, stamping nvoi/owner=<owner> on its
-// labels. Dispatches to the per-kind typed apply helper. Existing
-// labels on obj are merged (not replaced).
+// Scope is the (namespace, owner) pair every owned-resource operation
+// is keyed by. ApplyOwned stamps nvoi/owner=<Owner>; ListOwned and
+// SweepOwned filter by it. Bundled because the pair always travels
+// together — every call site that touches one needs the other.
+type Scope struct {
+	Namespace string
+	Owner     string
+}
+
+// ApplyOwned upserts obj in scope.Namespace, stamping
+// nvoi/owner=<scope.Owner> on its labels. Dispatches to the per-kind
+// typed apply helper. Existing labels on obj are merged (not replaced).
 //
 // Every nvoi-managed write goes through this path — no other surface
 // stamps the owner label.
-func (c *Client) ApplyOwned(ctx context.Context, ns, owner string, obj runtime.Object) error {
-	if owner == "" {
+func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object) error {
+	if scope.Owner == "" {
 		return fmt.Errorf("ApplyOwned: owner required")
 	}
 	accessor, ok := obj.(metav1.Object)
@@ -64,9 +73,10 @@ func (c *Client) ApplyOwned(ctx context.Context, ns, owner string, obj runtime.O
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	labels[LabelOwner] = owner
+	labels[LabelOwner] = scope.Owner
 	accessor.SetLabels(labels)
 
+	ns := scope.Namespace
 	switch o := obj.(type) {
 	case *appsv1.Deployment:
 		return c.applyDeployment(ctx, ns, o)
@@ -85,23 +95,23 @@ func (c *Client) ApplyOwned(ctx context.Context, ns, owner string, obj runtime.O
 	}
 }
 
-// SweepOwned deletes every resource of `kind` in `ns` carrying
-// nvoi/owner=<owner> whose name is NOT in `desired`. Pass desired=nil
-// to sweep ALL resources for that owner+kind — the migration-cleanup
-// idiom for cross-mode transitions (caddy ↔ tunnel).
+// SweepOwned deletes every resource of `kind` in scope.Namespace
+// carrying nvoi/owner=<scope.Owner> whose name is NOT in `desired`.
+// Pass desired=nil to sweep ALL resources for that owner+kind — the
+// migration-cleanup idiom for cross-mode transitions (caddy ↔ tunnel).
 //
 // Owner-scoped: each reconcile step's sweep can never see another
 // step's resources. NotFound on Delete is silently ignored —
 // concurrent reconciles or manual cleanup are valid no-ops.
-func (c *Client) SweepOwned(ctx context.Context, ns, owner string, kind Kind, desired []string) error {
-	if owner == "" {
+func (c *Client) SweepOwned(ctx context.Context, scope Scope, kind Kind, desired []string) error {
+	if scope.Owner == "" {
 		return fmt.Errorf("SweepOwned: owner required")
 	}
 	keep := make(map[string]bool, len(desired))
 	for _, n := range desired {
 		keep[n] = true
 	}
-	names, err := c.ListOwned(ctx, ns, owner, kind)
+	names, err := c.ListOwned(ctx, scope, kind)
 	if err != nil {
 		return err
 	}
@@ -109,24 +119,25 @@ func (c *Client) SweepOwned(ctx context.Context, ns, owner string, kind Kind, de
 		if keep[name] {
 			continue
 		}
-		if err := c.deleteByKind(ctx, ns, kind, name); err != nil {
+		if err := c.deleteByKind(ctx, scope.Namespace, kind, name); err != nil {
 			return fmt.Errorf("sweep %s/%s: %w", kind, name, err)
 		}
 	}
 	return nil
 }
 
-// ListOwned returns the names of every resource of `kind` in `ns`
-// carrying nvoi/owner=<owner>. Read-only mirror of SweepOwned.
+// ListOwned returns the names of every resource of `kind` in
+// scope.Namespace carrying nvoi/owner=<scope.Owner>. Read-only mirror
+// of SweepOwned.
 //
 // Dispatches once on Kind to pick the right typed-client List call,
 // then extracts names via meta.ExtractList — one shared loop body
 // instead of one per kind.
-func (c *Client) ListOwned(ctx context.Context, ns, owner string, kind Kind) ([]string, error) {
-	if owner == "" {
+func (c *Client) ListOwned(ctx context.Context, scope Scope, kind Kind) ([]string, error) {
+	if scope.Owner == "" {
 		return nil, fmt.Errorf("ListOwned: owner required")
 	}
-	list, err := c.listOwned(ctx, ns, owner, kind)
+	list, err := c.listOwned(ctx, scope.Namespace, scope.Owner, kind)
 	if err != nil {
 		return nil, err
 	}

@@ -25,15 +25,15 @@ import (
 // Pending until the label arrives.
 //
 // Stamps s.kc on the session so the ingress phase reuses it.
-func (s *session) deployWorkloads(ctx context.Context) error {
-	rt, eps, shells := s.rt, s.eps, s.shells
+func (s *Session) deployWorkloads(ctx context.Context) error {
+	rt, eps, shells := s.Rt, s.eps, s.shells
 	primaryName := rt.Cfg.PrimaryMaster()
 	primaryShell, ok := shells[primaryName]
 	if !ok {
 		return fmt.Errorf("primary master %s has no open shell", primaryName)
 	}
 
-	rt.Log.Step("kube-tunnel")
+	s.Lg.Step("kube-tunnel")
 	kc, err := kube.New(ctx, primaryShell)
 	if err != nil {
 		return fmt.Errorf("build kube client: %w", err)
@@ -44,17 +44,17 @@ func (s *session) deployWorkloads(ctx context.Context) error {
 		s.kc = nil
 	}()
 
-	rt.Log.Step("node-labels")
+	s.Lg.Step("node-labels")
 	for _, key := range utils.SortedKeys(rt.Cfg.Servers) {
 		hostname := naming.Server(rt.Cfg.App, rt.Cfg.Env, key)
 		if err := kc.LabelNode(ctx, hostname, workload.LabelNvoiRole, key); err != nil {
 			return fmt.Errorf("label node %s: %w", key, err)
 		}
-		rt.Log.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
+		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
 	}
 
-	rt.Log.Step("workloads")
-	if err := workload.ApplyAll(ctx, rt, kc, rt.Log); err != nil {
+	s.Lg.Step("workloads")
+	if err := workload.ApplyAll(ctx, rt, kc, s.Lg); err != nil {
 		return err
 	}
 
@@ -78,13 +78,13 @@ func (s *session) deployWorkloads(ctx context.Context) error {
 //     WaitForCaddyCert + WaitForCaddyHTTPS from inside the pod,
 //     sweep any leftover tunnel-agent workloads from a prior
 //     tunnel-mode deploy.
-func (s *session) deployIngress(ctx context.Context) error {
-	rt, kc := s.rt, s.kc
+func (s *Session) deployIngress(ctx context.Context) error {
+	rt, kc := s.Rt, s.kc
 	if rt.Cfg.Providers.Tunnel != "" {
 		return s.deployTunnelIngress(ctx)
 	}
 
-	rt.Log.Step("caddy")
+	s.Lg.Step("caddy")
 	if err := kc.EnsureCaddy(ctx); err != nil {
 		return fmt.Errorf("ensure caddy: %w", err)
 	}
@@ -112,38 +112,38 @@ func (s *session) deployIngress(ctx context.Context) error {
 		return fmt.Errorf("build caddy config: %w", err)
 	}
 
-	rt.Log.Step("caddy-reload")
+	s.Lg.Step("caddy-reload")
 	if err := kc.ReloadCaddyConfig(ctx, configJSON); err != nil {
 		return err
 	}
-	rt.Log.Info("caddy config loaded")
+	s.Lg.Info("caddy config loaded")
 
 	// Per-domain cert + HTTPS verification. Warn-and-continue posture:
 	// timeouts surface but don't fail the deploy. Caddy retries ACME.
 	for _, svcName := range utils.SortedKeys(rt.Cfg.Domains) {
 		for _, domain := range rt.Cfg.Domains[svcName] {
-			rt.Log.Step("cert-" + domain)
+			s.Lg.Step("cert-" + domain)
 			if err := kc.WaitForCaddyCert(ctx, domain); err != nil {
-				rt.Log.Warn(fmt.Sprintf("%s: certificate not issued in time — next deploy re-verifies (%v)", domain, err))
+				s.Lg.Warn(fmt.Sprintf("%s: certificate not issued in time — next deploy re-verifies (%v)", domain, err))
 				continue
 			}
-			rt.Log.Info(fmt.Sprintf("certificate ready: %s", domain))
+			s.Lg.Info(fmt.Sprintf("certificate ready: %s", domain))
 
-			rt.Log.Step("https-" + domain)
+			s.Lg.Step("https-" + domain)
 			if err := kc.WaitForCaddyHTTPS(ctx, domain, "/healthz"); err != nil {
-				rt.Log.Warn(fmt.Sprintf("https://%s/healthz: probe failed — next deploy re-verifies (%v)", domain, err))
+				s.Lg.Warn(fmt.Sprintf("https://%s/healthz: probe failed — next deploy re-verifies (%v)", domain, err))
 				continue
 			}
-			rt.Log.Info(fmt.Sprintf("https live: https://%s/", domain))
+			s.Lg.Info(fmt.Sprintf("https live: https://%s/", domain))
 		}
 	}
 
 	// Cross-mode cleanup: if a previous deploy ran in tunnel mode,
 	// the cloudflared / ngrok agent workloads are still around.
 	// Purge them now that Caddy is serving.
-	rt.Log.Step("purge-tunnel-agent")
-	if err := purgeOwner(ctx, kc, "default", kube.OwnerTunnelAgent); err != nil {
-		rt.Log.Warn(fmt.Sprintf("purge tunnel-agent (cross-mode cleanup): %v", err))
+	s.Lg.Step("purge-tunnel-agent")
+	if err := purgeOwner(ctx, kc, kube.Scope{Namespace: "default", Owner: kube.OwnerTunnelAgent}); err != nil {
+		s.Lg.Warn(fmt.Sprintf("purge tunnel-agent (cross-mode cleanup): %v", err))
 	}
 	return nil
 }
@@ -166,8 +166,8 @@ func (s *session) deployIngress(ctx context.Context) error {
 // only comes up in this workload phase, so traffic hits the CF
 // edge before the agent has registered. ~30s–2min, one-time per
 // app. Documented in CLAUDE.md.
-func (s *session) deployTunnelIngress(ctx context.Context) error {
-	rt, eps, kc := s.rt, s.eps, s.kc
+func (s *Session) deployTunnelIngress(ctx context.Context) error {
+	rt, eps, kc := s.Rt, s.eps, s.kc
 	if eps.TunnelToken == "" {
 		return fmt.Errorf("tunnel mode: terraform output tunnel_token is empty")
 	}
@@ -177,39 +177,39 @@ func (s *session) deployTunnelIngress(ctx context.Context) error {
 		return fmt.Errorf("resolve tunnel emitter: %w", err)
 	}
 
-	rt.Log.Step("tunnel-agent")
+	s.Lg.Step("tunnel-agent")
 	workloads, err := tun.AgentWorkloads(eps.TunnelToken)
 	if err != nil {
 		return fmt.Errorf("build tunnel-agent workloads: %w", err)
 	}
 	for _, w := range workloads {
-		if err := kc.ApplyOwned(ctx, "default", kube.OwnerTunnelAgent, w.Obj); err != nil {
+		if err := kc.ApplyOwned(ctx, kube.Scope{Namespace: "default", Owner: kube.OwnerTunnelAgent}, w.Obj); err != nil {
 			return fmt.Errorf("apply tunnel-agent %s/%s: %w", w.Kind, w.Name, err)
 		}
-		rt.Log.Info(fmt.Sprintf("applied tunnel-agent %s/%s", w.Kind, w.Name))
+		s.Lg.Info(fmt.Sprintf("applied tunnel-agent %s/%s", w.Kind, w.Name))
 	}
 
-	rt.Log.Step("tunnel-agent-ready")
+	s.Lg.Step("tunnel-agent-ready")
 	if err := kc.WaitDeploymentReady(ctx, "default", "cloudflared"); err != nil {
 		return fmt.Errorf("wait cloudflared ready: %w", err)
 	}
 
-	rt.Log.Step("purge-caddy")
-	if err := purgeOwner(ctx, kc, kube.CaddyNamespace, kube.OwnerCaddy); err != nil {
-		rt.Log.Warn(fmt.Sprintf("purge caddy (cross-mode cleanup): %v", err))
+	s.Lg.Step("purge-caddy")
+	if err := purgeOwner(ctx, kc, kube.Scope{Namespace: kube.CaddyNamespace, Owner: kube.OwnerCaddy}); err != nil {
+		s.Lg.Warn(fmt.Sprintf("purge caddy (cross-mode cleanup): %v", err))
 	}
 	return nil
 }
 
-// purgeOwner deletes every resource carrying nvoi/owner=<owner> in
-// the given namespace, across every kind ApplyOwned supports. Used
-// for cross-mode ingress transitions (caddy ↔ tunnel-agent).
-func purgeOwner(ctx context.Context, kc *kube.Client, ns, owner string) error {
+// purgeOwner deletes every resource of every Kind carrying
+// nvoi/owner=<scope.Owner> in scope.Namespace. Used for cross-mode
+// ingress transitions (caddy ↔ tunnel-agent).
+func purgeOwner(ctx context.Context, kc *kube.Client, scope kube.Scope) error {
 	for _, kind := range []kube.Kind{
 		kube.KindDeployment, kube.KindStatefulSet, kube.KindService,
 		kube.KindSecret, kube.KindConfigMap, kube.KindPVC,
 	} {
-		if err := kc.SweepOwned(ctx, ns, owner, kind, nil); err != nil {
+		if err := kc.SweepOwned(ctx, scope, kind, nil); err != nil {
 			return fmt.Errorf("sweep %s: %w", kind, err)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/providers"
 	"github.com/getnvoi/core/internal/state"
@@ -14,8 +15,8 @@ import (
 // fakeBucket is a minimal in-memory BucketProvider — records every
 // EnsureBucket call and returns canned credentials.
 type fakeBucket struct {
-	ensured []string
-	creds   providers.BucketCredentials
+	ensured     []string
+	creds       providers.BucketCredentials
 	validateErr error
 	ensureErr   error
 }
@@ -42,7 +43,7 @@ func TestConfigure_EnsuresBucketAndReturnsBackend(t *testing.T) {
 		},
 	}
 
-	be, err := state.Configure(context.Background(), "hello", "dev", bp, silentLog())
+	be, err := state.Configure(context.Background(), &config.Config{App: "hello", Env: "dev"}, bp, silentLog())
 	if err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestConfigure_EnsuresBucketAndReturnsBackend(t *testing.T) {
 
 func TestConfigure_FailsOnInvalidCreds(t *testing.T) {
 	bp := &fakeBucket{validateErr: errors.New("bad token")}
-	_, err := state.Configure(context.Background(), "h", "d", bp, silentLog())
+	_, err := state.Configure(context.Background(), &config.Config{App: "h", Env: "d"}, bp, silentLog())
 	if err == nil {
 		t.Fatal("expected error on invalid creds, got nil")
 	}
@@ -77,7 +78,7 @@ func TestConfigure_FailsOnInvalidCreds(t *testing.T) {
 
 func TestConfigure_FailsOnBucketCreateError(t *testing.T) {
 	bp := &fakeBucket{ensureErr: errors.New("provider 500")}
-	_, err := state.Configure(context.Background(), "h", "d", bp, silentLog())
+	_, err := state.Configure(context.Background(), &config.Config{App: "h", Env: "d"}, bp, silentLog())
 	if err == nil {
 		t.Fatal("expected error on bucket failure, got nil")
 	}

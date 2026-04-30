@@ -25,32 +25,46 @@ type HTTPClient struct {
 	Label      string
 }
 
-func (c *HTTPClient) Do(ctx context.Context, method, path string, body, result any) error {
+// Request carries a single HTTP call's intent. Body is the request
+// payload (nil for GET/DELETE); Result is the JSON-decode target
+// (nil to discard the response body). Method+Path are HTTP verb +
+// path-relative-to-BaseURL.
+type Request struct {
+	Method string
+	Path   string
+	Body   any
+	Result any
+}
+
+// Do issues req against c. Status 2xx with non-empty body decodes
+// into req.Result (when set); non-2xx returns an *APIError that
+// preserves the response body for caller inspection.
+func (c *HTTPClient) Do(ctx context.Context, req Request) error {
 	var reqBody io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
+	if req.Body != nil {
+		data, err := json.Marshal(req.Body)
 		if err != nil {
 			return err
 		}
 		reqBody = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, reqBody)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, c.BaseURL+req.Path, reqBody)
 	if err != nil {
 		return err
 	}
 	if c.SetAuth != nil {
-		c.SetAuth(req)
+		c.SetAuth(httpReq)
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	if req.Body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
 	}
 
 	client := c.HTTPClient
 	if client == nil {
 		client = defaultHTTPClient
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -65,8 +79,8 @@ func (c *HTTPClient) Do(ctx context.Context, method, path string, body, result a
 		return &APIError{Status: resp.StatusCode, Body: string(respBody), label: c.Label}
 	}
 
-	if result != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, result); err != nil {
+	if req.Result != nil && len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, req.Result); err != nil {
 			return fmt.Errorf("%s: decode response: %w", c.Label, err)
 		}
 	}

@@ -39,16 +39,17 @@ func SetCaddyTimingForTest(poll, total time.Duration) func() {
 // then waits for the Deployment to become Available. Reapplied
 // every reconcile → zero drift.
 func (c *Client) EnsureCaddy(ctx context.Context) error {
-	if err := c.ApplyOwned(ctx, CaddyNamespace, OwnerCaddy, buildCaddyPVC()); err != nil {
+	scope := Scope{Namespace: CaddyNamespace, Owner: OwnerCaddy}
+	if err := c.ApplyOwned(ctx, scope, buildCaddyPVC()); err != nil {
 		return fmt.Errorf("ensure caddy pvc: %w", err)
 	}
-	if err := c.ApplyOwned(ctx, CaddyNamespace, OwnerCaddy, buildCaddyConfigMap()); err != nil {
+	if err := c.ApplyOwned(ctx, scope, buildCaddyConfigMap()); err != nil {
 		return fmt.Errorf("ensure caddy configmap: %w", err)
 	}
-	if err := c.ApplyOwned(ctx, CaddyNamespace, OwnerCaddy, buildCaddyService()); err != nil {
+	if err := c.ApplyOwned(ctx, scope, buildCaddyService()); err != nil {
 		return fmt.Errorf("ensure caddy service: %w", err)
 	}
-	if err := c.ApplyOwned(ctx, CaddyNamespace, OwnerCaddy, buildCaddyDeployment()); err != nil {
+	if err := c.ApplyOwned(ctx, scope, buildCaddyDeployment()); err != nil {
 		return fmt.Errorf("ensure caddy deployment: %w", err)
 	}
 	return c.waitForCaddyReady(ctx)

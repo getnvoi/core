@@ -9,7 +9,7 @@ import (
 
 	"github.com/getnvoi/core/internal/deploy"
 	"github.com/getnvoi/core/internal/install"
-	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
@@ -43,12 +43,16 @@ Examples:
 			if err != nil {
 				return err
 			}
-
 			kArgs := buildLogsArgs(target, follow, tail, since)
-			primary := r.runtime.Cfg.PrimaryMaster()
-			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
-				return runOnNode(ctx, r.runtime, run, primary, func(sh *ssh.Client) error {
-					return install.KubectlStream(ctx, sh, os.Stdout, os.Stderr, kArgs...)
+
+			return deploy.RunWithSession(cmd.Context(), r.runtime, log.KindCluster, func(ctx context.Context, s *deploy.Session) error {
+				return s.OnPrimary(ctx, func(sh *ssh.Client) error {
+					return install.KubectlStream(ctx, install.KubectlSpec{
+						Shell:  sh,
+						Args:   kArgs,
+						Stdout: os.Stdout,
+						Stderr: os.Stderr,
+					})
 				})
 			})
 		},

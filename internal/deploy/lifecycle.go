@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/getnvoi/core/internal/compile"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/runner"
 	"github.com/getnvoi/core/internal/runtime"
 )
@@ -18,17 +19,22 @@ import (
 //
 // Bundle and Runner live as locals — they are produced here, consumed
 // here, and never stashed on a struct.
+//
+// Steps emitted here (compile / write-bundle / tf-binary) all carry
+// kind=infra — they're the operator-side preparation phase before
+// anything cluster- or build-side runs.
 func WithRunner(ctx context.Context, rt *runtime.Runtime, action func(context.Context, *runner.Runner) error) error {
-	rt.Log.Step("compile")
+	lg := rt.Log.Sub(log.KindInfra)
+	lg.Step("compile")
 	bundle, err := compile.Compile(rt)
 	if err != nil {
 		return fmt.Errorf("compile: %w", err)
 	}
-	rt.Log.Step("write-bundle")
+	lg.Step("write-bundle")
 	if err := writeBundle(rt.WorkDir, bundle); err != nil {
 		return fmt.Errorf("write bundle: %w", err)
 	}
-	rt.Log.Step("tf-binary")
+	lg.Step("tf-binary")
 	run, err := runner.New(ctx, rt)
 	if err != nil {
 		return err

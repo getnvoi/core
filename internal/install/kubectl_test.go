@@ -13,11 +13,12 @@ import (
 func TestKubectlExec_AssemblesQuotedCommand(t *testing.T) {
 	sh := &sshfake.Shell{} // no matchers — RunStream succeeds with empty stdout
 
-	err := install.KubectlExec(context.Background(), sh,
-		"statefulset/postgres",
-		[]string{"psql", "-U", "nvoi", "-d", "nvoi", "-tAc", "SELECT COUNT(*) FROM visits"},
-		io.Discard, io.Discard,
-	)
+	err := install.KubectlExec(context.Background(), "statefulset/postgres", install.KubectlSpec{
+		Shell:  sh,
+		Args:   []string{"psql", "-U", "nvoi", "-d", "nvoi", "-tAc", "SELECT COUNT(*) FROM visits"},
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
 	if err != nil {
 		t.Fatalf("KubectlExec: %v", err)
 	}
@@ -43,7 +44,9 @@ func TestKubectlExec_AssemblesQuotedCommand(t *testing.T) {
 
 func TestKubectlExec_RejectsEmptyTarget(t *testing.T) {
 	sh := &sshfake.Shell{}
-	err := install.KubectlExec(context.Background(), sh, "", []string{"ls"}, io.Discard, io.Discard)
+	err := install.KubectlExec(context.Background(), "", install.KubectlSpec{
+		Shell: sh, Args: []string{"ls"}, Stdout: io.Discard, Stderr: io.Discard,
+	})
 	if err == nil {
 		t.Error("expected error for empty target")
 	}
@@ -54,7 +57,9 @@ func TestKubectlExec_RejectsEmptyTarget(t *testing.T) {
 
 func TestKubectlExec_RejectsEmptyArgs(t *testing.T) {
 	sh := &sshfake.Shell{}
-	err := install.KubectlExec(context.Background(), sh, "deploy/web", nil, io.Discard, io.Discard)
+	err := install.KubectlExec(context.Background(), "deploy/web", install.KubectlSpec{
+		Shell: sh, Args: nil, Stdout: io.Discard, Stderr: io.Discard,
+	})
 	if err == nil {
 		t.Error("expected error for empty args")
 	}
@@ -65,11 +70,12 @@ func TestKubectlExec_RejectsEmptyArgs(t *testing.T) {
 
 func TestKubectlExec_PreservesSingleQuotesInsideArg(t *testing.T) {
 	sh := &sshfake.Shell{}
-	err := install.KubectlExec(context.Background(), sh,
-		"deploy/web",
-		[]string{"sh", "-c", `echo "it's fine"`},
-		io.Discard, io.Discard,
-	)
+	err := install.KubectlExec(context.Background(), "deploy/web", install.KubectlSpec{
+		Shell:  sh,
+		Args:   []string{"sh", "-c", `echo "it's fine"`},
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
 	if err != nil {
 		t.Fatalf("KubectlExec: %v", err)
 	}

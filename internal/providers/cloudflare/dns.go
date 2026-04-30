@@ -162,4 +162,3 @@ func sanitizeResourceName(s string) string {
 	}
 	return out
 }
-

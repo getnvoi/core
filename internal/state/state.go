@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/naming"
 	"github.com/getnvoi/core/internal/providers"
@@ -37,13 +38,15 @@ type Backend struct {
 
 // Configure provisions the state bucket (idempotent) and returns the
 // Backend describing it. Called once at the cmd/ boundary, before
-// runtime.Build.
-func Configure(ctx context.Context, app, env string, bp providers.BucketProvider, lg log.Log) (Backend, error) {
+// runtime.Build. Cluster identity (app, env) is read from cfg —
+// passing the whole config keeps the signature narrow without
+// needing a per-callsite struct.
+func Configure(ctx context.Context, cfg *config.Config, bp providers.BucketProvider, lg log.Log) (Backend, error) {
 	if err := bp.ValidateCredentials(ctx); err != nil {
 		return Backend{}, fmt.Errorf("validate bucket creds: %w", err)
 	}
 
-	bucket := naming.StateBucket(app, env)
+	bucket := naming.StateBucket(cfg.App, cfg.Env)
 	lg.Step("state-bucket")
 	lg.Info(fmt.Sprintf("ensuring state bucket %s...", bucket))
 	if err := bp.EnsureBucket(ctx, bucket); err != nil {

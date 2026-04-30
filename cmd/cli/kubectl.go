@@ -8,7 +8,7 @@ import (
 
 	"github.com/getnvoi/core/internal/deploy"
 	"github.com/getnvoi/core/internal/install"
-	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
@@ -40,14 +40,14 @@ Examples:
 				return fmt.Errorf("missing kubectl args after --")
 			}
 
-			primary := r.runtime.Cfg.PrimaryMaster()
-
-			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
-				return runOnNode(ctx, r.runtime, run, primary, func(sh *ssh.Client) error {
-					return install.KubectlStream(ctx, sh,
-						r.runtime.Log.Stream(), r.runtime.Log.Stream(),
-						kArgs...,
-					)
+			return deploy.RunWithSession(cmd.Context(), r.runtime, log.KindCluster, func(ctx context.Context, s *deploy.Session) error {
+				return s.OnPrimary(ctx, func(sh *ssh.Client) error {
+					return install.KubectlStream(ctx, install.KubectlSpec{
+						Shell:  sh,
+						Args:   kArgs,
+						Stdout: s.Lg.Stream(),
+						Stderr: s.Lg.Stream(),
+					})
 				})
 			})
 		},

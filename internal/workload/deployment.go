@@ -105,17 +105,17 @@ func podLabels(rt *runtime.Runtime, name string) map[string]string {
 // StatefulSet and the Service share. Strict architectural rule:
 //
 //   - INCLUDES   LabelService (per-service identifier; unique by
-//                construction).
+//     construction).
 //   - EXCLUDES   LabelDeployHash (selector mutations orphan pods on
-//                every roll).
+//     every roll).
 //   - EXCLUDES   kube.LabelOwner (owner is a sweep-scope concern, not
-//                a selection concern). StatefulSet/Deployment
-//                selectors are immutable post-Create — putting the
-//                owner taxonomy in the selector means any future
-//                taxonomy change requires destroy+recreate. Keep
-//                owner on object metadata for ListOwned/SweepOwned;
-//                keep it OUT of selectors so the architecture stays
-//                evolvable.
+//     a selection concern). StatefulSet/Deployment
+//     selectors are immutable post-Create — putting the
+//     owner taxonomy in the selector means any future
+//     taxonomy change requires destroy+recreate. Keep
+//     owner on object metadata for ListOwned/SweepOwned;
+//     keep it OUT of selectors so the architecture stays
+//     evolvable.
 //
 // LabelService alone is unique enough to discriminate pods — no
 // other system writes pods with `nvoi/service=<our-name>` keys.

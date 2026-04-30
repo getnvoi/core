@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/getnvoi/core/internal/build"
-	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -25,61 +25,75 @@ import (
 //	workloads           registry-auth Secret → Deployments → Services →
 //	                    reconcile (delete nvoi-managed objects no longer in YAML)
 //	defer closeShells   one close per server, end of command
+//
+// Each phase emits through a kind-scoped sub-logger:
+//   - infraLg   — tf-init / tf-plan / tf-apply / endpoints / detach / drain-tunnel
+//   - buildLg   — build phase (docker login + buildx)
+//   - clusterLg — ssh open + k3s install + workloads + ingress
 func Run(ctx context.Context, rt *runtime.Runtime) error {
-	return WithRunner(ctx, rt, func(ctx context.Context, run *runner.Runner) error {
-		s := &session{rt: rt, run: run}
+	// Cluster kind is the default scope of the Session — install /
+	// kube / caddy / tunnel work all live there. Infra-phase steps
+	// (tf-init, tf-plan, endpoints, predrains) re-scope to KindInfra
+	// via local Sub() calls. Build phase gets its own KindBuild
+	// scope handed straight to build.All.
+	return RunWithSession(ctx, rt, log.KindCluster, func(ctx context.Context, s *Session) error {
+		infraLg := rt.Log.Sub(log.KindInfra)
+		buildLg := rt.Log.Sub(log.KindBuild)
 
 		// ── pre-infra: build phase ──
 		// Conditional: build.All is a no-op when no service has
 		// build: set. Failures abort BEFORE any infra change.
-		if err := build.All(ctx, rt, build.DockerRunner{}, rt.Log); err != nil {
+		if err := build.All(ctx, rt, build.DockerRunner{}, buildLg); err != nil {
 			return err
 		}
 
-		rt.Log.Step("tf-init")
-		if err := run.Init(ctx); err != nil {
+		infraLg.Step("tf-init")
+		if err := s.Init(ctx); err != nil {
 			return err
 		}
 
 		// ── plan → drain doomed nodes → apply ──
-		// Plan path is RELATIVE to terraform's cwd (which is
-		// already rt.WorkDir). Don't filepath.Join — that
-		// double-resolves and terraform errors with "no such
-		// directory."
+		// Plan path is RELATIVE to terraform's cwd (rt.WorkDir).
+		// Don't filepath.Join — terraform double-resolves.
 		const planPath = "plan.tfplan"
-		rt.Log.Step("tf-plan")
-		hasChanges, err := run.PlanWithOut(ctx, planPath)
+		infraLg.Step("tf-plan")
+		hasChanges, err := s.Run.PlanWithOut(ctx, planPath)
 		if err != nil {
 			return err
 		}
 		if hasChanges {
-			if err := detachNode(ctx, rt, run, planPath); err != nil {
+			// predrains run BEFORE tf-apply but log under kind=infra
+			// (preparation for an infra mutation), so we swap Lg for
+			// the drain calls and restore after.
+			s.Lg, infraLg = infraLg, s.Lg
+			if err := s.detachNode(ctx, planPath); err != nil {
 				return err
 			}
-			if err := drainTunnel(ctx, rt, run, planPath); err != nil {
+			if err := s.drainTunnel(ctx, planPath); err != nil {
 				return err
 			}
-			rt.Log.Step("tf-apply")
-			if err := run.ApplyPlan(ctx, planPath); err != nil {
+			s.Lg, infraLg = infraLg, s.Lg
+
+			infraLg.Step("tf-apply")
+			if err := s.Run.ApplyPlan(ctx, planPath); err != nil {
 				return err
 			}
 		} else {
-			rt.Log.Info("no terraform changes")
+			infraLg.Info("no terraform changes")
 		}
 
 		// ── post-apply: open SSH to every server ONCE,
 		// thread through install + workloads, close all at the
 		// end. Single SSH per server per command — same connection
 		// installs k3s AND tunnels the kube apiserver for workloads.
-		rt.Log.Step("endpoints")
-		eps, err := run.Endpoints(ctx)
+		infraLg.Step("endpoints")
+		eps, err := s.Endpoints(ctx)
 		if err != nil {
 			return err
 		}
-		s.eps = eps
 
-		rt.Log.Step("ssh")
-		shells, err := openShells(ctx, rt, eps)
+		s.Lg.Step("ssh")
+		shells, err := openShells(ctx, rt, s.Lg, eps)
 		if err != nil {
 			return err
 		}

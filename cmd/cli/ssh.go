@@ -10,12 +10,13 @@ import (
 
 	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/deploy"
-	"github.com/getnvoi/core/internal/install"
-	"github.com/getnvoi/core/internal/runner"
-	"github.com/getnvoi/core/internal/runtime"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
+// sshCmd is a thin cobra adapter over deploy.RunWithSession +
+// (*Session).OnNode. The verb's whole job is "dial the named node and
+// stream the operator's command" — Session does everything else.
 func sshCmd(r *rt) *cobra.Command {
 	return &cobra.Command{
 		Use:   "ssh [target] -- <command>",
@@ -55,37 +56,13 @@ Examples:
 				return fmt.Errorf("server %q not in config; available: %s", target, listServerNames(r.runtime.Cfg))
 			}
 
-			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
-				return runOnNode(ctx, r.runtime, run, target, func(sh *ssh.Client) error {
-					return sh.RunStream(ctx, command, r.runtime.Log.Stream(), r.runtime.Log.Stream())
+			return deploy.RunWithSession(cmd.Context(), r.runtime, log.KindCluster, func(ctx context.Context, s *deploy.Session) error {
+				return s.OnNode(ctx, target, func(sh *ssh.Client) error {
+					return sh.RunStream(ctx, command, s.Lg.Stream(), s.Lg.Stream())
 				})
 			})
 		},
 	}
-}
-
-// runOnNode is the shared attach helper for ssh + kubectl:
-// terraform-init → read endpoints → SSH-dial the named server →
-// run action(sh) → deferred close. Hard-error if state has no record
-// of the server (operator hasn't run `nvoi deploy` yet).
-func runOnNode(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, target string, action func(sh *ssh.Client) error) error {
-	if err := run.Init(ctx); err != nil {
-		return err
-	}
-	eps, err := run.Endpoints(ctx)
-	if err != nil {
-		return err
-	}
-	srv, ok := eps.Servers[target]
-	if !ok {
-		return fmt.Errorf("server %q not in terraform state — run `nvoi deploy` first", target)
-	}
-	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
-	if err != nil {
-		return err
-	}
-	defer sh.Close()
-	return action(sh)
 }
 
 // listServerNames returns the sorted, comma-joined YAML server keys —

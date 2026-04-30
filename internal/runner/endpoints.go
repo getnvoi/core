@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 )
 
@@ -73,7 +74,23 @@ func (e *Endpoints) WorkerJoinTarget(primaryMaster string) string {
 
 // Endpoints reads `terraform output -json` and parses our uniform
 // schema. Called after Apply.
+//
+// Leak guard: tfexec v0.21's Output() — even with SetStdout(io.Discard)
+// — leaks terraform's pretty-printed `output -json` dump to the
+// process's real os.Stdout. We see it when running `bin/deploy --json`:
+// the multi-line JSON corrupts the JSONL stream. Workaround: redirect
+// os.Stdout to /dev/null around the Output() call. Single-threaded
+// stage (no other writers to os.Stdout during this window).
 func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err == nil {
+		realStdout := os.Stdout
+		os.Stdout = devnull
+		defer func() {
+			os.Stdout = realStdout
+			_ = devnull.Close()
+		}()
+	}
 	out, err := r.tf.Output(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("terraform output: %w", err)

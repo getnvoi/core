@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
@@ -18,13 +19,21 @@ const (
 	tokenPath      = "/var/lib/rancher/k3s/server/node-token"
 )
 
-// Node is one server's network identity used during k3s install.
-// Caller (deploy.go) populates from the YAML key + naming.Server.
+// Node is one server's network identity AND its operational handles
+// (SSH connection + log sink). Bundling Shell and Log onto Node
+// collocates them with the identity that owns them — every install
+// step needs all three together, so they always travel as one value.
+//
+// Pre-existing per-node operations (`InstallPrimaryMaster`, `JoinX`,
+// kubectl probes) used to take `(ctx, sh, n, ..., lg)` triplets.
+// They now take `(ctx, n Node, ...)` and read sh/lg from the Node.
 type Node struct {
-	Name     string // YAML key — operator-facing identifier
-	Hostname string // naming.Server(app, env, name) — the actual k3s node name set via cloud-init
-	IPv4     string // public IP (TLS SAN)
-	Private  string // private IP (k3s --node-ip / --advertise-address)
+	Name     string    // YAML key — operator-facing identifier
+	Hostname string    // naming.Server(app, env, name) — the actual k3s node name set via cloud-init
+	IPv4     string    // public IP (TLS SAN)
+	Private  string    // private IP (k3s --node-ip / --advertise-address)
+	Shell    ssh.Shell // SSH handle to this node
+	Log      log.Log   // sink for progress + Stream() for the k3s installer's stdout
 }
 
 // localNodeReady is the fast idempotency check at the top of every

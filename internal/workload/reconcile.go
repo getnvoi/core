@@ -26,18 +26,22 @@ import (
 // retry-on-conflict. Re-running on an unchanged cluster is a string
 // of read-then-no-op API calls.
 func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
+	registryScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerRegistry}
+	appSecretsScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}
+	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
+
 	if sec, err := BuildRegistrySecret(r); err != nil {
 		return fmt.Errorf("build registry-auth: %w", err)
 	} else if sec != nil {
 		lg.Step("registry-secret")
-		if err := kc.ApplyOwned(ctx, namespace, kube.OwnerRegistry, sec); err != nil {
+		if err := kc.ApplyOwned(ctx, registryScope, sec); err != nil {
 			return fmt.Errorf("apply registry-auth: %w", err)
 		}
 	}
 
 	if sec := BuildAppSecret(r); sec != nil {
 		lg.Step("app-secret")
-		if err := kc.ApplyOwned(ctx, namespace, kube.OwnerAppSecrets, sec); err != nil {
+		if err := kc.ApplyOwned(ctx, appSecretsScope, sec); err != nil {
 			return fmt.Errorf("apply nvoi-secrets: %w", err)
 		}
 	}
@@ -52,10 +56,10 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 		} else {
 			workload = BuildDeployment(r, name, svc)
 		}
-		if err := kc.ApplyOwned(ctx, namespace, kube.OwnerServices, workload); err != nil {
+		if err := kc.ApplyOwned(ctx, servicesScope, workload); err != nil {
 			return fmt.Errorf("apply workload %s: %w", name, err)
 		}
-		if err := kc.ApplyOwned(ctx, namespace, kube.OwnerServices, BuildService(r, name, svc)); err != nil {
+		if err := kc.ApplyOwned(ctx, servicesScope, BuildService(r, name, svc)); err != nil {
 			return fmt.Errorf("apply service %s: %w", name, err)
 		}
 	}
@@ -91,13 +95,14 @@ func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 		}
 	}
 
-	if err := kc.SweepOwned(ctx, namespace, kube.OwnerServices, kube.KindDeployment, declaredStateless); err != nil {
+	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
+	if err := kc.SweepOwned(ctx, servicesScope, kube.KindDeployment, declaredStateless); err != nil {
 		return fmt.Errorf("sweep stale deployments: %w", err)
 	}
-	if err := kc.SweepOwned(ctx, namespace, kube.OwnerServices, kube.KindStatefulSet, declaredStateful); err != nil {
+	if err := kc.SweepOwned(ctx, servicesScope, kube.KindStatefulSet, declaredStateful); err != nil {
 		return fmt.Errorf("sweep stale statefulsets: %w", err)
 	}
-	if err := kc.SweepOwned(ctx, namespace, kube.OwnerServices, kube.KindService, declared); err != nil {
+	if err := kc.SweepOwned(ctx, servicesScope, kube.KindService, declared); err != nil {
 		return fmt.Errorf("sweep stale services: %w", err)
 	}
 
@@ -106,7 +111,7 @@ func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	if len(r.Cfg.Registry) > 0 {
 		registryDesired = []string{registrySecretName}
 	}
-	if err := kc.SweepOwned(ctx, namespace, kube.OwnerRegistry, kube.KindSecret, registryDesired); err != nil {
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerRegistry}, kube.KindSecret, registryDesired); err != nil {
 		return fmt.Errorf("sweep stale registry secret: %w", err)
 	}
 
@@ -115,7 +120,7 @@ func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	if len(r.Cfg.Secrets) > 0 {
 		appSecretDesired = []string{AppSecretName}
 	}
-	if err := kc.SweepOwned(ctx, namespace, kube.OwnerAppSecrets, kube.KindSecret, appSecretDesired); err != nil {
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}, kube.KindSecret, appSecretDesired); err != nil {
 		return fmt.Errorf("sweep stale app secret: %w", err)
 	}
 

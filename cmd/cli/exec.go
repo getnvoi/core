@@ -10,7 +10,7 @@ import (
 	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/deploy"
 	"github.com/getnvoi/core/internal/install"
-	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
@@ -40,19 +40,23 @@ land in v2 once SSH-side PTY allocation is wired.`,
 			if err != nil {
 				return err
 			}
-
 			target, err := execTarget(r.runtime.Cfg, service)
 			if err != nil {
 				return err
 			}
 
-			primary := r.runtime.Cfg.PrimaryMaster()
-			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
-				return runOnNode(ctx, r.runtime, run, primary, func(sh *ssh.Client) error {
-					// Bypass the log indenter: callers will pipe this
-					// output to other tools, where leading spaces and
-					// step markers would corrupt every parser.
-					return install.KubectlExec(ctx, sh, target, execArgs, os.Stdout, os.Stderr)
+			return deploy.RunWithSession(cmd.Context(), r.runtime, log.KindCluster, func(ctx context.Context, s *deploy.Session) error {
+				return s.OnPrimary(ctx, func(sh *ssh.Client) error {
+					// Bypass the log writer: kubectl exec's stdout/stderr
+					// are pipe-bound (operator wants to grep / awk / jq).
+					// Routing through s.Lg.Stream() would JSON-wrap each
+					// line and corrupt every parser.
+					return install.KubectlExec(ctx, target, install.KubectlSpec{
+						Shell:  sh,
+						Args:   execArgs,
+						Stdout: os.Stdout,
+						Stderr: os.Stderr,
+					})
 				})
 			})
 		},

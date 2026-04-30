@@ -44,9 +44,11 @@ func (c *BucketClient) ValidateCredentials(ctx context.Context) error {
 }
 
 func (c *BucketClient) EnsureBucket(ctx context.Context, name string) error {
-	err := c.api.Do(ctx, "POST", fmt.Sprintf("/accounts/%s/r2/buckets", c.accountID),
-		map[string]string{"name": name}, nil,
-	)
+	err := c.api.Do(ctx, utils.Request{
+		Method: "POST",
+		Path:   fmt.Sprintf("/accounts/%s/r2/buckets", c.accountID),
+		Body:   map[string]string{"name": name},
+	})
 	if err == nil {
 		return nil
 	}
@@ -59,7 +61,10 @@ func (c *BucketClient) EnsureBucket(ctx context.Context, name string) error {
 }
 
 func (c *BucketClient) DeleteBucket(ctx context.Context, name string) error {
-	err := c.api.Do(ctx, "DELETE", fmt.Sprintf("/accounts/%s/r2/buckets/%s", c.accountID, name), nil, nil)
+	err := c.api.Do(ctx, utils.Request{
+		Method: "DELETE",
+		Path:   fmt.Sprintf("/accounts/%s/r2/buckets/%s", c.accountID, name),
+	})
 	if err != nil {
 		if utils.IsNotFound(err) {
 			return nil
@@ -97,7 +102,7 @@ func (c *BucketClient) tokenVerify(ctx context.Context) (string, error) {
 			ID string `json:"id"`
 		} `json:"result"`
 	}
-	if err := c.api.Do(ctx, "GET", "/user/tokens/verify", nil, &result); err != nil {
+	if err := c.api.Do(ctx, utils.Request{Method: "GET", Path: "/user/tokens/verify", Result: &result}); err != nil {
 		return "", err
 	}
 	if result.Result.ID == "" {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
@@ -21,13 +20,16 @@ import (
 // Always uses --cluster-init regardless of master count: even
 // single-master clusters get embedded etcd, so the 1↔N migration
 // is mechanical (just add masters and redeploy).
-func InstallPrimaryMaster(ctx context.Context, sh ssh.Shell, self Node, extraSANs []string, lg log.Log) error {
-	if installed, _ := localNodeReady(ctx, sh); installed {
-		lg.Info(fmt.Sprintf("k3s primary on %s already Ready", self.Name))
+//
+// `self.Shell` is the SSH handle, `self.Log` is the progress sink —
+// both bundled on Node so we don't need to take them as separate args.
+func InstallPrimaryMaster(ctx context.Context, self Node, extraSANs []string) error {
+	if installed, _ := localNodeReady(ctx, self.Shell); installed {
+		self.Log.Info(fmt.Sprintf("k3s primary on %s already Ready", self.Name))
 		return nil
 	}
 
-	iface, err := discoverPrivateInterface(ctx, sh, self.Private)
+	iface, err := discoverPrivateInterface(ctx, self.Shell, self.Private)
 	if err != nil {
 		return fmt.Errorf("primary %s: %w", self.Name, err)
 	}
@@ -49,16 +51,16 @@ func InstallPrimaryMaster(ctx context.Context, sh ssh.Shell, self Node, extraSAN
 	}, " ")
 	cmd := fmt.Sprintf(`curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=%q sh -`, execArgs)
 
-	lg.Info(fmt.Sprintf("installing k3s primary on %s (priv %s)...", self.Name, self.Private))
-	if err := sh.RunStream(ctx, cmd, lg.Stream(), lg.Stream()); err != nil {
+	self.Log.Info(fmt.Sprintf("installing k3s primary on %s (priv %s)...", self.Name, self.Private))
+	if err := self.Shell.RunStream(ctx, cmd, self.Log.Stream(), self.Log.Stream()); err != nil {
 		return fmt.Errorf("k3s primary install on %s: %w", self.Name, err)
 	}
 
-	if err := setupKubeconfig(ctx, sh, self.Private); err != nil {
+	if err := setupKubeconfig(ctx, self.Shell, self.Private); err != nil {
 		return fmt.Errorf("kubeconfig setup on %s: %w", self.Name, err)
 	}
 
-	if err := WaitNodeReady(ctx, sh, self.Hostname, lg); err != nil {
+	if err := WaitNodeReady(ctx, self.Shell, self.Hostname, self.Log); err != nil {
 		return fmt.Errorf("primary %s did not become Ready: %w", self.Name, err)
 	}
 	return nil

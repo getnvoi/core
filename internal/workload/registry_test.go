@@ -70,7 +70,7 @@ func TestResolveRegistryCreds_LiteralsAndEnvRefs(t *testing.T) {
 	getenv := func(k string) string { return env[k] }
 
 	in := map[string]config.RegistryDef{
-		"ghcr.io":  {Username: "$GH_USER", Password: "$GH_TOKEN"},
+		"ghcr.io":   {Username: "$GH_USER", Password: "$GH_TOKEN"},
 		"docker.io": {Username: "literal-user", Password: "literal-pass"},
 	}
 	out := ResolveRegistryCreds(in, getenv)

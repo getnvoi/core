@@ -3,7 +3,7 @@ package deploy
 import (
 	"context"
 
-	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/log"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -14,21 +14,24 @@ import (
 // starts removing it — same pattern detachNode + drainTunnel use on
 // the deploy path. Path is RELATIVE to terraform's cwd (rt.WorkDir);
 // don't filepath.Join.
+//
+// Every step emits kind=infra (tf operations + the tunnel pre-apply
+// drain that prepares for tf-destroy).
 func Destroy(ctx context.Context, rt *runtime.Runtime) error {
-	return WithRunner(ctx, rt, func(ctx context.Context, run *runner.Runner) error {
-		rt.Log.Step("tf-init")
-		if err := run.Init(ctx); err != nil {
+	return RunWithSession(ctx, rt, log.KindInfra, func(ctx context.Context, s *Session) error {
+		s.Lg.Step("tf-init")
+		if err := s.Init(ctx); err != nil {
 			return err
 		}
 
 		const planPath = "destroy.tfplan"
-		rt.Log.Step("tf-plan-destroy")
-		hasChanges, err := run.PlanDestroyWithOut(ctx, planPath)
+		s.Lg.Step("tf-plan-destroy")
+		hasChanges, err := s.Run.PlanDestroyWithOut(ctx, planPath)
 		if err != nil {
 			return err
 		}
 		if !hasChanges {
-			rt.Log.Info("nothing to destroy")
+			s.Lg.Info("nothing to destroy")
 			return nil
 		}
 
@@ -36,11 +39,11 @@ func Destroy(ctx context.Context, rt *runtime.Runtime) error {
 		// removes the tunnel object. CF rejects tunnel DELETE with
 		// active connections — see terraform-provider-cloudflare#5255.
 		// Same primitive as the deploy path.
-		if err := drainTunnel(ctx, rt, run, planPath); err != nil {
+		if err := s.drainTunnel(ctx, planPath); err != nil {
 			return err
 		}
 
-		rt.Log.Step("tf-destroy")
-		return run.ApplyPlan(ctx, planPath)
+		s.Lg.Step("tf-destroy")
+		return s.Run.ApplyPlan(ctx, planPath)
 	})
 }

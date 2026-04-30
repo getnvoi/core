@@ -10,126 +10,109 @@ import (
 	"github.com/getnvoi/core/internal/install"
 	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/naming"
-	"github.com/getnvoi/core/internal/runner"
-	"github.com/getnvoi/core/internal/runtime"
 	"github.com/getnvoi/core/internal/ssh"
 )
 
-// predrainBody is the per-action work a predrain runs once it has SSH
-// to the survivor / control-plane master. The action is responsible
-// for whatever drain-style work the destroy flavour needs (sweep
-// kube-side resources, kubectl-drain via the master, etc.).
+// predrainSpec describes one pre-tf-apply drain step. Run / Destroy
+// build a spec per drain target (nodes leaving = detachNode;
+// tunnel-resource leaving = drainTunnel) and hand it to
+// (*Session).predrain.
 //
-// Failures here are NOT fatal — predrain warns and the caller
-// proceeds to tf-apply, which will surface the underlying provider
-// error (e.g. CF "active connections") with full context if the drain
-// was actually required.
-type predrainBody func(ctx context.Context, rt *runtime.Runtime, sh *ssh.Client) error
+// Body closes over whatever it needs from the enclosing scope (Session
+// + spec data); predrain itself stays narrow.
+type predrainSpec struct {
+	PlanPath     string
+	ResourceType string                                          // tf resource type to filter the plan for (e.g. "hcloud_server")
+	Control      string                                          // YAML key of the master to dial for the drain (survivor / primary)
+	Leaving      []string                                        // names the plan will delete; if empty, predrain is a no-op
+	Label        string                                          // operator-facing step name ("detach", "drain-tunnel")
+	Body         func(ctx context.Context, sh *ssh.Client) error // per-flavour drain work (kubectl drain, kube sweep, etc.)
+}
 
 // predrain is the shared skeleton for the two pre-tf-apply drain
-// steps (detachNode + drainTunnel):
+// steps:
 //
-//  1. Filter the saved plan for resources of `resourceType` going to
-//     Delete (or Replace, which is delete+create).
-//  2. If empty, return nil — no work.
-//  3. Pick a "control" master (one NOT in the leaving set for nodes;
-//     primary for tunnels).
-//  4. Look up the control master's IP in eps (cached on the session)
-//     or read it fresh.
-//  5. Dial SSH, hand off to body(ctx, rt, sh).
-//  6. Warn-and-continue on EVERY failure path so a misconfigured
-//     drain can't block tf-apply.
-//
-// label is the operator-facing step name printed before the work
-// starts (e.g. "drain-tunnel", "detach"). leaving is reported as part
-// of the info line so the operator sees what's being drained.
-func predrain(
-	ctx context.Context,
-	rt *runtime.Runtime,
-	run *runner.Runner,
-	planPath string,
-	resourceType string,
-	control string,
-	leaving []string,
-	label string,
-	body predrainBody,
-) error {
-	if len(leaving) == 0 {
+//  1. If spec.Leaving is empty, return nil — no work.
+//  2. Look up the control master's IPv4 in the session's memoized
+//     Endpoints (single tf-output read across the whole command).
+//  3. Dial SSH, hand off to spec.Body(ctx, sh).
+//  4. Warn-and-continue on EVERY failure path so a misconfigured
+//     drain can't block tf-apply. tf-apply will surface the underlying
+//     provider error (e.g. CF "active connections") if the drain was
+//     actually required.
+func (s *Session) predrain(ctx context.Context, spec predrainSpec) error {
+	if len(spec.Leaving) == 0 {
 		return nil
 	}
 
-	// Read CURRENT state (pre-apply) to find the control master's IP.
-	eps, err := run.Endpoints(ctx)
+	eps, err := s.Endpoints(ctx)
 	if err != nil {
 		// Cold start: state file may not have outputs yet (first
-		// apply). In that case there's nothing to drain — the
-		// cluster doesn't exist and the "destroys" are spurious.
-		// Warn-and-continue.
-		rt.Log.Warn(fmt.Sprintf("read endpoints for %s: %s — skipping", label, err))
+		// apply). In that case there's nothing to drain — the cluster
+		// doesn't exist and the "destroys" are spurious.
+		s.Lg.Warn(fmt.Sprintf("read endpoints for %s: %s — skipping", spec.Label, err))
 		return nil
 	}
-	srv, ok := eps.Servers[control]
+	srv, ok := eps.Servers[spec.Control]
 	if !ok || srv.IPv4 == "" {
-		rt.Log.Warn(fmt.Sprintf("control master %s not in current state — skipping %s", control, label))
+		s.Lg.Warn(fmt.Sprintf("control master %s not in current state — skipping %s", spec.Control, spec.Label))
 		return nil
 	}
 
-	rt.Log.Step(label)
-	rt.Log.Info(fmt.Sprintf("draining %d %s(s): %v", len(leaving), resourceType, leaving))
+	s.Lg.Step(spec.Label)
+	s.Lg.Info(fmt.Sprintf("draining %d %s(s): %v", len(spec.Leaving), spec.ResourceType, spec.Leaving))
 
-	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
+	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, s.Rt.SSHPrivKey)
 	if err != nil {
-		rt.Log.Warn(fmt.Sprintf("ssh control %s for %s: %s — skipping", control, label, err))
+		s.Lg.Warn(fmt.Sprintf("ssh control %s for %s: %s — skipping", spec.Control, spec.Label, err))
 		return nil
 	}
 	defer sh.Close()
 
-	if err := body(ctx, rt, sh); err != nil {
-		rt.Log.Warn(fmt.Sprintf("%s: %s", label, err))
+	if err := spec.Body(ctx, sh); err != nil {
+		s.Lg.Warn(fmt.Sprintf("%s: %s", spec.Label, err))
 	}
 	return nil
 }
 
 // detachNode inspects the saved plan, identifies servers about to be
-// destroyed (including replacements — change of server_type, region,
-// etc.), and detaches each from the cluster via a surviving master
-// (drain + kubectl delete node). Best-effort — failures warn but
-// don't block apply.
-//
-// Skipped when:
-//   - no nodes are being destroyed
-//   - all masters are being destroyed (no surviving control plane)
-//   - we can't dial the survivor (state may not yet have IPs for a
-//     freshly-created cluster — detach is moot if nothing exists)
-func detachNode(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, planPath string) error {
-	serverType, err := compile.ServerResourceType(rt.Cfg.Providers.Infra)
+// destroyed (including replacements), and detaches each from the
+// cluster via a surviving master (drain + kubectl delete node).
+// Best-effort — failures warn but don't block apply.
+func (s *Session) detachNode(ctx context.Context, planPath string) error {
+	serverType, err := compile.ServerResourceType(s.Rt.Cfg.Providers.Infra)
 	if err != nil {
 		return fmt.Errorf("server resource type: %w", err)
 	}
-	leaving, err := run.PlannedNodeDestroys(ctx, planPath, serverType)
+	leaving, err := s.Run.PlannedNodeDestroys(ctx, planPath, serverType)
 	if err != nil {
 		return fmt.Errorf("plan destroys: %w", err)
 	}
 
-	survivor := pickSurvivorMaster(rt.Cfg, leaving)
+	survivor := pickSurvivorMaster(s.Rt.Cfg, leaving)
 	if survivor == "" && len(leaving) > 0 {
-		rt.Log.Warn(fmt.Sprintf("all masters being destroyed (leaving: %v) — skipping detach", leaving))
+		s.Lg.Warn(fmt.Sprintf("all masters being destroyed (leaving: %v) — skipping detach", leaving))
 		return nil
 	}
 
-	return predrain(ctx, rt, run, planPath, serverType, survivor, leaving, "detach",
-		func(ctx context.Context, rt *runtime.Runtime, sh *ssh.Client) error {
+	return s.predrain(ctx, predrainSpec{
+		PlanPath:     planPath,
+		ResourceType: serverType,
+		Control:      survivor,
+		Leaving:      leaving,
+		Label:        "detach",
+		Body: func(ctx context.Context, sh *ssh.Client) error {
 			nodes := make([]detach.Node, len(leaving))
 			for i, key := range leaving {
 				nodes[i] = detach.Node{
-					Hostname: naming.Server(rt.Cfg.App, rt.Cfg.Env, key),
-					Role:     rt.Cfg.Servers[key].Role,
+					Hostname: naming.Server(s.Rt.Cfg.App, s.Rt.Cfg.Env, key),
+					Role:     s.Rt.Cfg.Servers[key].Role,
 				}
 			}
-			detach.Nodes(ctx, sh, nodes, rt.Log)
+			detach.Nodes(ctx, sh, nodes, s.Lg)
 			return nil
 		},
-	)
+	})
 }
 
 // drainTunnel inspects the saved plan and, if any tunnel resource is
@@ -137,34 +120,32 @@ func detachNode(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, pl
 // cloudflared agent before tf-apply runs. CF's API rejects tunnel
 // DELETE while connections are alive — see
 // terraform-provider-cloudflare#5255 — and the provider has no
-// force_destroy, no /connections cleanup call, and no retry. Killing
-// the agent here drops the connections so tf-apply succeeds in one
-// pass.
+// force_destroy, no /connections cleanup call, no retry. Killing the
+// agent here drops the connections so tf-apply succeeds in one pass.
 //
 // Plan-driven: zero cost on no-op deploys (filter returns empty);
 // fires automatically on `nvoi destroy`, on Caddy←tunnel mode
 // switches, and on tunnel-replacement (rename, secret rotation).
-//
-// Same shape as detachNode — best-effort, warn-and-continue on
-// kube-unreachable so a misconfigured drain can't block tf-apply.
-// If sweep fails, tf-apply will surface CF's "active connections"
-// error with the same clarity it does today.
-func drainTunnel(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, planPath string) error {
-	if rt.Cfg.Providers.Tunnel == "" {
+func (s *Session) drainTunnel(ctx context.Context, planPath string) error {
+	if s.Rt.Cfg.Providers.Tunnel == "" {
 		return nil
 	}
-	tunnelType, err := compile.TunnelResourceType(rt.Cfg.Providers.Tunnel)
+	tunnelType, err := compile.TunnelResourceType(s.Rt.Cfg.Providers.Tunnel)
 	if err != nil {
 		return fmt.Errorf("tunnel resource type: %w", err)
 	}
-	leaving, err := run.PlannedTunnelDestroys(ctx, planPath, tunnelType)
+	leaving, err := s.Run.PlannedTunnelDestroys(ctx, planPath, tunnelType)
 	if err != nil {
 		return fmt.Errorf("plan tunnel destroys: %w", err)
 	}
 
-	primary := rt.Cfg.PrimaryMaster()
-	return predrain(ctx, rt, run, planPath, tunnelType, primary, leaving, "drain-tunnel",
-		func(ctx context.Context, rt *runtime.Runtime, sh *ssh.Client) error {
+	return s.predrain(ctx, predrainSpec{
+		PlanPath:     planPath,
+		ResourceType: tunnelType,
+		Control:      s.Rt.Cfg.PrimaryMaster(),
+		Leaving:      leaving,
+		Label:        "drain-tunnel",
+		Body: func(ctx context.Context, sh *ssh.Client) error {
 			kc, err := kube.New(ctx, sh)
 			if err != nil {
 				return fmt.Errorf("kube tunnel: %w", err)
@@ -175,16 +156,17 @@ func drainTunnel(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, p
 			// termination drops cloudflared's outbound connections,
 			// which clears CF's active-connections gate on the
 			// subsequent tf-apply DELETE.
+			scope := kube.Scope{Namespace: "default", Owner: kube.OwnerTunnelAgent}
 			for _, kind := range []kube.Kind{
 				kube.KindDeployment, kube.KindSecret, kube.KindConfigMap,
 			} {
-				if err := kc.SweepOwned(ctx, "default", kube.OwnerTunnelAgent, kind, nil); err != nil {
-					rt.Log.Warn(fmt.Sprintf("sweep tunnel-agent %s: %s", kind, err))
+				if err := kc.SweepOwned(ctx, scope, kind, nil); err != nil {
+					s.Lg.Warn(fmt.Sprintf("sweep tunnel-agent %s: %s", kind, err))
 				}
 			}
 			return nil
 		},
-	)
+	})
 }
 
 // pickSurvivorMaster returns the YAML key of any master NOT in the
@@ -204,7 +186,6 @@ func pickSurvivorMaster(cfg *config.Config, leaving []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	// determinism — pick first alphabetical
 	pick := candidates[0]
 	for _, c := range candidates[1:] {
 		if c < pick {

@@ -134,7 +134,7 @@ func TestAll_MultiHostLoginEach(t *testing.T) {
 			"db":  {Image: "registry.example.com:5000/x/db", Build: &config.BuildSpec{Context: ".", Dockerfile: "Dockerfile"}},
 		},
 		map[string]config.RegistryDef{
-			"ghcr.io":                 {Username: "alice", Password: "p1"},
+			"ghcr.io":                   {Username: "alice", Password: "p1"},
 			"registry.example.com:5000": {Username: "bob", Password: "p2"},
 		},
 	), r, silentLog())

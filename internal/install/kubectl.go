@@ -10,6 +10,17 @@ import (
 	"github.com/getnvoi/core/internal/utils"
 )
 
+// KubectlSpec carries the inputs to a `sudo k3s kubectl <args>` run
+// against a master shell. Shared by KubectlStream (long-running stream)
+// and KubectlExec (target + user-args wrapper) so the writer pair and
+// shell handle have one canonical home.
+type KubectlSpec struct {
+	Shell  ssh.Shell // master shell — workers can't kubectl
+	Args   []string  // verb + flags + positional args (joined with spaces)
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 // Kubectl runs `sudo k3s kubectl <args>` on a master shell and returns
 // combined output. Works without kubeconfig setup because k3s embeds
 // kubectl as a subcommand that reads /etc/rancher/k3s/k3s.yaml
@@ -24,16 +35,17 @@ func Kubectl(ctx context.Context, sh ssh.Shell, args ...string) ([]byte, error) 
 	return sh.Run(ctx, "sudo k3s kubectl "+strings.Join(args, " "))
 }
 
-// KubectlStream runs `sudo k3s kubectl <args>` with output streamed to
-// the given writers. For verbose ops where the operator wants progress
-// in real time (apply -f, port-forward, logs follow, …).
-func KubectlStream(ctx context.Context, sh ssh.Shell, stdout, stderr io.Writer, args ...string) error {
-	return sh.RunStream(ctx, "sudo k3s kubectl "+strings.Join(args, " "), stdout, stderr)
+// KubectlStream runs `sudo k3s kubectl <spec.Args>` against spec.Shell
+// with stdout/stderr streamed to spec.Stdout/spec.Stderr. For verbose
+// ops where the operator wants progress in real time (apply -f,
+// port-forward, logs follow, …).
+func KubectlStream(ctx context.Context, spec KubectlSpec) error {
+	return spec.Shell.RunStream(ctx, "sudo k3s kubectl "+strings.Join(spec.Args, " "), spec.Stdout, spec.Stderr)
 }
 
-// KubectlExec runs `kubectl exec <target> -- <userArgs>` over the
-// supplied shell, streaming stdout/stderr to the writers. Each entry
-// in userArgs is shell-quoted before being joined into the remote
+// KubectlExec runs `kubectl exec <target> -- <spec.Args>` over
+// spec.Shell, streaming stdout/stderr to the writers. Each entry in
+// spec.Args is shell-quoted before being joined into the remote
 // command line so things like `SELECT COUNT(*) FROM visits` reach the
 // container as a single argument unmolested by the master's bash.
 //
@@ -44,17 +56,21 @@ func KubectlStream(ctx context.Context, sh ssh.Shell, stdout, stderr io.Writer, 
 // v1 is non-interactive only: stdin is closed, no PTY allocation. Long
 // commands stream output back as they run; on completion the remote
 // process's exit code surfaces as the function's error.
-func KubectlExec(ctx context.Context, sh ssh.Shell, target string, userArgs []string, stdout, stderr io.Writer) error {
+//
+// Implementation reuses KubectlStream by prepending `exec target --`
+// to the args — single source of truth for the kubectl-over-SSH path.
+func KubectlExec(ctx context.Context, target string, spec KubectlSpec) error {
 	if target == "" {
 		return fmt.Errorf("kubectl exec: empty target")
 	}
-	if len(userArgs) == 0 {
+	if len(spec.Args) == 0 {
 		return fmt.Errorf("kubectl exec: empty command")
 	}
-	parts := make([]string, 0, 3+len(userArgs))
-	parts = append(parts, "exec", target, "--")
-	for _, a := range userArgs {
-		parts = append(parts, utils.ShellQuote(a))
+	wrapped := make([]string, 0, 3+len(spec.Args))
+	wrapped = append(wrapped, "exec", target, "--")
+	for _, a := range spec.Args {
+		wrapped = append(wrapped, utils.ShellQuote(a))
 	}
-	return sh.RunStream(ctx, "sudo k3s kubectl "+strings.Join(parts, " "), stdout, stderr)
+	spec.Args = wrapped
+	return KubectlStream(ctx, spec)
 }

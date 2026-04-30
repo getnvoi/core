@@ -30,7 +30,7 @@ func TestApplyOwned_StampsOwnerLabel_OnCreate(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "api"},
 		Spec:       appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"k": "v"}}},
 	}
-	if err := c.ApplyOwned(context.Background(), "ns", kube.OwnerServices, dep); err != nil {
+	if err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, dep); err != nil {
 		t.Fatalf("ApplyOwned: %v", err)
 	}
 	got, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "api", metav1.GetOptions{})
@@ -53,7 +53,7 @@ func TestApplyOwned_PreservesExistingLabels(t *testing.T) {
 		},
 		Spec: appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"k": "v"}}},
 	}
-	if err := c.ApplyOwned(context.Background(), "ns", kube.OwnerServices, dep); err != nil {
+	if err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, dep); err != nil {
 		t.Fatalf("ApplyOwned: %v", err)
 	}
 	got, _ := cs.AppsV1().Deployments("ns").Get(context.Background(), "api", metav1.GetOptions{})
@@ -68,7 +68,7 @@ func TestApplyOwned_PreservesExistingLabels(t *testing.T) {
 func TestApplyOwned_EmptyOwner_Errors(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	c := kube.NewForTest(cs)
-	err := c.ApplyOwned(context.Background(), "ns", "", &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "x"}})
+	err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "ns"}, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "x"}})
 	if err == nil {
 		t.Error("expected error for empty owner")
 	}
@@ -77,7 +77,7 @@ func TestApplyOwned_EmptyOwner_Errors(t *testing.T) {
 func TestApplyOwned_UnsupportedKind_Errors(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	c := kube.NewForTest(cs)
-	err := c.ApplyOwned(context.Background(), "ns", kube.OwnerServices, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "x"}})
+	err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "x"}})
 	if err == nil {
 		t.Error("expected error for unsupported kind (Pod)")
 	}
@@ -92,7 +92,7 @@ func TestSweepOwned_DeletesOrphan_KeepsDesired(t *testing.T) {
 	)
 	c := kube.NewForTest(cs)
 
-	if err := c.SweepOwned(context.Background(), "ns", kube.OwnerServices, kube.KindDeployment, []string{"keep"}); err != nil {
+	if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, kube.KindDeployment, []string{"keep"}); err != nil {
 		t.Fatalf("SweepOwned: %v", err)
 	}
 	if _, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "keep", metav1.GetOptions{}); err != nil {
@@ -117,7 +117,7 @@ func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 	c := kube.NewForTest(cs)
 
 	for _, kind := range []kube.Kind{kube.KindDeployment, kube.KindService, kube.KindPVC, kube.KindConfigMap} {
-		if err := c.SweepOwned(context.Background(), "kube-system", kube.OwnerCaddy, kind, nil); err != nil {
+		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "kube-system", Owner: kube.OwnerCaddy}, kind, nil); err != nil {
 			t.Fatalf("SweepOwned %s: %v", kind, err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestSweepOwned_NeverCrossesOwnerBoundaries(t *testing.T) {
 
 	// Sweep all services-owned. Caddy Deployment + external Deployment
 	// must remain untouched.
-	if err := c.SweepOwned(context.Background(), "ns", kube.OwnerServices, kube.KindDeployment, nil); err != nil {
+	if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, kube.KindDeployment, nil); err != nil {
 		t.Fatalf("SweepOwned: %v", err)
 	}
 	if _, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "caddy", metav1.GetOptions{}); err != nil {
@@ -164,7 +164,7 @@ func TestSweepOwned_NeverCrossesOwnerBoundaries(t *testing.T) {
 func TestSweepOwned_EmptyOwner_Errors(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	c := kube.NewForTest(cs)
-	if err := c.SweepOwned(context.Background(), "ns", "", kube.KindDeployment, nil); err == nil {
+	if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "ns"}, kube.KindDeployment, nil); err == nil {
 		t.Error("expected error for empty owner")
 	}
 }
@@ -172,7 +172,7 @@ func TestSweepOwned_EmptyOwner_Errors(t *testing.T) {
 func TestSweepOwned_UnsupportedKind_Errors(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	c := kube.NewForTest(cs)
-	if err := c.SweepOwned(context.Background(), "ns", kube.OwnerServices, kube.Kind("Pod"), nil); err == nil {
+	if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, kube.Kind("Pod"), nil); err == nil {
 		t.Error("expected error for unsupported kind")
 	}
 }
@@ -187,7 +187,7 @@ func TestListOwned_OnlyMatchingOwner(t *testing.T) {
 	)
 	c := kube.NewForTest(cs)
 
-	got, err := c.ListOwned(context.Background(), "ns", kube.OwnerServices, kube.KindService)
+	got, err := c.ListOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, kube.KindService)
 	if err != nil {
 		t.Fatalf("ListOwned: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestListOwned_AcrossKinds(t *testing.T) {
 		{kube.KindConfigMap, "cm"},
 		{kube.KindPVC, "pvc"},
 	} {
-		got, err := c.ListOwned(context.Background(), "ns", kube.OwnerServices, tc.kind)
+		got, err := c.ListOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, tc.kind)
 		if err != nil {
 			t.Errorf("ListOwned %s: %v", tc.kind, err)
 			continue

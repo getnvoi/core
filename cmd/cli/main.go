@@ -133,7 +133,7 @@ func newRoot(r *rt) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			b, err := state.Configure(cmd.Context(), cfg.App, cfg.Env, bp, r.log)
+			b, err := state.Configure(cmd.Context(), cfg, bp, r.log)
 			if err != nil {
 				return err
 			}

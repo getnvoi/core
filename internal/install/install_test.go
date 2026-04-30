@@ -95,10 +95,12 @@ func TestInstallPrimaryMaster_CommandHasClusterInitAndTLSSANs(t *testing.T) {
 		Hostname: "nvoi-hello-dev-master",
 		IPv4:     "1.2.3.4",
 		Private:  "10.0.1.1",
+		Shell:    sh,
+		Log:      silentLog(),
 	}
 	extraSANs := []string{"10.0.1.99", "5.6.7.8"} // LB priv + pub
 
-	if err := install.InstallPrimaryMaster(context.Background(), sh, node, extraSANs, silentLog()); err != nil {
+	if err := install.InstallPrimaryMaster(context.Background(), node, extraSANs); err != nil {
 		t.Fatalf("InstallPrimaryMaster: %v", err)
 	}
 
@@ -121,8 +123,8 @@ func TestInstallPrimaryMaster_CommandHasClusterInitAndTLSSANs(t *testing.T) {
 		"--cluster-cidr 10.42.0.0/16",
 		"--service-cidr 10.43.0.0/16",
 		"--flannel-iface enp7s0",
-		"--tls-san 10.0.1.1", // self.Private
-		"--tls-san 1.2.3.4",  // self.IPv4
+		"--tls-san 10.0.1.1",  // self.Private
+		"--tls-san 1.2.3.4",   // self.IPv4
 		"--tls-san 10.0.1.99", // extra LB priv
 		"--tls-san 5.6.7.8",   // extra LB pub
 	} {
@@ -136,10 +138,12 @@ func TestInstallPrimaryMaster_CommandHasClusterInitAndTLSSANs(t *testing.T) {
 
 func TestJoinSecondaryMaster_UsesServerFlagWithToken(t *testing.T) {
 	sh := k3sInstallShell()
-	self := install.Node{Name: "m2", Hostname: "nvoi-h-master-2", IPv4: "5.5.5.5", Private: "10.0.1.2"}
+	self := install.Node{Name: "m2", Hostname: "nvoi-h-master-2", IPv4: "5.5.5.5", Private: "10.0.1.2", Shell: sh, Log: silentLog()}
 	primary := install.Node{Name: "m1", Hostname: "nvoi-h-master-1", IPv4: "1.1.1.1", Private: "10.0.1.1"}
 
-	if err := install.JoinSecondaryMaster(context.Background(), sh, self, primary, "K10TOKEN", nil, silentLog()); err != nil {
+	if err := install.JoinSecondaryMaster(context.Background(), install.SecondaryJoinSpec{
+		Self: self, Primary: primary, Token: "K10TOKEN",
+	}); err != nil {
 		t.Fatalf("JoinSecondaryMaster: %v", err)
 	}
 
@@ -179,10 +183,12 @@ func TestJoinWorker_PassesK3SURLAndToken(t *testing.T) {
 			{Contains: "curl -sfL https://get.k3s.io", Resp: sshfake.Response{}},
 		},
 	}
-	self := install.Node{Name: "w1", Hostname: "nvoi-h-worker-1", IPv4: "9.9.9.9", Private: "10.0.1.10"}
+	self := install.Node{Name: "w1", Hostname: "nvoi-h-worker-1", IPv4: "9.9.9.9", Private: "10.0.1.10", Shell: sh, Log: silentLog()}
 	target := "10.0.1.99" // LB private IP (HA case)
 
-	if err := install.JoinWorker(context.Background(), sh, self, target, "K10TOKEN", silentLog()); err != nil {
+	if err := install.JoinWorker(context.Background(), install.WorkerJoinSpec{
+		Self: self, Target: target, Token: "K10TOKEN",
+	}); err != nil {
 		t.Fatalf("JoinWorker: %v", err)
 	}
 
@@ -199,7 +205,7 @@ func TestJoinWorker_PassesK3SURLAndToken(t *testing.T) {
 	for _, want := range []string{
 		"K3S_URL=https://10.0.1.99:6443",
 		"K3S_TOKEN=K10TOKEN",
-		"agent",            // INSTALL_K3S_EXEC starts with agent
+		"agent", // INSTALL_K3S_EXEC starts with agent
 		"--node-ip 10.0.1.10",
 		"--flannel-iface ens10",
 	} {
@@ -216,9 +222,11 @@ func TestJoinWorker_AlreadyJoined_IsNoop(t *testing.T) {
 			{Contains: "is-active --quiet k3s-agent", Resp: sshfake.Response{}},
 		},
 	}
-	self := install.Node{Hostname: "nvoi-h-worker-1", Private: "10.0.1.10"}
+	self := install.Node{Hostname: "nvoi-h-worker-1", Private: "10.0.1.10", Shell: sh, Log: silentLog()}
 
-	if err := install.JoinWorker(context.Background(), sh, self, "10.0.1.99", "K10TOKEN", silentLog()); err != nil {
+	if err := install.JoinWorker(context.Background(), install.WorkerJoinSpec{
+		Self: self, Target: "10.0.1.99", Token: "K10TOKEN",
+	}); err != nil {
 		t.Fatalf("JoinWorker: %v", err)
 	}
 	for _, c := range sh.Calls {

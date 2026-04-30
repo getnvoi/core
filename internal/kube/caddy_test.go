@@ -60,7 +60,7 @@ func TestEnsureCaddy_AppliesAllFour(t *testing.T) {
 	}
 
 	for _, kind := range []kube.Kind{kube.KindPVC, kube.KindConfigMap, kube.KindService, kube.KindDeployment} {
-		names, err := c.ListOwned(context.Background(), kube.CaddyNamespace, kube.OwnerCaddy, kind)
+		names, err := c.ListOwned(context.Background(), kube.Scope{Namespace: kube.CaddyNamespace, Owner: kube.OwnerCaddy}, kind)
 		if err != nil {
 			t.Errorf("ListOwned %s: %v", kind, err)
 			continue
