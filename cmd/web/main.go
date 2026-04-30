@@ -67,7 +67,10 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Recovery())
+	// Logger middleware → one stdout line per request. Without it,
+	// `nvoi logs web` only ever shows the startup line, which makes
+	// the verb feel broken on a real workload.
+	r.Use(gin.Logger(), gin.Recovery())
 	r.SetHTMLTemplate(tpl)
 
 	r.GET("/healthz", func(c *gin.Context) {

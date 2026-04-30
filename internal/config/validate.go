@@ -20,6 +20,7 @@ var reservedAliasNames = map[string]bool{
 	"ssh":        true,
 	"kubectl":    true,
 	"exec":       true,
+	"logs":       true,
 	"help":       true,
 	"completion": true,
 }

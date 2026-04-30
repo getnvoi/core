@@ -63,4 +63,4 @@ services:
 aliases:
   visits: exec postgres -- psql -U nvoi -d nvoi -tAc "SELECT COUNT(*) FROM visits"
   pgshell: exec postgres -- psql -U nvoi -d nvoi
-  weblogs: kubectl -- logs deploy/web -f
+  weblogs: logs web -f
