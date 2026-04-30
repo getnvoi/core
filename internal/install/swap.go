@@ -12,7 +12,7 @@ import (
 // EnsureSwap allocates /swapfile sized 5% of root disk, clamped
 // 512MB-2GB, and registers it in /etc/fstab. Idempotent: skips if
 // swap is already active. Mirrors nvoi/pkg/infra/cloudinit.go::EnsureSwap.
-func EnsureSwap(ctx context.Context, sh *ssh.Client, lg log.Log) error {
+func EnsureSwap(ctx context.Context, sh ssh.Shell, lg log.Log) error {
 	out, err := sh.Run(ctx, "swapon --show --noheadings")
 	if err == nil && len(strings.TrimSpace(string(out))) > 0 {
 		return nil // already active

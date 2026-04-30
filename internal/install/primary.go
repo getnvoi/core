@@ -21,7 +21,7 @@ import (
 // Always uses --cluster-init regardless of master count: even
 // single-master clusters get embedded etcd, so the 1↔N migration
 // is mechanical (just add masters and redeploy).
-func InstallPrimaryMaster(ctx context.Context, sh *ssh.Client, self Node, extraSANs []string, lg log.Log) error {
+func InstallPrimaryMaster(ctx context.Context, sh ssh.Shell, self Node, extraSANs []string, lg log.Log) error {
 	if installed, _ := localNodeReady(ctx, sh); installed {
 		lg.Info(fmt.Sprintf("k3s primary on %s already Ready", self.Name))
 		return nil
@@ -71,7 +71,7 @@ func InstallPrimaryMaster(ctx context.Context, sh *ssh.Client, self Node, extraS
 // Private to primary.go because only the primary install runs it
 // (subsequent masters inherit the kubeconfig from the cluster they
 // joined; workers don't need one).
-func setupKubeconfig(ctx context.Context, sh *ssh.Client, privateIP string) error {
+func setupKubeconfig(ctx context.Context, sh ssh.Shell, privateIP string) error {
 	cmd := fmt.Sprintf(
 		`mkdir -p /home/%[1]s/.kube && sudo cp %[2]s /home/%[1]s/.kube/config && sudo sed -i 's/127.0.0.1/%[3]s/g' /home/%[1]s/.kube/config && sudo chown -R %[1]s:%[1]s /home/%[1]s/.kube && chmod 600 /home/%[1]s/.kube/config`,
 		DefaultUser, kubeconfigPath, privateIP,

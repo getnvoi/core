@@ -30,7 +30,7 @@ type Node struct {
 // localNodeReady is the fast idempotency check at the top of every
 // install function: does the local k3s think any node is Ready?
 // Returns false (not an error) when k3s is not installed.
-func localNodeReady(ctx context.Context, sh *ssh.Client) (bool, error) {
+func localNodeReady(ctx context.Context, sh ssh.Shell) (bool, error) {
 	// k3s binary present? If not, no install yet — quietly return false.
 	if _, err := sh.Run(ctx, "command -v k3s >/dev/null 2>&1"); err != nil {
 		return false, nil
@@ -46,7 +46,7 @@ func localNodeReady(ctx context.Context, sh *ssh.Client) (bool, error) {
 // discoverPrivateInterface finds the linux interface name carrying
 // the given private IP. Hetzner image varies (enp7s0, ens10, …) so
 // we discover at runtime rather than hardcode.
-func discoverPrivateInterface(ctx context.Context, sh *ssh.Client, privateIP string) (string, error) {
+func discoverPrivateInterface(ctx context.Context, sh ssh.Shell, privateIP string) (string, error) {
 	cmd := fmt.Sprintf(`ip -o -4 addr show | awk '/%s/{print $2}' | head -1`, privateIP)
 	out, err := sh.Run(ctx, cmd)
 	if err != nil {

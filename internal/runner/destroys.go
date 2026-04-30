@@ -48,6 +48,13 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 	if err != nil {
 		return nil, fmt.Errorf("read plan file %s: %w", planPath, err)
 	}
+	return planNodeDestroys(plan, serverResourceType), nil
+}
+
+// planNodeDestroys is the pure walker — pulled out so tests can pass a
+// hand-crafted *tfjson.Plan instead of needing a real terraform binary
+// + plan file on disk.
+func planNodeDestroys(plan *tfjson.Plan, serverResourceType string) []string {
 	var nodes []string
 	for _, rc := range plan.ResourceChanges {
 		if rc.Type != serverResourceType || rc.Change == nil {
@@ -61,5 +68,5 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 		}
 	}
 	sort.Strings(nodes)
-	return nodes, nil
+	return nodes
 }

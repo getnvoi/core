@@ -46,6 +46,15 @@ func New(jsonl bool) Log {
 	return &textLog{out: os.Stderr}
 }
 
+// NewWith is the test-friendly variant: same impls, but the writer
+// is caller-supplied so tests can capture output into a bytes.Buffer.
+func NewWith(jsonl bool, w io.Writer) Log {
+	if jsonl {
+		return &jsonLog{out: w}
+	}
+	return &textLog{out: w}
+}
+
 // ── indentWriter ───────────────────────────────────────────────────────
 // Streaming line-prefix writer: prepends the indent to every line as
 // bytes flow through. Used by the text impl's TFStream so terraform's

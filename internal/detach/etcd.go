@@ -25,7 +25,7 @@ const etcdctlPrelude = `ETCDCTL_API=3 etcdctl ` +
 // ensureEtcdctl makes sure the `etcdctl` binary is installed on the
 // survivor master. Idempotent — fast-path returns when it's already
 // present.
-func ensureEtcdctl(ctx context.Context, sh *ssh.Client, lg log.Log) error {
+func ensureEtcdctl(ctx context.Context, sh ssh.Shell, lg log.Log) error {
 	if _, err := sh.Run(ctx, "command -v etcdctl >/dev/null 2>&1"); err == nil {
 		return nil
 	}
@@ -45,7 +45,7 @@ func ensureEtcdctl(ctx context.Context, sh *ssh.Client, lg log.Log) error {
 // Without this, etcd retains the dead member and quorum degrades.
 //
 // Idempotent: returns nil if the member is already gone.
-func removeEtcdMember(ctx context.Context, sh *ssh.Client, hostname string, lg log.Log) error {
+func removeEtcdMember(ctx context.Context, sh ssh.Shell, hostname string, lg log.Log) error {
 	if err := ensureEtcdctl(ctx, sh, lg); err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func removeEtcdMember(ctx context.Context, sh *ssh.Client, hostname string, lg l
 // Output format (CSV — etcdctl default `-w simple`):
 //
 //	<hex-id>, started, <hostname>-<rand>, <peer-urls>, <client-urls>, false
-func findEtcdMemberID(ctx context.Context, sh *ssh.Client, hostname string) (string, error) {
+func findEtcdMemberID(ctx context.Context, sh ssh.Shell, hostname string) (string, error) {
 	out, err := sh.Run(ctx, fmt.Sprintf("sudo bash -c %q",
 		etcdctlPrelude+" member list",
 	))

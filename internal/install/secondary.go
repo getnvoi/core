@@ -15,7 +15,7 @@ import (
 //
 // extraSANs same as primary — every master's apiserver cert lists the
 // same SANs so workers and kubectl validate against any master.
-func JoinSecondaryMaster(ctx context.Context, sh *ssh.Client, self, primary Node, token string, extraSANs []string, lg log.Log) error {
+func JoinSecondaryMaster(ctx context.Context, sh ssh.Shell, self, primary Node, token string, extraSANs []string, lg log.Log) error {
 	if installed, _ := localNodeReady(ctx, sh); installed {
 		lg.Info(fmt.Sprintf("k3s master %s already Ready", self.Name))
 		return nil

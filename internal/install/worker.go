@@ -15,7 +15,7 @@ import (
 // private IP — workers never reach the apiserver via public network.
 //
 // Idempotent: skips if k3s-agent is active.
-func JoinWorker(ctx context.Context, sh *ssh.Client, self Node, target, token string, lg log.Log) error {
+func JoinWorker(ctx context.Context, sh ssh.Shell, self Node, target, token string, lg log.Log) error {
 	if _, err := sh.Run(ctx, "systemctl is-active --quiet k3s-agent"); err == nil {
 		lg.Info(fmt.Sprintf("k3s worker %s already joined", self.Name))
 		return nil

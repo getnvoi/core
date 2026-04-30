@@ -46,7 +46,7 @@ type Node struct {
 //
 // `delete node` uses --ignore-not-found so re-runs on already-gone
 // nodes are no-ops.
-func Nodes(ctx context.Context, sh *ssh.Client, nodes []Node, lg log.Log) {
+func Nodes(ctx context.Context, sh ssh.Shell, nodes []Node, lg log.Log) {
 	for _, n := range nodes {
 		// 1. Drain.
 		lg.Info(fmt.Sprintf("draining %s...", n.Hostname))

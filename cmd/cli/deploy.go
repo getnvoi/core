@@ -244,8 +244,12 @@ func sortedServerNames(servers map[string]runner.Server) []string {
 	return names
 }
 
-func masterShellsOnly(shells map[string]*ssh.Client, eps *runner.Endpoints) map[string]*ssh.Client {
-	out := make(map[string]*ssh.Client)
+// masterShellsOnly filters the full per-server shell map down to
+// masters and returns a Shell-typed map (Go map types are invariant,
+// so we widen at the boundary where install.DiscoverToken expects
+// ssh.Shell rather than *ssh.Client).
+func masterShellsOnly(shells map[string]*ssh.Client, eps *runner.Endpoints) map[string]ssh.Shell {
+	out := make(map[string]ssh.Shell)
 	for _, name := range eps.Masters() {
 		if sh, ok := shells[name]; ok {
 			out[name] = sh

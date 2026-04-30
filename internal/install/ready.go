@@ -18,7 +18,7 @@ import (
 // fresh node, but apt-update / pull cycles on slow networks can push
 // it longer. Tighter timeouts mask real connectivity issues; looser
 // ones make CI feedback slow.
-func WaitNodeReady(ctx context.Context, sh *ssh.Client, hostname string, lg log.Log) error {
+func WaitNodeReady(ctx context.Context, sh ssh.Shell, hostname string, lg log.Log) error {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 

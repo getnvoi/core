@@ -15,7 +15,7 @@ import (
 // The convention: a running cluster is its own source of truth. We
 // never re-bootstrap an existing cluster. The token is the same
 // across every master (k3s shares it via etcd).
-func DiscoverToken(ctx context.Context, masterShells map[string]*ssh.Client) (token string, found bool, err error) {
+func DiscoverToken(ctx context.Context, masterShells map[string]ssh.Shell) (token string, found bool, err error) {
 	for _, sh := range masterShells {
 		// k3s server active AND token file exists?
 		if _, e := sh.Run(ctx, "systemctl is-active --quiet k3s"); e != nil {

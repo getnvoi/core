@@ -18,6 +18,16 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
+// Shell is the narrow interface install + detach packages depend on.
+// Lets tests substitute a fake without holding a real SSH connection.
+// *Client implements it (Run + RunStream below). Kept tight: anything
+// needing TCP forwarding (kube tunnel) keeps using *Client directly.
+type Shell interface {
+	Run(ctx context.Context, cmd string) ([]byte, error)
+	RunStream(ctx context.Context, cmd string, stdout, stderr io.Writer) error
+	Addr() string // host:port — used in log/error messages
+}
+
 // Client wraps a persistent SSH connection.
 type Client struct {
 	conn *gossh.Client
