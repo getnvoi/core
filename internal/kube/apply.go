@@ -12,17 +12,15 @@ import (
 	"k8s.io/client-go/util/retry"
 )
 
-// ApplyDeployment is the typed Get-then-Create-or-Update for
-// Deployment. Wraps Update in retry-on-conflict because controllers
-// (the Deployment controller, replicaset controller) bump
-// ResourceVersion async between our Get and Update — standard
+// Per-kind apply helpers — invoked by ApplyOwned's switch. Each one
+// handles the kind's specific quirks (Deployment status preservation,
+// Service ClusterIP transition, StatefulSet immutable VolumeClaimTemplates),
+// then runs the standard Get → Create-or-Update + retry-on-conflict
+// pattern. Controllers bump ResourceVersion async between our Get
+// and Update — RetryOnConflict re-reads and retries; canonical
 // client-go hygiene.
-//
-// Status is preserved from the existing object (it's an apiserver
-// subresource — modifying it via Update has no effect, but writing
-// Spec.Replicas without preserving Status can confuse readiness probes
-// in edge cases).
-func (c *Client) ApplyDeployment(ctx context.Context, ns string, dep *appsv1.Deployment) error {
+
+func (c *Client) applyDeployment(ctx context.Context, ns string, dep *appsv1.Deployment) error {
 	api := c.CS.AppsV1().Deployments(ns)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := api.Get(ctx, dep.Name, metav1.GetOptions{})
@@ -40,13 +38,11 @@ func (c *Client) ApplyDeployment(ctx context.Context, ns string, dep *appsv1.Dep
 	})
 }
 
-// ApplyService is the same pattern for Service with one extra wrinkle:
-// the headless ↔ non-headless transition (ClusterIP "None" ↔ assigned
-// IP) is rejected by the apiserver as an Update — it requires
-// delete+recreate. Detect that case and route through Delete+Create;
-// otherwise preserve the existing.Spec.ClusterIP (apiserver assigns
-// ClusterIPs on first Create and rejects mutations).
-func (c *Client) ApplyService(ctx context.Context, ns string, svc *corev1.Service) error {
+// applyService handles the headless ↔ ClusterIP transition (apiserver
+// rejects update across that boundary, requires delete+recreate).
+// Otherwise preserves existing ClusterIP — apiserver assigns it on
+// first Create and rejects mutations.
+func (c *Client) applyService(ctx context.Context, ns string, svc *corev1.Service) error {
 	api := c.CS.CoreV1().Services(ns)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := api.Get(ctx, svc.Name, metav1.GetOptions{})
@@ -57,7 +53,6 @@ func (c *Client) ApplyService(ctx context.Context, ns string, svc *corev1.Servic
 		if err != nil {
 			return err
 		}
-		// Headless transition — kind change, recreate.
 		const headless = "None"
 		if existing.Spec.ClusterIP != svc.Spec.ClusterIP &&
 			(existing.Spec.ClusterIP == headless || svc.Spec.ClusterIP == headless) {
@@ -75,15 +70,11 @@ func (c *Client) ApplyService(ctx context.Context, ns string, svc *corev1.Servic
 	})
 }
 
-// ApplyStatefulSet is the StatefulSet sibling of ApplyDeployment.
-// Same Get→Create-or-Update + retry-on-conflict pattern. Status is
-// preserved from existing for the same reason as Deployment.
-//
-// VolumeClaimTemplates are immutable post-Create — k8s rejects
-// changes. Reconcile-on-config-change for those is a future concern;
-// for now an operator who changes storage size for an existing
+// applyStatefulSet preserves VolumeClaimTemplates (immutable post-Create)
+// + Status. Reconcile-on-config-change for the templates is a future
+// concern; today an operator who changes storage size for an existing
 // StatefulSet must `nvoi destroy` and redeploy.
-func (c *Client) ApplyStatefulSet(ctx context.Context, ns string, ss *appsv1.StatefulSet) error {
+func (c *Client) applyStatefulSet(ctx context.Context, ns string, ss *appsv1.StatefulSet) error {
 	api := c.CS.AppsV1().StatefulSets(ns)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := api.Get(ctx, ss.Name, metav1.GetOptions{})
@@ -96,17 +87,13 @@ func (c *Client) ApplyStatefulSet(ctx context.Context, ns string, ss *appsv1.Sta
 		}
 		ss.ResourceVersion = existing.ResourceVersion
 		ss.Status = existing.Status
-		// VolumeClaimTemplates is immutable — preserve existing to
-		// avoid a "field is immutable" reject every reconcile.
 		ss.Spec.VolumeClaimTemplates = existing.Spec.VolumeClaimTemplates
 		_, err = api.Update(ctx, ss, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
 	})
 }
 
-// ApplySecret upserts a Secret. Same Get-then-Create-or-Update +
-// retry-on-conflict pattern. Used for the registry-auth Secret.
-func (c *Client) ApplySecret(ctx context.Context, ns string, sec *corev1.Secret) error {
+func (c *Client) applySecret(ctx context.Context, ns string, sec *corev1.Secret) error {
 	api := c.CS.CoreV1().Secrets(ns)
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := api.Get(ctx, sec.Name, metav1.GetOptions{})
@@ -123,84 +110,45 @@ func (c *Client) ApplySecret(ctx context.Context, ns string, sec *corev1.Secret)
 	})
 }
 
-// DeleteDeployment removes a Deployment. Idempotent: NotFound returns
-// nil so reconcile-on-removal can run on every deploy without
-// caring whether the Deployment ever existed.
-func (c *Client) DeleteDeployment(ctx context.Context, ns, name string) error {
-	err := c.CS.AppsV1().Deployments(ns).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+func (c *Client) applyConfigMap(ctx context.Context, ns string, cm *corev1.ConfigMap) error {
+	api := c.CS.CoreV1().ConfigMaps(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, cm.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, cm, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		cm.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, cm, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
-	}
-	return nil
+	})
 }
 
-// DeleteStatefulSet removes a StatefulSet. Same idempotency contract.
-// Note: this does NOT delete the underlying PVCs k8s provisioned via
-// VolumeClaimTemplates — that's k8s's policy to preserve data even
-// when the StatefulSet goes away. Reclaim path is `nvoi destroy`
-// (terraform tears down the nodes; hostPath volumes go with them).
-func (c *Client) DeleteStatefulSet(ctx context.Context, ns, name string) error {
-	err := c.CS.AppsV1().StatefulSets(ns).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+// applyPVC preserves the immutable spec on update — k8s rejects
+// changes to .spec.resources, .spec.storageClassName, etc post-Create.
+// Re-applying the same template is a no-op; resizing requires a
+// PVC delete + recreate (out of scope for v1).
+func (c *Client) applyPVC(ctx context.Context, ns string, pvc *corev1.PersistentVolumeClaim) error {
+	api := c.CS.CoreV1().PersistentVolumeClaims(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, pvc.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, pvc, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		// Keep the existing spec (immutable post-bind); only labels /
+		// annotations may legitimately update.
+		pvc.ResourceVersion = existing.ResourceVersion
+		pvc.Spec = existing.Spec
+		_, err = api.Update(ctx, pvc, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
-	}
-	return nil
-}
-
-// DeleteService removes a Service. Same idempotency contract.
-func (c *Client) DeleteService(ctx context.Context, ns, name string) error {
-	err := c.CS.CoreV1().Services(ns).Delete(ctx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return err
-	}
-	return nil
-}
-
-// ListNvoiDeployments returns the names of every Deployment in the
-// namespace tagged with `nvoi/owner=nvoi`. Used by reconcile-on-removal:
-// any name in this list whose YAML entry is gone gets deleted.
-func (c *Client) ListNvoiDeployments(ctx context.Context, ns string) ([]string, error) {
-	list, err := c.CS.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: "nvoi/owner=nvoi",
 	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(list.Items))
-	for _, d := range list.Items {
-		out = append(out, d.Name)
-	}
-	return out, nil
-}
-
-// ListNvoiServices is the Service equivalent of ListNvoiDeployments.
-func (c *Client) ListNvoiServices(ctx context.Context, ns string) ([]string, error) {
-	list, err := c.CS.CoreV1().Services(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: "nvoi/owner=nvoi",
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(list.Items))
-	for _, s := range list.Items {
-		out = append(out, s.Name)
-	}
-	return out, nil
-}
-
-// ListNvoiStatefulSets is the StatefulSet equivalent.
-func (c *Client) ListNvoiStatefulSets(ctx context.Context, ns string) ([]string, error) {
-	list, err := c.CS.AppsV1().StatefulSets(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: "nvoi/owner=nvoi",
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(list.Items))
-	for _, s := range list.Items {
-		out = append(out, s.Name)
-	}
-	return out, nil
 }
 
 // WaitDeploymentReady polls until ReadyReplicas == Spec.Replicas or

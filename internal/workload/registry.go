@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/runtime"
 	"github.com/getnvoi/core/internal/utils"
 )
@@ -57,7 +58,7 @@ func BuildRegistrySecret(rt *runtime.Runtime) (*corev1.Secret, error) {
 			Name:      registrySecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				LabelOwner: "nvoi",
+				kube.LabelOwner: kube.OwnerRegistry,
 			},
 		},
 		Type: corev1.SecretTypeDockerConfigJson,

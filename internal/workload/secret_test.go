@@ -5,6 +5,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -33,8 +34,8 @@ func TestBuildAppSecret_Shape(t *testing.T) {
 	if s.Type != corev1.SecretTypeOpaque {
 		t.Errorf("type: got %s want Opaque", s.Type)
 	}
-	if s.Labels[LabelOwner] != "nvoi" {
-		t.Errorf("owner label missing: %v", s.Labels)
+	if s.Labels[kube.LabelOwner] != kube.OwnerAppSecrets {
+		t.Errorf("owner label: got %v want %s=%s", s.Labels, kube.LabelOwner, kube.OwnerAppSecrets)
 	}
 	if got := string(s.Data["DATABASE_URL"]); got != "postgres://u:p@db:5432/x" {
 		t.Errorf("DATABASE_URL: got %q", got)

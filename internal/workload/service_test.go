@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -18,20 +19,22 @@ func TestBuildService_Shape(t *testing.T) {
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("type: got %s want ClusterIP", svc.Spec.Type)
 	}
-	if svc.Labels[LabelOwner] != "nvoi" || svc.Labels[LabelService] != "api" {
+	if svc.Labels[kube.LabelOwner] != kube.OwnerServices || svc.Labels[LabelService] != "api" {
 		t.Errorf("labels: %v", svc.Labels)
 	}
-	// Selector matches Deployment's pod template labels (NOT
-	// LabelDeployHash — selector must be stable across deploys, or
-	// the Service drops connections every roll).
-	want := map[string]string{LabelOwner: "nvoi", LabelService: "api"}
-	for k, v := range want {
-		if svc.Spec.Selector[k] != v {
-			t.Errorf("selector[%s]: got %q want %q", k, svc.Spec.Selector[k], v)
-		}
+	// Selector strictly contains LabelService. NOT LabelDeployHash
+	// (selector mutations orphan pods every roll) and NOT
+	// kube.LabelOwner (owner is a sweep concern; selectors are
+	// immutable post-Create so putting owner there means destroy +
+	// recreate for any taxonomy change).
+	if svc.Spec.Selector[LabelService] != "api" {
+		t.Errorf("selector[%s]: got %q want api", LabelService, svc.Spec.Selector[LabelService])
 	}
 	if _, hashOnSelector := svc.Spec.Selector[LabelDeployHash]; hashOnSelector {
-		t.Error("selector must NOT include deploy-hash (would break stable routing across rollouts)")
+		t.Error("selector must NOT include deploy-hash")
+	}
+	if _, ownerOnSelector := svc.Spec.Selector[kube.LabelOwner]; ownerOnSelector {
+		t.Error("selector must NOT include nvoi/owner (immutable selector + evolvable owner taxonomy = destroy required on every taxonomy change)")
 	}
 	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Port != 8080 {
 		t.Errorf("ports: %+v", svc.Spec.Ports)

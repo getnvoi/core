@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -28,7 +29,7 @@ func TestBuildDeployment_Defaults(t *testing.T) {
 	if got := *d.Spec.Replicas; got != 1 {
 		t.Errorf("default replicas: got %d want 1", got)
 	}
-	if d.Labels[LabelOwner] != "nvoi" || d.Labels[LabelService] != "api" {
+	if d.Labels[kube.LabelOwner] != kube.OwnerServices || d.Labels[LabelService] != "api" {
 		t.Errorf("labels: %v", d.Labels)
 	}
 	if d.Labels[LabelDeployHash] != "20260430-120000" {

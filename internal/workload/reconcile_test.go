@@ -33,7 +33,7 @@ func orphanDeployment(name string) *appsv1.Deployment {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
-			Labels:    map[string]string{"nvoi/owner": "nvoi", "nvoi/service": name},
+			Labels:    map[string]string{kube.LabelOwner: kube.OwnerServices, "nvoi/service": name},
 		},
 	}
 }
@@ -155,7 +155,7 @@ func orphanStatefulSet(name string) *appsv1.StatefulSet {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "default",
-			Labels:    map[string]string{"nvoi/owner": "nvoi", "nvoi/service": name},
+			Labels:    map[string]string{kube.LabelOwner: kube.OwnerServices, "nvoi/service": name},
 		},
 	}
 }
@@ -197,8 +197,9 @@ func TestApplyAll_AppliesTopLevelSecrets(t *testing.T) {
 
 	rt := &runtime.Runtime{
 		Cfg: &config.Config{
-			App: "hello",
-			Env: "dev",
+			App:     "hello",
+			Env:     "dev",
+			Secrets: []string{"DATABASE_URL"}, // declared in YAML so the Secret survives ReconcileRemoval
 			Services: map[string]config.ServiceSpec{
 				"web": {Image: "nginx", Port: 80, Secrets: []string{"DATABASE_URL"}},
 			},

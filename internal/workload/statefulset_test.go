@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
@@ -27,13 +28,18 @@ func TestBuildStatefulSet_Shape(t *testing.T) {
 	if got := *ss.Spec.Replicas; got != 1 {
 		t.Errorf("default replicas: got %d want 1", got)
 	}
-	// Selector — stable across deploys, no LabelDeployHash.
+	// Selector contains LabelService only. NOT deploy-hash (orphans
+	// pods on every roll). NOT owner (selector immutability + owner
+	// taxonomy evolution = destroy required for every taxonomy change).
 	sel := ss.Spec.Selector.MatchLabels
-	if sel[LabelOwner] != "nvoi" || sel[LabelService] != "postgres" {
-		t.Errorf("selector: %v", sel)
+	if sel[LabelService] != "postgres" {
+		t.Errorf("selector: got %v want %s=postgres", sel, LabelService)
 	}
 	if _, ok := sel[LabelDeployHash]; ok {
-		t.Error("selector must NOT contain deploy-hash (rolling update would orphan pods)")
+		t.Error("selector must NOT contain deploy-hash")
+	}
+	if _, ok := sel[kube.LabelOwner]; ok {
+		t.Error("selector must NOT contain nvoi/owner")
 	}
 }
 
