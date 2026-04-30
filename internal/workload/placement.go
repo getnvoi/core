@@ -1,6 +1,8 @@
 package workload
 
 import (
+	"sort"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -62,17 +64,9 @@ func secretEnvVars(names []string) []corev1.EnvVar {
 	if len(names) == 0 {
 		return nil
 	}
-	// Caller may pass the slice as-is; we don't mutate. Copy + sort.
 	cp := make([]string, len(names))
 	copy(cp, names)
-	// insertion sort — small lists, stable, no import.
-	for i := 1; i < len(cp); i++ {
-		j := i
-		for j > 0 && cp[j-1] > cp[j] {
-			cp[j-1], cp[j] = cp[j], cp[j-1]
-			j--
-		}
-	}
+	sort.Strings(cp)
 	out := make([]corev1.EnvVar, 0, len(cp))
 	for _, n := range cp {
 		out = append(out, corev1.EnvVar{

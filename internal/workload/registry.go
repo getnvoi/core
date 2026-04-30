@@ -10,6 +10,7 @@ import (
 
 	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/runtime"
+	"github.com/getnvoi/core/internal/utils"
 )
 
 const registrySecretName = "registry-auth"
@@ -78,17 +79,9 @@ func ResolveRegistryCreds(in map[string]config.RegistryDef, getenv func(string) 
 	out := make(map[string]config.RegistryDef, len(in))
 	for host, reg := range in {
 		out[host] = config.RegistryDef{
-			Username: resolveVar(reg.Username, getenv),
-			Password: resolveVar(reg.Password, getenv),
+			Username: utils.ResolveVar(reg.Username, getenv),
+			Password: utils.ResolveVar(reg.Password, getenv),
 		}
 	}
 	return out
-}
-
-// resolveVar: "$FOO" → getenv("FOO"), otherwise literal.
-func resolveVar(s string, getenv func(string) string) string {
-	if len(s) > 1 && s[0] == '$' {
-		return getenv(s[1:])
-	}
-	return s
 }

@@ -137,7 +137,7 @@ func newRoot(r *rt) *cobra.Command {
 		return nil
 	}
 
-	root.AddCommand(deployCmd(r), planCmd(r), destroyCmd(r), sshCmd(r), kubectlCmd(r))
+	root.AddCommand(deployCmd(r), planCmd(r), destroyCmd(r), sshCmd(r), kubectlCmd(r), execCmd(r))
 	return root
 }
 

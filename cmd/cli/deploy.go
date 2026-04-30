@@ -18,6 +18,7 @@ import (
 	"github.com/getnvoi/core/internal/runner"
 	"github.com/getnvoi/core/internal/runtime"
 	"github.com/getnvoi/core/internal/ssh"
+	"github.com/getnvoi/core/internal/utils"
 	"github.com/getnvoi/core/internal/workload"
 )
 
@@ -104,7 +105,7 @@ func deployCmd(r *rt) *cobra.Command {
 // is responsible for `defer closeShells(shells)`.
 func openShells(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints) (map[string]*ssh.Client, error) {
 	shells := make(map[string]*ssh.Client, len(eps.Servers))
-	for _, name := range sortedServerNames(eps.Servers) {
+	for _, name := range utils.SortedKeys(eps.Servers) {
 		srv := eps.Servers[name]
 		sh, err := install.WaitForSSH(ctx, srv.IPv4, rt.SSHPrivKey, rt.Log)
 		if err != nil {
@@ -138,7 +139,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 
 	// 1. Swap on every node.
 	rt.Log.Step("swap")
-	for _, name := range sortedServerNames(eps.Servers) {
+	for _, name := range utils.SortedKeys(eps.Servers) {
 		if err := install.EnsureSwap(ctx, shells[name], rt.Log); err != nil {
 			return fmt.Errorf("swap %s: %w", name, err)
 		}
@@ -265,22 +266,6 @@ func writeBundle(workDir string, b *compile.Bundle) error {
 	return nil
 }
 
-func sortedServerNames(servers map[string]runner.Server) []string {
-	names := make([]string, 0, len(servers))
-	for n := range servers {
-		names = append(names, n)
-	}
-	// stable order — matters for retry-friendly logs and reproducible
-	// test fixtures.
-	for i := 1; i < len(names); i++ {
-		j := i
-		for j > 0 && names[j-1] > names[j] {
-			names[j-1], names[j] = names[j], names[j-1]
-			j--
-		}
-	}
-	return names
-}
 
 // masterShellsOnly filters the full per-server shell map down to
 // masters and returns a Shell-typed map (Go map types are invariant,
@@ -329,7 +314,7 @@ func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string
 	defer kc.Close()
 
 	rt.Log.Step("node-labels")
-	for _, key := range sortedConfigServerKeys(rt.Cfg.Servers) {
+	for _, key := range utils.SortedKeys(rt.Cfg.Servers) {
 		hostname := naming.Server(rt.Cfg.App, rt.Cfg.Env, key)
 		if err := kc.LabelNode(ctx, hostname, workload.LabelNvoiRole, key); err != nil {
 			return fmt.Errorf("label node %s: %w", key, err)
@@ -339,24 +324,6 @@ func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string
 
 	rt.Log.Step("workloads")
 	return workload.ApplyAll(ctx, rt, kc, rt.Log)
-}
-
-// sortedConfigServerKeys returns the YAML keys of cfg.Servers in
-// stable lexicographic order — node labeling needs determinism for
-// reproducible logs and test fixtures.
-func sortedConfigServerKeys(servers map[string]config.ServerSpec) []string {
-	keys := make([]string, 0, len(servers))
-	for k := range servers {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		j := i
-		for j > 0 && keys[j-1] > keys[j] {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-			j--
-		}
-	}
-	return keys
 }
 
 // detachNode inspects the saved plan, identifies servers about to be
