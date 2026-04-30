@@ -49,6 +49,12 @@ type Client struct {
 	cfg     *rest.Config
 	apiHost string // original apiserver host (kubeconfig.cluster.server) — used for TLS ServerName
 	cleanup func() // closes the local listener + accept loop
+
+	// ExecFunc, when non-nil, replaces the SPDY remotecommand path in
+	// (*Client).Exec. Tests inject a fake to capture stdin and return
+	// canned stdout/stderr without a real apiserver connection.
+	// Nil in production — Exec dials apiserver via cfg.
+	ExecFunc func(ctx context.Context, req ExecRequest) error
 }
 
 // New builds the client by:

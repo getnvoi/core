@@ -10,9 +10,9 @@ import (
 	"text/template"
 
 	"github.com/getnvoi/core/internal/cloudinit"
+	"github.com/getnvoi/core/internal/compile"
 	"github.com/getnvoi/core/internal/naming"
 	"github.com/getnvoi/core/internal/runtime"
-	"github.com/getnvoi/core/internal/state"
 )
 
 const (
@@ -61,6 +61,17 @@ type emitter struct{}
 // template uses for k3s nodes. Used by detach to filter plans.
 func (emitter) ServerResourceType() string { return "hcloud_server" }
 
+// Provider declares the terraform provider this emitter relies on.
+// Aggregated by compile into the consolidated backend.tf so the
+// module ends up with exactly one `required_providers` block.
+func (emitter) Provider() compile.ProviderRequirement {
+	return compile.ProviderRequirement{
+		Alias:   "hcloud",
+		Source:  "hetznercloud/hcloud",
+		Version: "~> 1.48",
+	}
+}
+
 // templateData is the shape the template consumes. Built from rt.Cfg
 // + rt.SSHPubKey; pure transformation.
 type templateData struct {
@@ -72,8 +83,13 @@ type templateData struct {
 	NetworkZone   string
 	Servers       []serverData
 	HA            bool
-	PrimaryMaster string         // used by outputs in non-HA mode (any master Key works; we pick the first)
-	Backend       *state.Backend // nil = no `backend "s3"` block emitted (local state)
+	PrimaryMaster string // used by outputs in non-HA mode (any master Key works; we pick the first)
+
+	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 when
+	// the master serves Caddy directly. True iff domains: is declared
+	// AND providers.tunnel is unset. Tunnel mode closes the ports —
+	// all ingress flows through the agent's outbound connection.
+	PublicHTTPIngress bool
 }
 
 type serverData struct {
@@ -141,16 +157,16 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 	}
 
 	data := templateData{
-		App:           cfg.App,
-		Env:           cfg.Env,
-		Prefix:        naming.Prefix(cfg.App, cfg.Env),
-		NetworkCIDR:   networkCIDR,
-		NetworkSubnet: networkSubnet,
-		NetworkZone:   zone,
-		Servers:       servers,
-		HA:            len(masters) >= 2,
-		PrimaryMaster: masters[0], // alphabetically first by sort above
-		Backend:       rt.Backend,
+		App:               cfg.App,
+		Env:               cfg.Env,
+		Prefix:            naming.Prefix(cfg.App, cfg.Env),
+		NetworkCIDR:       networkCIDR,
+		NetworkSubnet:     networkSubnet,
+		NetworkZone:       zone,
+		Servers:           servers,
+		HA:                len(masters) >= 2,
+		PrimaryMaster:     masters[0], // alphabetically first by sort above
+		PublicHTTPIngress: len(cfg.Domains) > 0 && cfg.Providers.Tunnel == "",
 	}
 
 	var buf bytes.Buffer

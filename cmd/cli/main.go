@@ -102,6 +102,17 @@ func newRoot(r *rt) *cobra.Command {
 			return err
 		}
 
+		// Cloudflare's terraform provider auto-reads CLOUDFLARE_API_TOKEN
+		// from the env. Operator's .env carries CF_API_KEY (re-used by
+		// the bucket provider's HTTP client); mirror it under the name
+		// the TF provider expects so DNS / Tunnel resources authenticate
+		// without leaking credentials into rendered HCL or tfstate.
+		if v := os.Getenv("CF_API_KEY"); v != "" {
+			if err := os.Setenv("CLOUDFLARE_API_TOKEN", v); err != nil {
+				return fmt.Errorf("setenv CLOUDFLARE_API_TOKEN: %w", err)
+			}
+		}
+
 		// Optional remote-state backend. Validator already verified
 		// the provider name is registered; here we resolve creds and
 		// upsert the bucket.

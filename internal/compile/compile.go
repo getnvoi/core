@@ -11,22 +11,57 @@
 package compile
 
 import (
+	"fmt"
+
 	"github.com/getnvoi/core/internal/naming"
 	"github.com/getnvoi/core/internal/runtime"
 )
 
-// Compile resolves the configured infra provider, asks it to emit its
-// HCL bytes, and packages the result into a Bundle.
+// Compile resolves the configured providers, asks each to emit its
+// HCL bytes, and packages the result into a Bundle. One file per
+// concern:
+//
+//	backend.tf            terraform { required_providers + backend }
+//	                      — aggregated from every active provider's
+//	                      Provider() declaration
+//	<infra-provider>.tf   provider "X" {} + servers/network/firewall
+//	<dns-provider>-dns.tf provider "X" {} + cloudflare_record etc
+//	(<tunnel> joins in commit #7)
+//
+// Each provider's emitter writes ONLY its provider-config block + its
+// resources. The terraform meta-block lives in backend.tf alone —
+// terraform rejects duplicate `required_providers` blocks at the
+// module level, so per-provider declarations must aggregate.
 func Compile(rt *runtime.Runtime) (*Bundle, error) {
+	b := NewBundle()
+
+	backendHCL, err := emitBackend(rt)
+	if err != nil {
+		return nil, fmt.Errorf("emit backend.tf: %w", err)
+	}
+	b.Set("backend.tf", backendHCL)
+
 	infra, err := resolveInfra(rt.Cfg.Providers.Infra)
 	if err != nil {
 		return nil, err
 	}
-	content, err := infra.EmitInfra(rt)
+	infraHCL, err := infra.EmitInfra(rt)
 	if err != nil {
 		return nil, err
 	}
-	b := NewBundle()
-	b.Set(naming.ProviderHCL(rt.Cfg.Providers.Infra), content)
+	b.Set(naming.ProviderHCL(rt.Cfg.Providers.Infra), infraHCL)
+
+	if len(rt.Cfg.Domains) > 0 && rt.Cfg.Providers.DNS != "" {
+		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
+		if err != nil {
+			return nil, err
+		}
+		dnsHCL, err := dns.EmitDNS(rt.Cfg)
+		if err != nil {
+			return nil, err
+		}
+		b.Set(rt.Cfg.Providers.DNS+"-dns.tf", dnsHCL)
+	}
+
 	return b, nil
 }

@@ -1,6 +1,7 @@
 package compile_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/getnvoi/core/internal/compile"
@@ -33,6 +34,13 @@ func rt(t *testing.T, servers map[string]config.ServerSpec, backend *state.Backe
 
 // fileBytes runs Compile and returns the rendered hetzner.tf bytes.
 func fileBytes(t *testing.T, r *runtime.Runtime) []byte {
+	return bundleFile(t, r, "hetzner.tf")
+}
+
+// bundleFile runs Compile and returns the named file from the bundle.
+// Used to pull either hetzner.tf or backend.tf depending on what
+// the test is asserting against.
+func bundleFile(t *testing.T, r *runtime.Runtime, name string) []byte {
 	t.Helper()
 	b, err := compile.Compile(r)
 	if err != nil {
@@ -42,9 +50,9 @@ func fileBytes(t *testing.T, r *runtime.Runtime) []byte {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	src, ok := files["hetzner.tf"]
+	src, ok := files[name]
 	if !ok {
-		t.Fatalf("hetzner.tf not in bundle: %v", keys(files))
+		t.Fatalf("%s not in bundle: %v", name, keys(files))
 	}
 	return src
 }
@@ -100,14 +108,14 @@ func TestCompile_NonHASkipsLoadBalancer(t *testing.T) {
 }
 
 func TestCompile_BackendBlockOmittedWhenNil(t *testing.T) {
-	src := fileBytes(t, rt(t, map[string]config.ServerSpec{
+	src := bundleFile(t, rt(t, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
-	}, nil))
-	body := hcltest.ParseValid(t, src, "hetzner.tf")
+	}, nil), "backend.tf")
+	body := hcltest.ParseValid(t, src, "backend.tf")
 
 	tf := hcltest.FindBlock(body, "terraform")
 	if tf == nil {
-		t.Fatal("missing terraform { } block")
+		t.Fatal("missing terraform { } block in backend.tf")
 	}
 	if hcltest.FindBlock(tf.Body, "backend", "s3") != nil {
 		t.Errorf("backend should NOT be present when rt.Backend is nil")
@@ -115,7 +123,7 @@ func TestCompile_BackendBlockOmittedWhenNil(t *testing.T) {
 }
 
 func TestCompile_BackendBlockEmitsResolvedCreds(t *testing.T) {
-	src := fileBytes(t, rt(t, map[string]config.ServerSpec{
+	src := bundleFile(t, rt(t, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}, &state.Backend{
 		Bucket:    "nvoi-hello-dev-tfstate",
@@ -123,10 +131,13 @@ func TestCompile_BackendBlockEmitsResolvedCreds(t *testing.T) {
 		Region:    "auto",
 		AccessKey: "AKIATEST",
 		SecretKey: "secrettest",
-	}))
-	body := hcltest.ParseValid(t, src, "hetzner.tf")
+	}), "backend.tf")
+	body := hcltest.ParseValid(t, src, "backend.tf")
 
 	tf := hcltest.FindBlock(body, "terraform")
+	if tf == nil {
+		t.Fatal("missing terraform { } block in backend.tf")
+	}
 	bk := hcltest.FindBlock(tf.Body, "backend", "s3")
 	if bk == nil {
 		t.Fatal("backend \"s3\" block not present")
@@ -146,6 +157,38 @@ func TestCompile_BackendBlockEmitsResolvedCreds(t *testing.T) {
 		}
 		if got != v {
 			t.Errorf("backend.%s: got %q want %q", k, got, v)
+		}
+	}
+}
+
+// backend.tf aggregates required_providers across every active
+// emitter. This locks the rule "exactly one terraform meta-block per
+// module" — terraform errors at init if multiple required_providers
+// blocks exist.
+func TestCompile_BackendTF_AggregatesRequiredProviders(t *testing.T) {
+	src := bundleFile(t, rt(t, map[string]config.ServerSpec{
+		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
+	}, nil), "backend.tf")
+	body := hcltest.ParseValid(t, src, "backend.tf")
+
+	tf := hcltest.FindBlock(body, "terraform")
+	if tf == nil {
+		t.Fatal("backend.tf missing top-level terraform block")
+	}
+	rp := hcltest.FindBlock(tf.Body, "required_providers")
+	if rp == nil {
+		t.Fatal("backend.tf missing required_providers block")
+	}
+	// hcloud is active (infra: hetzner) — must appear with the
+	// version pin from hetzner emitter's Provider().
+	hcl := string(src)
+	for _, want := range []string{
+		`hcloud = `,
+		`"hetznercloud/hcloud"`,
+		`"~> 1.48"`,
+	} {
+		if !strings.Contains(hcl, want) {
+			t.Errorf("backend.tf missing %q\n--- output ---\n%s", want, hcl)
 		}
 	}
 }

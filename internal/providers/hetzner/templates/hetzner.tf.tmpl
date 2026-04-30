@@ -1,32 +1,3 @@
-terraform {
-  required_providers {
-    hcloud = {
-      source  = "hetznercloud/hcloud"
-      version = "~> 1.48"
-    }
-  }
-{{- if .Backend }}
-
-  # Remote state — provisioned + creds resolved by internal/state
-  # before this template was rendered. Auto-migrates from local on
-  # first deploy with providers.storage set.
-  backend "s3" {
-    bucket    = {{ .Backend.Bucket | hcl }}
-    key       = "terraform.tfstate"
-    endpoints = { s3 = {{ .Backend.Endpoint | hcl }} }
-    region    = {{ .Backend.Region | hcl }}
-    access_key = {{ .Backend.AccessKey | hcl }}
-    secret_key = {{ .Backend.SecretKey | hcl }}
-    skip_credentials_validation = true
-    skip_requesting_account_id  = true
-    skip_metadata_api_check     = true
-    skip_region_validation      = true
-    skip_s3_checksum            = true
-    use_path_style              = true
-  }
-{{- end }}
-}
-
 provider "hcloud" {}
 
 locals {
@@ -93,6 +64,24 @@ resource "hcloud_firewall" "default" {
     port       = "5000"
     source_ips = [{{ .NetworkCIDR | hcl }}]
   }
+{{ if .PublicHTTPIngress }}
+  # Caddy on the master holds hostPort 80/443 directly. Tunnel mode
+  # closes these (all ingress flows through the cloudflared / ngrok
+  # agent's outbound connection); the rules only emit when domains:
+  # is set AND providers.tunnel is unset.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "80"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "443"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+{{ end }}
 }
 
 # ── Servers ────────────────────────────────────────────────────────────

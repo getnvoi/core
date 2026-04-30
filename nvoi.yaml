@@ -4,6 +4,7 @@ env: production
 providers:
   infra: hetzner
   storage: cloudflare
+  dns: cloudflare
 
 ssh_key: ~/.ssh/id_rsa.pub
 
@@ -56,6 +57,17 @@ services:
     port: 8080
     secrets:
       - DATABASE_URL
+
+# Public hostnames. providers.dns: cloudflare must be set; the
+# cloudflare DNS emitter writes one cloudflare_record per (service,
+# host) pair pointing at the master's public IPv4. Caddy serves
+# them on the master via hostPort 80/443 with ACME-issued TLS.
+domains:
+  web: [www.nvoi.to]
+
+# ACME contact email (Let's Encrypt rate-limit + expiration alerts
+# land here). Optional — fallback is acme@<first-domain>.
+acme_email: ops@nvoi.to
 
 # Operator shortcuts. `nvoi <name>` expands the body verbatim before
 # cobra dispatch — pure text substitution, same shape as Kamal's

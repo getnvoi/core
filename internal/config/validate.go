@@ -111,7 +111,80 @@ func (c *Config) Validate() error {
 	if err := validateAliases(c); err != nil {
 		return err
 	}
+	if err := validateDomains(c); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateDomains enforces:
+//   - non-empty Domains requires providers.dns
+//   - every key in Domains must be a declared service
+//   - every hostname is DNS-1123-shaped (lowercase letters / digits /
+//     dashes / dots; labels ≤63 chars; total ≤253 chars)
+//   - providers.tunnel requires providers.dns (tunnel writes CNAMEs
+//     via the DNS provider; without it there's nowhere to put them)
+//
+// Provider name registration happens inside the compile package
+// (RegisterDNS / RegisterTunnel via blank-imports in cmd/cli/main.go).
+// We don't validate registration here — the validator stays env-free
+// to keep tests pure; unknown providers fail at compile time with a
+// clear "unknown infra provider %q" / "unknown dns provider %q".
+func validateDomains(c *Config) error {
+	if c.Providers.Tunnel != "" && c.Providers.DNS == "" {
+		return fmt.Errorf("providers.tunnel requires providers.dns (tunnel CNAMEs must be written somewhere)")
+	}
+	if len(c.Domains) == 0 {
+		return nil
+	}
+	if c.Providers.DNS == "" {
+		return fmt.Errorf("domains: requires providers.dns")
+	}
+	for svcName, hosts := range c.Domains {
+		if _, ok := c.Services[svcName]; !ok {
+			return fmt.Errorf("domains.%s: %q is not a declared service", svcName, svcName)
+		}
+		if len(hosts) == 0 {
+			return fmt.Errorf("domains.%s: at least one hostname required", svcName)
+		}
+		for _, h := range hosts {
+			if !isValidHostname(h) {
+				return fmt.Errorf("domains.%s: %q is not a valid DNS hostname", svcName, h)
+			}
+		}
+	}
+	return nil
+}
+
+// isValidHostname accepts DNS-1123-shaped hostnames: lowercase letters,
+// digits, dashes, separated by dots; each label 1-63 chars, no
+// leading/trailing dash; total ≤253 chars. No wildcards in v1.
+func isValidHostname(h string) bool {
+	if h == "" || len(h) > 253 {
+		return false
+	}
+	labels := strings.Split(h, ".")
+	if len(labels) < 2 {
+		return false // must be FQDN-ish (at least one dot)
+	}
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			switch {
+			case r >= 'a' && r <= 'z':
+			case r >= '0' && r <= '9':
+			case r == '-':
+			default:
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // validateAliases enforces:

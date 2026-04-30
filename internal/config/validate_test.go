@@ -3,9 +3,12 @@ package config
 import (
 	"strings"
 	"testing"
-
-	_ "github.com/getnvoi/core/internal/providers/cloudflare" // register the bucket provider so providers.storage: cloudflare validates
 )
+
+// Tests that require a registered bucket provider live in
+// validate_external_test.go (package config_test) — registering
+// providers/cloudflare here would create a cycle now that
+// cloudflare imports internal/config for the DNSEmitter.
 
 func TestValidate(t *testing.T) {
 	base := func() *Config {
@@ -77,7 +80,10 @@ func TestValidate(t *testing.T) {
 		},
 
 		{name: "storage unset is fine", mutate: func(c *Config) { c.Providers.Storage = "" }},
-		{name: "storage cloudflare ok", mutate: func(c *Config) { c.Providers.Storage = "cloudflare" }},
+		// "storage cloudflare ok" lives in validate_external_test.go —
+		// it requires the bucket provider to be registered, which means
+		// blank-importing internal/providers/cloudflare, which can't
+		// happen from inside the config package without a cycle.
 		{
 			name:    "unknown storage provider",
 			mutate:  func(c *Config) { c.Providers.Storage = "no-such-thing" },
@@ -305,6 +311,55 @@ func TestValidate(t *testing.T) {
 					Image: "nginx", Port: 80, Servers: []string{"master", "w1"},
 				}}
 			},
+		},
+
+		// domains
+		{
+			name: "valid domains",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to", "nvoi.to"}}
+			},
+		},
+		{
+			name: "domains require providers.dns",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to"}}
+			},
+			wantErr: "domains: requires providers.dns",
+		},
+		{
+			name: "domain key must be a declared service",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Domains = Domains{"ghost": {"www.nvoi.to"}}
+			},
+			wantErr: `"ghost" is not a declared service`,
+		},
+		{
+			name: "empty hostname list rejected",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {}}
+			},
+			wantErr: "at least one hostname required",
+		},
+		{
+			name: "invalid hostname rejected",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"NOT_VALID"}}
+			},
+			wantErr: "not a valid DNS hostname",
+		},
+		{
+			name:    "tunnel without dns rejected",
+			mutate:  func(c *Config) { c.Providers.Tunnel = "cloudflare" },
+			wantErr: "providers.tunnel requires providers.dns",
 		},
 
 		// aliases

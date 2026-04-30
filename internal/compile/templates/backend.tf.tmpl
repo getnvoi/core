@@ -1,0 +1,30 @@
+terraform {
+  required_providers {
+{{- range .Reqs }}
+    {{ .Alias }} = {
+      source  = {{ .Source | hcl }}
+      version = {{ .Version | hcl }}
+    }
+{{- end }}
+  }
+{{- if .Backend }}
+
+  # Remote state — provisioned + creds resolved by internal/state
+  # before this template was rendered. Auto-migrates from local on
+  # first deploy with providers.storage set.
+  backend "s3" {
+    bucket    = {{ .Backend.Bucket | hcl }}
+    key       = "terraform.tfstate"
+    endpoints = { s3 = {{ .Backend.Endpoint | hcl }} }
+    region    = {{ .Backend.Region | hcl }}
+    access_key = {{ .Backend.AccessKey | hcl }}
+    secret_key = {{ .Backend.SecretKey | hcl }}
+    skip_credentials_validation = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_region_validation      = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+  }
+{{- end }}
+}

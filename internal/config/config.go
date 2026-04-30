@@ -51,6 +51,19 @@ type Config struct {
 	// no escapes, no $VAR interpolation — runtime values come from
 	// the verbs the alias expands to, not from the alias layer).
 	Aliases map[string]string `yaml:"aliases,omitempty"`
+
+	// Domains maps a service name to its public hostnames. Requires
+	// providers.dns when non-empty. Each key must exist in services:.
+	// When providers.tunnel is unset, ingress flows: master 80/443 →
+	// in-cluster Caddy → Service. With tunnel set, ingress flows
+	// through the tunnel agent's CNAME and Caddy is purged.
+	Domains Domains `yaml:"domains,omitempty"`
+
+	// ACMEEmail is the contact address Caddy registers with Let's
+	// Encrypt. Optional — when empty, BuildCaddyConfig falls back to
+	// `acme@<first-domain>`. Real operators want a real address so
+	// LE rate-limit and expiration warnings reach a human.
+	ACMEEmail string `yaml:"acme_email,omitempty"`
 }
 
 // RegistryDef holds pull credentials for a single private container
@@ -110,7 +123,27 @@ type Providers struct {
 	// and terraform's `s3` backend points at it. Transitions both
 	// directions auto-migrate state.
 	Storage string `yaml:"storage,omitempty"`
+
+	// DNS is REQUIRED when Domains is non-empty. Today: cloudflare.
+	// The named provider's emitter writes terraform resources for
+	// the domain → master (or tunnel edge) bindings; terraform owns
+	// the lifecycle (drift detection, deletion) — there are no
+	// runtime API calls from nvoi to the DNS provider.
+	DNS string `yaml:"dns,omitempty"`
+
+	// Tunnel is OPTIONAL. When set, the DNS provider points
+	// hostnames at the tunnel's CNAME edge instead of the master
+	// IP, the in-cluster tunnel agent runs in place of Caddy, and
+	// the Hetzner firewall keeps 80/443 closed (all ingress flows
+	// through the tunnel). Today: cloudflare | ngrok.
+	Tunnel string `yaml:"tunnel,omitempty"`
 }
+
+// Domains maps service names to public hostnames. Each service must
+// already exist in cfg.Services. When non-empty, providers.dns is
+// required (and the chosen DNS backend's emitter writes the records
+// during tf-apply).
+type Domains map[string][]string
 
 // ServerSpec describes one server. Role is `master` or `worker`.
 // Primary marks the master that runs `--cluster-init` on cold-start

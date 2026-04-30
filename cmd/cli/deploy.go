@@ -85,12 +85,14 @@ func deployCmd(r *rt) *cobra.Command {
 					return err
 				}
 
-				// ── workloads: kube tunnel via primary's shell ──
-				// Skipped when nothing to deploy AND no top-level
-				// secrets to publish AND no registry: block to set up.
+				// ── workloads + ingress: kube tunnel via primary's shell ──
+				// Skipped only when there's nothing for the in-cluster
+				// pipeline to do — no services, no secrets to publish,
+				// no registry to set up, no domains to front.
 				if len(r.runtime.Cfg.Services) == 0 &&
 					len(r.runtime.Cfg.Registry) == 0 &&
-					len(r.runtime.Cfg.Secrets) == 0 {
+					len(r.runtime.Cfg.Secrets) == 0 &&
+					len(r.runtime.Cfg.Domains) == 0 {
 					return nil
 				}
 				return deployWorkloads(ctx, r.runtime, shells)
@@ -323,7 +325,100 @@ func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string
 	}
 
 	rt.Log.Step("workloads")
-	return workload.ApplyAll(ctx, rt, kc, rt.Log)
+	if err := workload.ApplyAll(ctx, rt, kc, rt.Log); err != nil {
+		return err
+	}
+
+	return deployIngress(ctx, rt, kc)
+}
+
+// deployIngress is the post-workloads ingress reconcile. Today: Caddy
+// + ACME path. Tunnel mode lands in commit #7 — when cfg.Providers.Tunnel
+// is set, this routes to a tunnel-mode helper instead of Caddy.
+//
+// Caddy path (no tunnel):
+//
+//  1. EnsureCaddy applies PVC + ConfigMap + Service + Deployment in
+//     kube-system (owner=caddy) and waits for Ready.
+//  2. BuildCaddyConfig renders the per-service routes from cfg.Domains
+//     + the resolved Service ports.
+//  3. ReloadCaddyConfig POSTs the JSON to Caddy's admin API on
+//     localhost:2019/load via Exec into the Caddy pod — atomic
+//     listener swap, no connection drops.
+//  4. Per-domain WaitForCaddyCert + WaitForCaddyHTTPS, both probes
+//     run from inside the pod (no dependency on operator's local DNS).
+//     Timeouts warn-and-continue (Caddy keeps retrying ACME between
+//     deploys; next deploy re-verifies).
+//
+// Skipped when:
+//   - cfg.Domains empty (no public hostnames declared)
+//   - cfg.Providers.Tunnel set (commit #7 will route here)
+func deployIngress(ctx context.Context, rt *runtime.Runtime, kc *kube.Client) error {
+	if len(rt.Cfg.Domains) == 0 {
+		return nil
+	}
+	if rt.Cfg.Providers.Tunnel != "" {
+		// Tunnel mode lands in commit #7. Today, fall through silently
+		// rather than fail — the tunnel agent's own reconcile will run
+		// in the future commit and Caddy stays unbootstrapped.
+		rt.Log.Info("providers.tunnel set — skipping Caddy ingress (tunnel mode lands in a follow-up commit)")
+		return nil
+	}
+
+	rt.Log.Step("caddy")
+	if err := kc.EnsureCaddy(ctx); err != nil {
+		return fmt.Errorf("ensure caddy: %w", err)
+	}
+
+	// Resolve per-service ports from the live Services we just applied.
+	routes := make([]kube.CaddyRoute, 0, len(rt.Cfg.Domains))
+	for _, svcName := range utils.SortedKeys(rt.Cfg.Domains) {
+		port, err := kc.GetServicePort(ctx, "default", svcName)
+		if err != nil {
+			return fmt.Errorf("ingress: service %q port: %w", svcName, err)
+		}
+		routes = append(routes, kube.CaddyRoute{
+			Service: svcName,
+			Port:    port,
+			Domains: rt.Cfg.Domains[svcName],
+		})
+	}
+
+	configJSON, err := kube.BuildCaddyConfig(kube.CaddyConfigInput{
+		Namespace: "default",
+		Routes:    routes,
+		ACMEEmail: rt.Cfg.ACMEEmail,
+	})
+	if err != nil {
+		return fmt.Errorf("build caddy config: %w", err)
+	}
+
+	rt.Log.Step("caddy-reload")
+	if err := kc.ReloadCaddyConfig(ctx, configJSON); err != nil {
+		return err
+	}
+	rt.Log.Info("caddy config loaded")
+
+	// Per-domain cert + HTTPS verification. Warn-and-continue posture:
+	// timeouts surface but don't fail the deploy. Caddy retries ACME.
+	for _, svcName := range utils.SortedKeys(rt.Cfg.Domains) {
+		for _, domain := range rt.Cfg.Domains[svcName] {
+			rt.Log.Step("cert-" + domain)
+			if err := kc.WaitForCaddyCert(ctx, domain); err != nil {
+				rt.Log.Warn(fmt.Sprintf("%s: certificate not issued in time — next deploy re-verifies (%v)", domain, err))
+				continue
+			}
+			rt.Log.Info(fmt.Sprintf("certificate ready: %s", domain))
+
+			rt.Log.Step("https-" + domain)
+			if err := kc.WaitForCaddyHTTPS(ctx, domain, "/healthz"); err != nil {
+				rt.Log.Warn(fmt.Sprintf("https://%s/healthz: probe failed — next deploy re-verifies (%v)", domain, err))
+				continue
+			}
+			rt.Log.Info(fmt.Sprintf("https live: https://%s/", domain))
+		}
+	}
+	return nil
 }
 
 // detachNode inspects the saved plan, identifies servers about to be
