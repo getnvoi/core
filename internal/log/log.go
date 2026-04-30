@@ -5,9 +5,9 @@
 // output we pass through whatever terraform emits:
 //
 //   - text mode: terraform's native text → indented under our step
-//                markers on stderr
+//     markers on stderr
 //   - jsonl mode: terraform's -json events → raw on stdout, our own
-//                events also on stdout in our schema
+//     events also on stdout in our schema
 //
 // Why this and not normalization: every reformat is a brittle parse of
 // terraform's evolving event schema. Passing the bytes through trades

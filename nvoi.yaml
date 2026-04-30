@@ -56,3 +56,11 @@ services:
     port: 8080
     secrets:
       - DATABASE_URL
+
+# Operator shortcuts. `nvoi <name>` expands the body verbatim before
+# cobra dispatch — pure text substitution, same shape as Kamal's
+# aliases:. Bodies compose existing nvoi verbs (exec, kubectl, ssh).
+aliases:
+  visits: exec postgres -- psql -U nvoi -d nvoi -tAc "SELECT COUNT(*) FROM visits"
+  pgshell: exec postgres -- psql -U nvoi -d nvoi
+  weblogs: kubectl -- logs deploy/web -f

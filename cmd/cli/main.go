@@ -145,8 +145,20 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// Pre-cobra alias expansion: if argv[0] matches an entry in
+	// cfg.Aliases, splice its body in. Pure text substitution, same
+	// shape as Kamal's `aliases:` block. Best-effort — config load
+	// failures fall through to cobra's standard parsing path.
+	args, err := expandAliasArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
+
 	var r rt
-	if err := newRoot(&r).ExecuteContext(ctx); err != nil {
+	root := newRoot(&r)
+	root.SetArgs(args)
+	if err := root.ExecuteContext(ctx); err != nil {
 		// Once PersistentPreRunE has run at least far enough to build
 		// the log, route through it. Otherwise (cobra-level flag parse
 		// errors, --help shouldn't reach here) fall back to stderr.

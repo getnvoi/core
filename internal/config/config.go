@@ -36,6 +36,21 @@ type Config struct {
 	Secrets []string `yaml:"secrets,omitempty"`
 
 	Services map[string]ServiceSpec `yaml:"services,omitempty"`
+
+	// Aliases are operator-defined shortcuts. Each entry maps a name
+	// to a command-string composed of existing nvoi verbs (exec,
+	// kubectl, ssh, …). `nvoi <name>` expands the body into argv
+	// before cobra dispatches — pure text substitution, no new logic.
+	// Mirrors Kamal's `aliases:` shape verbatim.
+	//
+	//   aliases:
+	//     visits: exec postgres -- psql -U nvoi -d nvoi -tAc "SELECT COUNT(*) FROM visits"
+	//     weblogs: kubectl -- logs deploy/web -f
+	//
+	// Bodies tokenize via utils.ShellSplit (single + double quotes,
+	// no escapes, no $VAR interpolation — runtime values come from
+	// the verbs the alias expands to, not from the alias layer).
+	Aliases map[string]string `yaml:"aliases,omitempty"`
 }
 
 // RegistryDef holds pull credentials for a single private container

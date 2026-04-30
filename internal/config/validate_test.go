@@ -306,6 +306,51 @@ func TestValidate(t *testing.T) {
 				}}
 			},
 		},
+
+		// aliases
+		{
+			name: "valid alias",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{
+					"visits": `exec postgres -- psql -tAc "SELECT COUNT(*) FROM visits"`,
+				}
+			},
+		},
+		{
+			name: "invalid alias name (uppercase)",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{"FOO": "exec web -- ls"}
+			},
+			wantErr: "invalid name",
+		},
+		{
+			name: "invalid alias name (starts with digit)",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{"1visits": "exec web -- ls"}
+			},
+			wantErr: "invalid name",
+		},
+		{
+			name: "alias shadows built-in verb",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{"deploy": "ssh -- uptime"}
+			},
+			wantErr: "shadows a built-in verb",
+		},
+		{
+			name: "empty alias body rejected",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{"foo": "   "}
+			},
+			wantErr: "empty body",
+		},
+		{
+			name: "alias with unbalanced quotes rejected",
+			mutate: func(c *Config) {
+				c.Aliases = map[string]string{"bad": `exec web -- echo "unterminated`}
+			},
+			wantErr: "unbalanced quote",
+		},
 	}
 
 	for _, tc := range cases {

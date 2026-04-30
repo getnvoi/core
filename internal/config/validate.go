@@ -5,7 +5,24 @@ import (
 	"strings"
 
 	"github.com/getnvoi/core/internal/providers"
+	"github.com/getnvoi/core/internal/utils"
 )
+
+// reservedAliasNames are command names an alias must not shadow.
+// Every built-in cobra verb plus cobra's own help/completion
+// subcommands. Any alias matching one of these is a hard error so
+// operators can't silently break `nvoi deploy` by writing
+// `aliases.deploy: ...`.
+var reservedAliasNames = map[string]bool{
+	"deploy":     true,
+	"plan":       true,
+	"destroy":    true,
+	"ssh":        true,
+	"kubectl":    true,
+	"exec":       true,
+	"help":       true,
+	"completion": true,
+}
 
 // reservedServerNames are YAML keys an operator must NOT pick for a
 // server, because the hetzner emitter (or any future infra emitter)
@@ -90,7 +107,53 @@ func (c *Config) Validate() error {
 	if err := validateServices(c); err != nil {
 		return err
 	}
+	if err := validateAliases(c); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateAliases enforces:
+//   - name shape: lowercase letters / digits / dashes / underscores;
+//     must start with a letter (matches cobra-friendly verb names)
+//   - name must not collide with a built-in verb (deploy, exec, etc.)
+//   - body must be non-empty after trim
+//   - body must tokenize (balanced quotes)
+//
+// Tokenization happens here too so misconfigured aliases fail fast at
+// load time, not at the moment an operator types `nvoi <alias>`.
+func validateAliases(c *Config) error {
+	for name, body := range c.Aliases {
+		if !isValidAliasName(name) {
+			return fmt.Errorf("aliases.%s: invalid name (lowercase letters / digits / dash / underscore; must start with a letter)", name)
+		}
+		if reservedAliasNames[name] {
+			return fmt.Errorf("aliases.%s: name shadows a built-in verb", name)
+		}
+		if strings.TrimSpace(body) == "" {
+			return fmt.Errorf("aliases.%s: empty body", name)
+		}
+		if _, err := utils.ShellSplit(body); err != nil {
+			return fmt.Errorf("aliases.%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func isValidAliasName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case i > 0 && r >= '0' && r <= '9':
+		case i > 0 && (r == '-' || r == '_'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validateSecrets enforces the top-level `secrets:` shape:
