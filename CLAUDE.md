@@ -12,6 +12,8 @@ build               only when any service has build: set
 tf-init / tf-plan -out
 detach              only when nodes leaving — drain → etcd member remove →
                     kubectl delete node (for masters; workers skip etcd)
+drain-tunnel        only when tunnel object leaving — sweep cloudflared agent
+                    in-cluster so CF accepts the DELETE
 tf-apply <plan>     applies the saved plan, no re-plan
 endpoints           parse terraform output (servers, api_endpoint, ha)
 openShells          one ssh.Client per server, kept alive through end
@@ -26,44 +28,121 @@ defer closeShells   one close per server, end of command
 ## Architecture rules (non-negotiable)
 
 - **ctx is a parameter** end-to-end. Never on a struct.
+- **>4 args = struct.** Every function in the tree obeys this. Bundle `(ctx, …)` until you fit; if you can't, you're missing a type.
 - **`os.*` lives only at cmd/ boundary**, plus `runtime.Build`, `runner/install.go`, `config.Load`. Internal packages are pure.
 - `*config.Config` read-only after `Load`.
-- `*runtime.Runtime` is the bag: Cfg, Log, SSH keys, CacheDir, WorkDir, DeployHash, Backend. Read-only after `Build`.
+- `*runtime.Runtime` is the boot bag: Cfg, Log, SSH keys, CacheDir, WorkDir, DeployHash, Backend, SecretValues. Read-only after `Build`.
+- `*deploy.Session` is the **lifecycle bag** (every verb gets one): Rt, Run, Lg + memoized Endpoints + deploy-time accumulators (shells, kc). Methods on `*Session` take only ctx + narrow inputs; rt/run/lg are fields, not args.
 - Per-stage handles (Bundle, Runner, ssh.Client, kube.Client) are locals in the lifecycle — never on Runtime.
 - One ssh.Client per server per command. The same connection that installs k3s tunnels the kube apiserver.
 - Always `--cluster-init` (etcd from day one regardless of master count).
 
+## The Session primitive
+
+`internal/deploy/Session` is the universal primitive that backs every verb. Built by `RunWithSession(ctx, rt, kind, fn)` — wraps compile + write-bundle + tf-runner construction, hands `fn` a Session scoped to the given log Kind.
+
+Every cmd/cli verb is a thin cobra adapter over `RunWithSession`:
+
+| Verb | Body |
+|---|---|
+| `deploy.Run` | RunWithSession + build + tf-init/plan/predrain/apply + installCluster + deployWorkloads |
+| `deploy.Destroy` | RunWithSession + tf-init + tf-plan-destroy + drain-tunnel + tf-destroy |
+| `deploy.Plan` | RunWithSession + tf-init + tf-plan |
+| `cmd/cli/ssh.go` | `s.OnNode(target, action)` |
+| `cmd/cli/exec.go` | `s.OnPrimary(action)` running `install.KubectlExec` |
+| `cmd/cli/logs.go` | `s.OnPrimary(action)` running `install.KubectlStream` |
+| `cmd/cli/kubectl.go` | `s.OnPrimary(action)` running `install.KubectlStream` |
+
+Methods on `*Session`: `Init` (idempotent tf-init), `Endpoints` (memoized terraform output read), `OnNode(target, action)`, `OnPrimary(action)`, `Sub` via `s.Lg.Sub(kind)`.
+
+## Logging — JSONL canonical, text is a projection
+
+One `Event` type. Two serializers selected at `log.New(jsonl bool)`. **JSONL is canonical, full-fidelity. Text is a strict projection** — every text line maps 1:1 to a JSONL line; text drops only the `tf:` body.
+
+| Field | Meaning |
+|---|---|
+| `time` | RFC3339 UTC. Lifted from `@timestamp` for terraform events. |
+| `kind` | Closed enum: `infra` \| `build` \| `cluster`. The deploy lifecycle's three buckets. |
+| `level` | Closed enum: `step` \| `info` \| `warn` \| `error`. Same field for nvoi events AND lifted terraform events. |
+| `step` | populated when `level=step` (stage marker). |
+| `msg` | populated when `level≠step`. Lifted from `@message` for terraform events. |
+| `tf` | populated for kind=infra wrapped terraform events; renders only in JSONL. |
+
+JSONL example:
+```jsonl
+{"time":"2026-04-30T15:37:21Z","kind":"infra","level":"step","step":"compile"}
+{"time":"2026-04-30T15:37:23Z","kind":"build","level":"info","msg":"#14 [builder 6/6] RUN go build ..."}
+{"time":"2026-04-30T15:37:43Z","kind":"infra","level":"info","msg":"Terraform 1.9.5","tf":{"type":"version","terraform":"1.9.5"}}
+{"time":"2026-04-30T15:37:47Z","kind":"cluster","level":"step","step":"workload-postgres"}
+```
+
+Text projection (same data, tabbed):
+```
+2026-04-30T15:37:21Z	infra	step	compile
+2026-04-30T15:37:23Z	build	info	#14 [builder 6/6] RUN go build ...
+2026-04-30T15:37:43Z	infra	info	Terraform 1.9.5
+2026-04-30T15:37:47Z	cluster	step	workload-postgres
+```
+
+Pipe-friendly: `cut -f3` = level, `cut -f4` = payload. Embedded tabs in payload are sanitized to spaces so column count is invariant.
+
+`log.Log.Sub(kind)` returns a kind-scoped logger. The orchestration layer (`internal/deploy/`) scopes per phase: `rt.Log.Sub(KindBuild)` for build, `Sub(KindInfra)` for tf ops, `Sub(KindCluster)` for k3s/kube/caddy/tunnel.
+
+Terraform's native `-json` events are normalized at `Log.TFStream()`: `@level → level`, `@message → msg`, `@timestamp → time`, `@module` dropped, the rest folded under `tf:`. Non-JSON lines (terraform's pretty-printed `output -json` dump) are silently filtered. **NOTHING in the codebase writes to os.Stdout or os.Stderr directly.**
+
 ## Layout
 
 ```
-cmd/cli/                 main, deploy, plan, destroy, ssh, kubectl, sshkey, dotenv
+cmd/cli/                 main, deploy, destroy, plan, ssh, kubectl, exec, logs,
+                         sshkey, dotenv, secrets, aliases — all thin adapters
 internal/
   config/                Config + Load + Validate (validate.go)
                          types: Providers, ServerSpec, ServiceSpec, BuildSpec, RegistryDef
-  runtime/               Inputs + Build → *Runtime
+  runtime/               Inputs + Build → *Runtime (boot bag)
+  deploy/                lifecycle layer above build/install/detach/kube/workload:
+                         deploy.go (Run), destroy.go, plan.go, lifecycle.go
+                         (WithRunner), session.go (Session + RunWithSession +
+                         OnNode/OnPrimary/Endpoints/Init), install.go
+                         (installCluster), workloads.go (deployWorkloads/Ingress/
+                         TunnelIngress + purgeOwner), predrain.go (predrain +
+                         detachNode + drainTunnel as Session methods),
+                         shells.go (openShells/closeShells)
   compile/               cfg → []byte HCL via registered InfraEmitter
   cloudinit/             cloud-init renderer (shared)
   providers/
     bucket.go            BucketProvider interface
-    registry.go          RegisterBucket / ResolveBucket
-    cloudflare/          R2 BucketProvider (api.go, bucket.go, register.go)
-    hetzner/             InfraEmitter (compile.go, register.go, templates/hetzner.tf.tmpl)
-  state/                 Configure: ensure state bucket + return Backend for HCL
-  runner/                tfexec wrapper; PlanWithOut, ApplyPlan, Endpoints,
-                         PlannedNodeDestroys, EnsureTerraform
-  ssh/                   *Client + Shell interface (Run / RunStream / Addr)
-  install/               wait, swap, k3s.go (constants),
-                         discover, primary, secondary, worker, ready, kubectl
+    registry.go          RegisterBucket / ResolveBucket / IsRegisteredBucket
+    reserved.go          RegisterReservedServerNames / ReservedServerNames
+                         (per-infra YAML key reservations the validator queries)
+    cloudflare/          R2 BucketProvider + DNS + tunnel emitters
+    hetzner/             InfraEmitter (compile.go, register.go, hetzner.tf.tmpl)
+  state/                 Configure(ctx, *cfg, bp, lg): ensure state bucket
+  runner/                tfexec wrapper; plan.go (PlanWithOut, ApplyPlan,
+                         PlanDestroyWithOut), destroys.go (PlannedNodeDestroys,
+                         PlannedTunnelDestroys, planTypeDestroys),
+                         endpoints.go, runner.go, install.go (EnsureTerraform)
+  ssh/                   *Client + Shell interface (Run / RunStream / Addr / DialTCP)
+  install/               wait, swap, k3s.go (constants + Node — bundles
+                         Shell+Log), discover, primary (InstallPrimaryMaster),
+                         secondary (JoinSecondaryMaster + SecondaryJoinSpec),
+                         worker (JoinWorker + WorkerJoinSpec), ready, kubectl
+                         (Kubectl/KubectlStream/KubectlExec + KubectlSpec)
   detach/                Nodes (drain + etcd remove + kubectl delete) + etcd.go
   kube/                  client.go (SSH-tunneled apiserver) + apply.go
-                         Apply{Deployment,Service,Secret} / Delete*  / List nvoi-owned
+                         + owned.go (Scope + ApplyOwned/ListOwned/SweepOwned)
+                         + caddy.go + caddy_config.go + caddy_manifests.go
+                         + exec.go + labels.go
   build/                 Runner interface; DockerRunner (info/buildx/login/build)
                          Plan, HostsToPush, All — fail-fast pipeline
-  workload/              deployment.go / service.go / registry.go / reconcile.go
+  workload/              deployment.go / statefulset.go / service.go /
+                         secret.go / registry.go / reconcile.go
                          BuildDeployment / BuildService / BuildRegistrySecret
-                         ApplyAll + ReconcileRemoval
-  log/                   Log interface; text + jsonl; Stream + TFStream
-  utils/                 httpclient (shared JSON-over-HTTP)
+                         ApplyAll + ReconcileRemoval (uses kube.Scope)
+  log/                   Log interface; Kind/Level enums; one Event,
+                         two serializers (JSONL + tabbed text projection);
+                         tfTransformer normalizes terraform's @-schema
+  utils/                 httpclient (Request struct + Do(ctx, req))
+                         shellquote / shellsplit / sortedkeys / envvars
   naming/                pure string helpers
   testutil/
     hcltest/             ParseValid / FindBlock / StringAttr
@@ -78,6 +157,12 @@ bin/nvoi plan     -c examples/minimal.yaml
 bin/nvoi destroy  -c examples/minimal.yaml
 bin/nvoi ssh      [target] -- <cmd>
 bin/nvoi kubectl  -- <args>
+bin/nvoi exec     <service> -- <cmd> [args]
+bin/nvoi logs     <service> [-f] [--tail N] [--since DUR]
+bin/nvoi <alias>  # operator-defined shortcut from aliases:
+
+bin/deploy --json    # JSONL canonical schema on stdout
+bin/deploy           # text projection on stderr (tabbed values)
 ```
 
 `.env` (gitignored) loaded natively at startup. Required: `HCLOUD_TOKEN`. When
@@ -93,11 +178,10 @@ bin/nvoi kubectl  -- <args>
 ## Conventions
 
 - `app` + `env` are the namespace. Names: `nvoi-{app}-{env}-{resource}`.
-- Every server in YAML = a k3s node. Reserved YAML keys: `default`, `cp`.
+- Every server in YAML = a k3s node. Reserved YAML keys are per-provider — registered via `providers.RegisterReservedServerNames(provider, set)` in each emitter's init(). Hetzner reserves `default`, `cp`.
 - HA emerges automatically from N≥2 masters (LB auto-emitted, label-selector targets).
   Exactly one master must have `primary: true` when N≥2; implicit for N=1.
-- Workloads tagged `nvoi/owner=nvoi`, `nvoi/service=<name>`, `nvoi/deploy-hash=<hash>`.
-  Reconcile-on-removal filters by `nvoi/owner=nvoi`; unmanaged objects are untouched.
+- Workloads tagged via `kube.Scope{Namespace, Owner}`. `kube.ApplyOwned` stamps `nvoi/owner=<owner>`; `kube.SweepOwned` filters by it. Owner taxonomy: `services` / `registry` / `app-secrets` / `caddy` / `tunnel-agent`.
 - `registry:` block is the ONE source of truth for credentials — same creds drive
   push (operator's docker daemon, via `docker login --password-stdin`) AND pull
   (cluster's `imagePullSecret`).
@@ -108,13 +192,13 @@ bin/nvoi kubectl  -- <args>
 
 `bin/test` → `go test -timeout 30s ./...`. Covered: config, compile, runner
 (plan-walker), log, detach, install (cmd construction), state, providers/cloudflare,
-build, workload. Untested by design: `kube` tunnel, `runner` tfexec wrapper,
-`cmd/cli` orchestration — validated by live deploys.
+build, workload, kube (apply + owned + caddy). Untested by design: `kube` tunnel,
+`runner` tfexec wrapper, `cmd/cli` orchestration — validated by live deploys.
 
 ## Add a provider
 
 1. `internal/providers/<name>/compile.go` — `EmitInfra(rt) ([]byte, error)` and `ServerResourceType() string`
-2. `internal/providers/<name>/register.go` — `compile.RegisterInfra` in `init()`
+2. `internal/providers/<name>/register.go` — `compile.RegisterInfra` in `init()`. Optionally `providers.RegisterReservedServerNames(name, ...)` for YAML keys that collide with non-server resources.
 3. Blank-import in `cmd/cli/main.go`
 
 For a bucket provider:
