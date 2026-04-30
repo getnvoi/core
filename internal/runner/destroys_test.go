@@ -88,3 +88,30 @@ func TestPlanNodeDestroys(t *testing.T) {
 		})
 	}
 }
+
+// planNodeDestroys delegates to planTypeDestroys; same walker is
+// re-used to filter tunnel-resource destroys for the pre-apply
+// drain step. Asserts the type filter is the only behavioural axis
+// — locking the contract that adding a new plan-gated drain target
+// is one constant + one call site, not a fork of the walker.
+func TestPlanTypeDestroys_TunnelFilter(t *testing.T) {
+	plan := &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
+		// Tunnel going away — caught.
+		rc("cloudflare_zero_trust_tunnel_cloudflared", "main", change(tfjson.ActionDelete)),
+		// Tunnel-config going away — NOT caught (only the tunnel
+		// object itself triggers the drain).
+		rc("cloudflare_zero_trust_tunnel_cloudflared_config", "main", change(tfjson.ActionDelete)),
+		// Server going away — NOT caught when filter is tunnel.
+		rc("hcloud_server", "master", change(tfjson.ActionDelete)),
+		// Tunnel being replaced — caught (delete leg of replace).
+		rc("cloudflare_zero_trust_tunnel_cloudflared", "rotated", change(tfjson.ActionDelete, tfjson.ActionCreate)),
+		// Tunnel being created (no destroy) — NOT caught.
+		rc("cloudflare_zero_trust_tunnel_cloudflared", "new", change(tfjson.ActionCreate)),
+	}}
+
+	got := planTypeDestroys(plan, "cloudflare_zero_trust_tunnel_cloudflared")
+	want := []string{"main", "rotated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}

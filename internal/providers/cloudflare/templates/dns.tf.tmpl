@@ -12,16 +12,26 @@ locals {
 }
 
 # ── DNS records ────────────────────────────────────────────────────────
-# One A record per (service, domain) entry, pointing at the master's
+# Without providers.tunnel: A record per (service, domain) → master
 # public IPv4 (terraform-resolved from hcloud_server.<primary>.ipv4_address).
-# Tunnel mode (commit #7) replaces these with CNAMEs to the tunnel edge.
+# With providers.tunnel: CNAME record → local.tunnel_cname (defined by
+# the tunnel emitter; cloudflare → <tunnel-id>.cfargotunnel.com,
+# ngrok → reserved-domain CNAME). The tunnel emitter also exposes
+# local.tunnel_proxied so CF orange-cloud flips on for cloudflare
+# tunnels (required for cfargotunnel routing).
 {{ range .Records }}
 resource "cloudflare_record" {{ .ResourceName | hcl }} {
   zone_id = local.cloudflare_zone_id
   name    = {{ .Name | hcl }}
-  type    = {{ .Type | hcl }}
+{{- if .Tunnel }}
+  type    = "CNAME"
+  content = local.tunnel_cname
+  proxied = local.tunnel_proxied
+{{- else }}
+  type    = "A"
   content = {{ .Target }}
-  ttl     = 1   # auto
-  proxied = {{ if .Proxied }}true{{ else }}false{{ end }}
+  proxied = false
+{{- end }}
+  ttl     = 1
 }
 {{ end }}

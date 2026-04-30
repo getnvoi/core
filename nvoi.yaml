@@ -5,6 +5,7 @@ providers:
   infra: hetzner
   storage: cloudflare
   dns: cloudflare
+  tunnel: cloudflare
 
 ssh_key: ~/.ssh/id_rsa.pub
 

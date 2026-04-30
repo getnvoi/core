@@ -19,8 +19,21 @@ func (r *Runner) PlanWithOut(ctx context.Context, planPath string) (bool, error)
 	return r.tf.Plan(ctx, tfexec.Out(planPath))
 }
 
+// PlanDestroyWithOut runs `terraform plan -destroy -out=<path>` and
+// returns hasChanges. The destroy variant of PlanWithOut: lets the
+// destroy pipeline inspect WHAT'S going away before tf actually
+// removes anything (the pre-apply drain step needs the plan to
+// decide whether the tunnel agent has to be killed first).
+func (r *Runner) PlanDestroyWithOut(ctx context.Context, planPath string) (bool, error) {
+	if r.rt.Flags.JSON {
+		return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath), tfexec.Destroy(true))
+	}
+	return r.tf.Plan(ctx, tfexec.Out(planPath), tfexec.Destroy(true))
+}
+
 // ApplyPlan applies a previously-saved plan file. Terraform won't
-// re-plan; it does exactly what's in the file.
+// re-plan; it does exactly what's in the file. Works for both
+// regular plans and -destroy plans.
 func (r *Runner) ApplyPlan(ctx context.Context, planPath string) error {
 	if r.rt.Flags.JSON {
 		return r.tf.ApplyJSON(ctx, r.rt.Log.TFStream(), tfexec.DirOrPlan(planPath))
@@ -55,18 +68,45 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 // hand-crafted *tfjson.Plan instead of needing a real terraform binary
 // + plan file on disk.
 func planNodeDestroys(plan *tfjson.Plan, serverResourceType string) []string {
-	var nodes []string
+	return planTypeDestroys(plan, serverResourceType)
+}
+
+// PlannedTunnelDestroys parses the saved plan and returns the
+// terraform resource names of tunnel objects being destroyed
+// (including replacements — delete+create counts, since the underlying
+// tunnel id changes and the in-cluster agent must be killed first
+// regardless of what comes after).
+//
+// Same shape as PlannedNodeDestroys: plan-driven, type-filtered, no
+// branching on provider name. The TunnelResourceType is resolved via
+// compile.TunnelResourceType(cfg.Providers.Tunnel) at the cmd/
+// boundary so the runner stays provider-agnostic.
+func (r *Runner) PlannedTunnelDestroys(ctx context.Context, planPath, tunnelResourceType string) ([]string, error) {
+	plan, err := r.tf.ShowPlanFile(ctx, planPath)
+	if err != nil {
+		return nil, fmt.Errorf("read plan file %s: %w", planPath, err)
+	}
+	return planTypeDestroys(plan, tunnelResourceType), nil
+}
+
+// planTypeDestroys is the shared pure walker — both nodes and tunnels
+// (and any future plan-gated drain target) want the same primitive:
+// "names of resources of type T that the plan will delete." Replacement
+// (delete+create) counts as a destroy — the underlying object is
+// going away even if a new one with the same address takes its place.
+func planTypeDestroys(plan *tfjson.Plan, resourceType string) []string {
+	var names []string
 	for _, rc := range plan.ResourceChanges {
-		if rc.Type != serverResourceType || rc.Change == nil {
+		if rc.Type != resourceType || rc.Change == nil {
 			continue
 		}
 		for _, a := range rc.Change.Actions {
 			if a == tfjson.ActionDelete {
-				nodes = append(nodes, rc.Name)
+				names = append(names, rc.Name)
 				break
 			}
 		}
 	}
-	sort.Strings(nodes)
-	return nodes
+	sort.Strings(names)
+	return names
 }

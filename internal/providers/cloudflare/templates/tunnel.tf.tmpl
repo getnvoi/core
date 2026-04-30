@@ -1,0 +1,65 @@
+# Cloudflare Zero Trust Tunnel — outbound-only ingress.
+# Replaces the master 80/443 hostPort + Caddy path. The cloudflared
+# agent runs in-cluster (workload phase, owner=tunnel-agent) and dials
+# OUT to Cloudflare's edge; no inbound ports needed on the master.
+#
+# `local.tunnel_cname` and `local.tunnel_proxied` are the well-known
+# names the DNS emitter consumes when providers.tunnel is set, so any
+# tunnel backend (cloudflare today, ngrok next) plugs in without
+# coupling the DNS emitter to the tunnel implementation.
+
+# 35 bytes of random → 47-char base64 string. Cloudflare requires
+# the tunnel secret be ≥32 bytes base64-encoded; this comfortably
+# clears the bar. Stored in tfstate (private R2 bucket).
+resource "random_id" "tunnel_secret" {
+  byte_length = 35
+}
+
+resource "cloudflare_zero_trust_tunnel_cloudflared" "main" {
+  account_id = {{ .AccountID | hcl }}
+  name       = {{ .Name | hcl }}
+  secret     = random_id.tunnel_secret.b64_std
+  config_src = "cloudflare"
+}
+
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
+  account_id = {{ .AccountID | hcl }}
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
+
+  config {
+{{- range .Routes }}
+    ingress_rule {
+      hostname = {{ .Hostname | hcl }}
+      service  = {{ .Service | hcl }}
+    }
+{{- end }}
+    # Catch-all — anything not matched above 404s at the edge.
+    ingress_rule {
+      service = "http_status:404"
+    }
+  }
+}
+
+# Locals consumed by the DNS emitter when providers.tunnel is set.
+# Cross-emitter contract: every TunnelEmitter exposes these two locals
+# (cloudflare → <id>.cfargotunnel.com + proxied=true; ngrok will
+# expose its reserved-domain CNAME + proxied=false). The DNS emitter
+# stays tunnel-backend-agnostic by referencing `local.tunnel_cname`
+# / `local.tunnel_proxied` directly.
+#
+# Cloudflare-Tunnel CNAMEs MUST be proxied — cfargotunnel.com is a
+# CF-internal hostname that only resolves when traffic enters the
+# CF edge with the orange-cloud proxy on.
+locals {
+  tunnel_cname   = "${cloudflare_zero_trust_tunnel_cloudflared.main.id}.cfargotunnel.com"
+  tunnel_proxied = true
+}
+
+# Single output: the agent-registration token. Read by nvoi's workload
+# phase via `terraform output`, plumbed into the cloudflared agent
+# Secret. DNS handoff is purely tf-internal via local.tunnel_cname —
+# nvoi never touches DNS records imperatively.
+output "tunnel_token" {
+  value     = cloudflare_zero_trust_tunnel_cloudflared.main.tunnel_token
+  sensitive = true
+}

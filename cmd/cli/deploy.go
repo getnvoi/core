@@ -56,6 +56,9 @@ func deployCmd(r *rt) *cobra.Command {
 					if err := detachNode(ctx, r.runtime, run, planPath); err != nil {
 						return err
 					}
+					if err := drainTunnel(ctx, r.runtime, run, planPath); err != nil {
+						return err
+					}
 					r.runtime.Log.Step("tf-apply")
 					if err := run.ApplyPlan(ctx, planPath); err != nil {
 						return err
@@ -95,7 +98,7 @@ func deployCmd(r *rt) *cobra.Command {
 					len(r.runtime.Cfg.Domains) == 0 {
 					return nil
 				}
-				return deployWorkloads(ctx, r.runtime, shells)
+				return deployWorkloads(ctx, r.runtime, shells, eps)
 			})
 		},
 	}
@@ -301,7 +304,7 @@ func closeShells(shells map[string]*ssh.Client) {
 // Order matters: labels MUST land before workloads. New pods
 // scheduled with a nodeSelector on a not-yet-labeled node hang
 // Pending until the label arrives.
-func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string]*ssh.Client) error {
+func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string]*ssh.Client, eps *runner.Endpoints) error {
 	primaryName := rt.Cfg.PrimaryMaster()
 	primaryShell, ok := shells[primaryName]
 	if !ok {
@@ -329,40 +332,31 @@ func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string
 		return err
 	}
 
-	return deployIngress(ctx, rt, kc)
+	return deployIngress(ctx, rt, kc, eps)
 }
 
-// deployIngress is the post-workloads ingress reconcile. Today: Caddy
-// + ACME path. Tunnel mode lands in commit #7 — when cfg.Providers.Tunnel
-// is set, this routes to a tunnel-mode helper instead of Caddy.
+// deployIngress is the post-workloads ingress reconcile. Two modes,
+// selected by cfg.Providers.Tunnel:
 //
-// Caddy path (no tunnel):
+//   - Tunnel mode (set): apply the cloudflared agent (Deployment +
+//     Secret with the token from `terraform output`), wait Ready,
+//     sweep any leftover Caddy from a prior Caddy-mode deploy.
+//     DNS records are tf-managed (CNAME → local.tunnel_cname); nvoi
+//     does not touch DNS imperatively.
 //
-//  1. EnsureCaddy applies PVC + ConfigMap + Service + Deployment in
-//     kube-system (owner=caddy) and waits for Ready.
-//  2. BuildCaddyConfig renders the per-service routes from cfg.Domains
-//     + the resolved Service ports.
-//  3. ReloadCaddyConfig POSTs the JSON to Caddy's admin API on
-//     localhost:2019/load via Exec into the Caddy pod — atomic
-//     listener swap, no connection drops.
-//  4. Per-domain WaitForCaddyCert + WaitForCaddyHTTPS, both probes
-//     run from inside the pod (no dependency on operator's local DNS).
-//     Timeouts warn-and-continue (Caddy keeps retrying ACME between
-//     deploys; next deploy re-verifies).
+//   - Caddy mode (unset): EnsureCaddy in kube-system, reload its
+//     config via the admin API (atomic listener swap), per-domain
+//     WaitForCaddyCert + WaitForCaddyHTTPS from inside the pod,
+//     sweep any leftover tunnel-agent workloads from a prior
+//     tunnel-mode deploy.
 //
-// Skipped when:
-//   - cfg.Domains empty (no public hostnames declared)
-//   - cfg.Providers.Tunnel set (commit #7 will route here)
-func deployIngress(ctx context.Context, rt *runtime.Runtime, kc *kube.Client) error {
+// Skipped when cfg.Domains is empty.
+func deployIngress(ctx context.Context, rt *runtime.Runtime, kc *kube.Client, eps *runner.Endpoints) error {
 	if len(rt.Cfg.Domains) == 0 {
 		return nil
 	}
 	if rt.Cfg.Providers.Tunnel != "" {
-		// Tunnel mode lands in commit #7. Today, fall through silently
-		// rather than fail — the tunnel agent's own reconcile will run
-		// in the future commit and Caddy stays unbootstrapped.
-		rt.Log.Info("providers.tunnel set — skipping Caddy ingress (tunnel mode lands in a follow-up commit)")
-		return nil
+		return deployTunnelIngress(ctx, rt, kc, eps)
 	}
 
 	rt.Log.Step("caddy")
@@ -416,6 +410,156 @@ func deployIngress(ctx context.Context, rt *runtime.Runtime, kc *kube.Client) er
 				continue
 			}
 			rt.Log.Info(fmt.Sprintf("https live: https://%s/", domain))
+		}
+	}
+
+	// Cross-mode cleanup: if a previous deploy ran in tunnel mode,
+	// the cloudflared / ngrok agent workloads are still around.
+	// Purge them now that Caddy is serving.
+	rt.Log.Step("purge-tunnel-agent")
+	if err := purgeOwner(ctx, kc, "default", kube.OwnerTunnelAgent); err != nil {
+		rt.Log.Warn(fmt.Sprintf("purge tunnel-agent (cross-mode cleanup): %v", err))
+	}
+	return nil
+}
+
+// deployTunnelIngress is the tunnel-mode counterpart to the Caddy
+// path. terraform owns every cloud resource — tunnel object, ingress
+// config, AND public DNS records (CNAME → local.tunnel_cname). nvoi
+// owns ONLY the kube-side agent:
+//
+//  1. Apply cloudflared agent (Deployment + Secret) using the token
+//     from `terraform output tunnel_token`.
+//  2. Wait for the agent Deployment to reach Ready so subsequent
+//     deploys can rely on it.
+//  3. Sweep orphan Caddy from kube-system (cross-mode cleanup —
+//     reclaims hostPort 80/443 if the prior deploy was Caddy-mode).
+//
+// Brief 502 window during initial deploy or Caddy → tunnel mode
+// switch is accepted by design: tf flips DNS records (A → CNAME or
+// fresh CNAME) atomically with `tf-apply`, the cloudflared agent
+// only comes up in this workload phase, so traffic hits the CF
+// edge before the agent has registered. ~30s–2min, one-time per
+// app. Documented in CLAUDE.md.
+func deployTunnelIngress(ctx context.Context, rt *runtime.Runtime, kc *kube.Client, eps *runner.Endpoints) error {
+	if eps.TunnelToken == "" {
+		return fmt.Errorf("tunnel mode: terraform output tunnel_token is empty")
+	}
+
+	tun, err := compile.ResolveTunnel(rt.Cfg.Providers.Tunnel)
+	if err != nil {
+		return fmt.Errorf("resolve tunnel emitter: %w", err)
+	}
+
+	rt.Log.Step("tunnel-agent")
+	workloads, err := tun.AgentWorkloads(rt.Cfg, eps.TunnelToken)
+	if err != nil {
+		return fmt.Errorf("build tunnel-agent workloads: %w", err)
+	}
+	for _, w := range workloads {
+		if err := kc.ApplyOwned(ctx, "default", kube.OwnerTunnelAgent, w.Obj); err != nil {
+			return fmt.Errorf("apply tunnel-agent %s/%s: %w", w.Kind, w.Name, err)
+		}
+		rt.Log.Info(fmt.Sprintf("applied tunnel-agent %s/%s", w.Kind, w.Name))
+	}
+
+	rt.Log.Step("tunnel-agent-ready")
+	if err := kc.WaitDeploymentReady(ctx, "default", "cloudflared"); err != nil {
+		return fmt.Errorf("wait cloudflared ready: %w", err)
+	}
+
+	rt.Log.Step("purge-caddy")
+	if err := purgeOwner(ctx, kc, kube.CaddyNamespace, kube.OwnerCaddy); err != nil {
+		rt.Log.Warn(fmt.Sprintf("purge caddy (cross-mode cleanup): %v", err))
+	}
+	return nil
+}
+
+// purgeOwner deletes every resource carrying nvoi/owner=<owner> in
+// the given namespace, across every kind ApplyOwned supports. Used
+// for cross-mode ingress transitions (caddy ↔ tunnel-agent).
+func purgeOwner(ctx context.Context, kc *kube.Client, ns, owner string) error {
+	for _, kind := range []kube.Kind{
+		kube.KindDeployment, kube.KindStatefulSet, kube.KindService,
+		kube.KindSecret, kube.KindConfigMap, kube.KindPVC,
+	} {
+		if err := kc.SweepOwned(ctx, ns, owner, kind, nil); err != nil {
+			return fmt.Errorf("sweep %s: %w", kind, err)
+		}
+	}
+	return nil
+}
+
+// drainTunnel inspects the saved plan and, if any tunnel resource is
+// going to delete (or replace), pre-emptively kills the in-cluster
+// cloudflared agent before tf-apply runs. CF's API rejects tunnel
+// DELETE while connections are alive — see
+// terraform-provider-cloudflare#5255 — and the provider has no
+// force_destroy, no /connections cleanup call, and no retry. Killing
+// the agent here drops the connections so tf-apply succeeds in one
+// pass.
+//
+// Plan-driven: zero cost on no-op deploys (filter returns empty);
+// fires automatically on `nvoi destroy`, on Caddy←tunnel mode
+// switches, and on tunnel-replacement (rename, secret rotation).
+//
+// Same shape as detachNode — best-effort, warn-and-continue on
+// kube-unreachable so a misconfigured detach can't block tf-apply.
+// If sweep fails, tf-apply will surface CF's "active connections"
+// error with the same clarity it does today.
+func drainTunnel(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, planPath string) error {
+	if rt.Cfg.Providers.Tunnel == "" {
+		return nil
+	}
+	tunnelType, err := compile.TunnelResourceType(rt.Cfg.Providers.Tunnel)
+	if err != nil {
+		return fmt.Errorf("tunnel resource type: %w", err)
+	}
+	leaving, err := run.PlannedTunnelDestroys(ctx, planPath, tunnelType)
+	if err != nil {
+		return fmt.Errorf("plan tunnel destroys: %w", err)
+	}
+	if len(leaving) == 0 {
+		return nil
+	}
+
+	eps, err := run.Endpoints(ctx)
+	if err != nil {
+		rt.Log.Warn(fmt.Sprintf("read endpoints for tunnel-drain: %s — skipping", err))
+		return nil
+	}
+	primary := rt.Cfg.PrimaryMaster()
+	srv, ok := eps.Servers[primary]
+	if !ok || srv.IPv4 == "" {
+		rt.Log.Warn(fmt.Sprintf("primary master %s not in current state — skipping tunnel-drain", primary))
+		return nil
+	}
+
+	rt.Log.Step("drain-tunnel")
+	rt.Log.Info(fmt.Sprintf("draining %d tunnel(s) before tf-apply: %v", len(leaving), leaving))
+
+	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
+	if err != nil {
+		rt.Log.Warn(fmt.Sprintf("ssh master %s for tunnel-drain: %s — skipping", primary, err))
+		return nil
+	}
+	defer sh.Close()
+
+	kc, err := kube.New(ctx, sh)
+	if err != nil {
+		rt.Log.Warn(fmt.Sprintf("kube tunnel for tunnel-drain: %s — skipping", err))
+		return nil
+	}
+	defer kc.Close()
+
+	// Sweep every owner=tunnel-agent resource — pod termination drops
+	// cloudflared's outbound connections, which clears CF's active-
+	// connections gate on the subsequent tf-apply DELETE.
+	for _, kind := range []kube.Kind{
+		kube.KindDeployment, kube.KindSecret, kube.KindConfigMap,
+	} {
+		if err := kc.SweepOwned(ctx, "default", kube.OwnerTunnelAgent, kind, nil); err != nil {
+			rt.Log.Warn(fmt.Sprintf("sweep tunnel-agent %s: %s", kind, err))
 		}
 	}
 	return nil

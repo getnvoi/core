@@ -3,8 +3,10 @@ package compile
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"github.com/getnvoi/core/internal/config"
-	"github.com/getnvoi/core/internal/runtime"
+	nvoiRuntime "github.com/getnvoi/core/internal/runtime"
 )
 
 // ProviderRequirement is the (alias, source, version) triple every
@@ -28,7 +30,7 @@ type ProviderRequirement struct {
 // active emitter into a single versions.tf so the module always has
 // exactly one terraform meta-block.
 type InfraEmitter interface {
-	EmitInfra(rt *runtime.Runtime) ([]byte, error)
+	EmitInfra(rt *nvoiRuntime.Runtime) ([]byte, error)
 
 	// ServerResourceType returns the terraform resource type this
 	// emitter uses for servers (k3s nodes). Used by the deploy
@@ -102,4 +104,87 @@ func ResolveDNS(name string) (DNSEmitter, error) {
 		return nil, fmt.Errorf("unknown dns provider %q", name)
 	}
 	return e, nil
+}
+
+// TunnelEmitter renders the tunnel provider's terraform resources
+// (the tunnel itself + ingress config) AND the post-tf agent
+// workloads (Deployment + token Secret applied via kc.ApplyOwned in
+// the workload phase).
+//
+// HCL contract: every TunnelEmitter writes a `locals {}` block
+// exposing two well-known names:
+//
+//	local.tunnel_cname     CNAME target hostname for DNS records
+//	local.tunnel_proxied   bool (Cloudflare-orange-cloud only; false elsewhere)
+//
+// The DNS emitter reads these locals when cfg.Providers.Tunnel is
+// set to flip its records from A → CNAME without knowing which
+// tunnel backend is active.
+//
+// Plus a `terraform { output "tunnel_token" }` block carrying the
+// agent's auth token; the workload phase reads it via
+// `terraform output` and injects it into the agent Secret.
+type TunnelEmitter interface {
+	EmitTunnel(cfg *config.Config) ([]byte, error)
+
+	// Providers returns ALL terraform provider requirements this
+	// tunnel emitter relies on. Plural (vs Infra/DNS's singular
+	// Provider()) because tunnel impls often need auxiliary
+	// providers — e.g. Cloudflare Tunnel uses hashicorp/random for
+	// the tunnel secret. Aggregated into backend.tf.
+	Providers() []ProviderRequirement
+
+	// TunnelResourceType returns the terraform resource type the
+	// emitter uses for the tunnel object itself (e.g.
+	// "cloudflare_zero_trust_tunnel_cloudflared"). Used by the
+	// deploy/destroy pipeline's drain step to filter "which
+	// resources in the plan are tunnels going away" — Cloudflare's
+	// API rejects DELETE on a tunnel with active connections, so
+	// nvoi pre-emptively kills the in-cluster agent before tf-apply
+	// runs the destroy. Mirrors InfraEmitter.ServerResourceType.
+	TunnelResourceType() string
+
+	// AgentWorkloads renders the in-cluster Deployment + Secret(s)
+	// the tunnel agent (cloudflared, ngrok) runs as. Called from
+	// the workload phase with the resolved token from `terraform
+	// output`.
+	AgentWorkloads(cfg *config.Config, token string) ([]TunnelWorkload, error)
+}
+
+// TunnelWorkload wraps a typed k8s object the workload phase will
+// hand to kc.ApplyOwned with owner=tunnel-agent.
+type TunnelWorkload struct {
+	Kind string // "Deployment" | "Secret" | "ConfigMap"
+	Name string
+	Obj  runtime.Object
+}
+
+var tunnelEmitters = map[string]TunnelEmitter{}
+
+// RegisterTunnel is called from a provider package's init().
+func RegisterTunnel(name string, e TunnelEmitter) {
+	if _, dup := tunnelEmitters[name]; dup {
+		panic(fmt.Sprintf("compile: duplicate tunnel emitter %q (programming error)", name))
+	}
+	tunnelEmitters[name] = e
+}
+
+// ResolveTunnel returns the registered TunnelEmitter for `name`.
+func ResolveTunnel(name string) (TunnelEmitter, error) {
+	e, ok := tunnelEmitters[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown tunnel provider %q", name)
+	}
+	return e, nil
+}
+
+// TunnelResourceType is the public lookup the deploy/destroy
+// pipelines use to filter terraform plans for "tunnel destroys" —
+// the trigger for the pre-apply agent-drain step.
+func TunnelResourceType(provider string) (string, error) {
+	e, err := ResolveTunnel(provider)
+	if err != nil {
+		return "", err
+	}
+	return e.TunnelResourceType(), nil
 }

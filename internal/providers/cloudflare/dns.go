@@ -43,16 +43,17 @@ func (DNSEmitter) Provider() compile.ProviderRequirement {
 	}
 }
 
-// recordData drives the per-record block in dns.tf.tmpl. Target is a
-// literal HCL fragment (NOT a quoted string) — it's typically a
-// terraform reference like `hcloud_server.master.ipv4_address`, which
-// must NOT be wrapped in quotes.
+// recordData drives the per-record block in dns.tf.tmpl. When
+// Tunnel is true, the template emits a CNAME pointing at
+// local.tunnel_cname (the tunnel emitter writes that local). When
+// false, an A record with Target as the raw HCL expression
+// (typically `hcloud_server.master.ipv4_address`, NOT a quoted
+// string).
 type recordData struct {
 	ResourceName string // sanitized terraform resource name, unique
 	Name         string // record name relative to zone (e.g. "www", "@")
-	Type         string // "A" | "AAAA" | "CNAME"
-	Target       string // raw HCL expression; quoted strings get quotes baked in by caller
-	Proxied      bool
+	Target       string // raw HCL expression for A-record content; ignored when Tunnel
+	Tunnel       bool   // emit CNAME → local.tunnel_cname instead of A
 }
 
 type dnsTemplateData struct {
@@ -80,9 +81,20 @@ func (DNSEmitter) EmitDNS(cfg *config.Config) ([]byte, error) {
 		return nil, fmt.Errorf("cloudflare dns: CF_ZONE required (e.g. nvoi.to)")
 	}
 
-	primary := cfg.PrimaryMaster()
-	if primary == "" {
-		return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
+	tunnelMode := cfg.Providers.Tunnel != ""
+
+	// In Caddy mode the A target is the master's public IPv4. In
+	// tunnel mode the template flips to CNAME → local.tunnel_cname
+	// (which the active tunnel emitter declares); the Target string
+	// here is unused on that path but we still set it so the
+	// template's else-branch is well-defined for assertion.
+	var aTarget string
+	if !tunnelMode {
+		primary := cfg.PrimaryMaster()
+		if primary == "" {
+			return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
+		}
+		aTarget = fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
 	}
 
 	// Per-deploy uniqueness: combine service + sanitized hostname so
@@ -93,11 +105,8 @@ func (DNSEmitter) EmitDNS(cfg *config.Config) ([]byte, error) {
 			records = append(records, recordData{
 				ResourceName: sanitizeResourceName(svcName + "_" + host),
 				Name:         recordNameFor(host, zone),
-				Type:         "A",
-				// Raw HCL expression — terraform resolves at apply time
-				// to the master's public IPv4. NOT a quoted string.
-				Target:  fmt.Sprintf("hcloud_server.%s.ipv4_address", primary),
-				Proxied: false,
+				Target:       aTarget,
+				Tunnel:       tunnelMode,
 			})
 		}
 	}

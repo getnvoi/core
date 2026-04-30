@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"text/template"
 
-	"github.com/getnvoi/core/internal/runtime"
+	nvoiRuntime "github.com/getnvoi/core/internal/runtime"
 )
 
 //go:embed templates/backend.tf.tmpl
@@ -25,7 +25,7 @@ var backendTpl = template.Must(template.New("backend.tf.tmpl").
 //
 // Empty when no providers register (defensive — should never happen
 // because infra is required).
-func emitBackend(rt *runtime.Runtime) ([]byte, error) {
+func emitBackend(rt *nvoiRuntime.Runtime) ([]byte, error) {
 	infra, err := resolveInfra(rt.Cfg.Providers.Infra)
 	if err != nil {
 		return nil, err
@@ -40,7 +40,27 @@ func emitBackend(rt *runtime.Runtime) ([]byte, error) {
 		reqs = append(reqs, dns.Provider())
 	}
 
-	// (Tunnel emitter joins here in commit #7.)
+	if rt.Cfg.Providers.Tunnel != "" {
+		tun, err := ResolveTunnel(rt.Cfg.Providers.Tunnel)
+		if err != nil {
+			return nil, err
+		}
+		reqs = append(reqs, tun.Providers()...)
+	}
+
+	// Dedupe by alias — multiple emitters can declare the same
+	// provider (CF DNS + CF Tunnel both want cloudflare). Last
+	// declaration wins; the slice is small so a linear scan is fine.
+	deduped := reqs[:0]
+	seen := make(map[string]bool, len(reqs))
+	for _, r := range reqs {
+		if seen[r.Alias] {
+			continue
+		}
+		seen[r.Alias] = true
+		deduped = append(deduped, r)
+	}
+	reqs = deduped
 
 	// Sort by Alias for deterministic HCL output. terraform doesn't
 	// care about the order, but tests + diffs do.

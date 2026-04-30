@@ -14,7 +14,7 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/internal/naming"
-	"github.com/getnvoi/core/internal/runtime"
+	nvoiRuntime "github.com/getnvoi/core/internal/runtime"
 )
 
 // Compile resolves the configured providers, asks each to emit its
@@ -32,7 +32,7 @@ import (
 // resources. The terraform meta-block lives in backend.tf alone —
 // terraform rejects duplicate `required_providers` blocks at the
 // module level, so per-provider declarations must aggregate.
-func Compile(rt *runtime.Runtime) (*Bundle, error) {
+func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 	b := NewBundle()
 
 	backendHCL, err := emitBackend(rt)
@@ -51,6 +51,14 @@ func Compile(rt *runtime.Runtime) (*Bundle, error) {
 	}
 	b.Set(naming.ProviderHCL(rt.Cfg.Providers.Infra), infraHCL)
 
+	// DNS records are tf-managed in BOTH modes:
+	//   - Caddy: A record per (service, domain) → master IPv4.
+	//   - Tunnel: CNAME per (service, domain) → local.tunnel_cname
+	//     (declared by the active TunnelEmitter).
+	// The DNS emitter reads cfg.Providers.Tunnel to flip its template
+	// branch. Mode-switch downtime (records flip atomically with the
+	// agent still bootstrapping in the workload phase) is accepted by
+	// design — see CLAUDE.md.
 	if len(rt.Cfg.Domains) > 0 && rt.Cfg.Providers.DNS != "" {
 		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
 		if err != nil {
@@ -61,6 +69,18 @@ func Compile(rt *runtime.Runtime) (*Bundle, error) {
 			return nil, err
 		}
 		b.Set(rt.Cfg.Providers.DNS+"-dns.tf", dnsHCL)
+	}
+
+	if rt.Cfg.Providers.Tunnel != "" && len(rt.Cfg.Domains) > 0 {
+		tun, err := ResolveTunnel(rt.Cfg.Providers.Tunnel)
+		if err != nil {
+			return nil, err
+		}
+		tunHCL, err := tun.EmitTunnel(rt.Cfg)
+		if err != nil {
+			return nil, err
+		}
+		b.Set(rt.Cfg.Providers.Tunnel+"-tunnel.tf", tunHCL)
 	}
 
 	return b, nil
