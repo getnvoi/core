@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // k3s does NOT ship etcdctl as a usable command (only `k3s

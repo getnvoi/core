@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // Kubectl runs `sudo k3s kubectl <args>` on a master shell and returns

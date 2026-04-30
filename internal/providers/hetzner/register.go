@@ -3,7 +3,7 @@
 // pkg/provider/hetzner over.
 package hetzner
 
-import "github.com/getnvoi/tf/internal/compile"
+import "github.com/getnvoi/core/internal/compile"
 
 func init() {
 	compile.RegisterInfra("hetzner", &emitter{})

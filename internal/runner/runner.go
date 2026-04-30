@@ -15,7 +15,7 @@ import (
 
 	"github.com/hashicorp/terraform-exec/tfexec"
 
-	"github.com/getnvoi/tf/internal/runtime"
+	"github.com/getnvoi/core/internal/runtime"
 )
 
 type Runner struct {

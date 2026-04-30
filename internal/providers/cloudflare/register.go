@@ -1,6 +1,6 @@
 package cloudflare
 
-import "github.com/getnvoi/tf/internal/providers"
+import "github.com/getnvoi/core/internal/providers"
 
 // BucketSchema declares the env vars cmd/cli reads to construct the
 // R2 BucketProvider. Same names as nvoi's CF_API_KEY / CF_ACCOUNT_ID.

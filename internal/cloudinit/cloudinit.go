@@ -13,7 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/getnvoi/tf/internal/naming"
+	"github.com/getnvoi/core/internal/naming"
 )
 
 type config struct {

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // DefaultUser is the unprivileged SSH login cloud-init creates.

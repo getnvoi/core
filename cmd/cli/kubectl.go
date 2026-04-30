@@ -6,9 +6,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/tf/internal/install"
-	"github.com/getnvoi/tf/internal/runner"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/install"
+	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 func kubectlCmd(r *rt) *cobra.Command {

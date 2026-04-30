@@ -3,7 +3,7 @@ package compile
 import (
 	"fmt"
 
-	"github.com/getnvoi/tf/internal/runtime"
+	"github.com/getnvoi/core/internal/runtime"
 )
 
 // InfraEmitter renders the provider block + infra resources for one

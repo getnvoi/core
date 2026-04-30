@@ -18,10 +18,10 @@ package runtime
 import (
 	"context"
 
-	"github.com/getnvoi/tf/internal/config"
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/naming"
-	"github.com/getnvoi/tf/internal/state"
+	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/naming"
+	"github.com/getnvoi/core/internal/state"
 )
 
 // Flags is the typed view of cobra's persistent flags. Constructed in

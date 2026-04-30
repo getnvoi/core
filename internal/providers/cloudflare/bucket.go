@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/getnvoi/tf/internal/providers"
-	"github.com/getnvoi/tf/internal/utils"
+	"github.com/getnvoi/core/internal/providers"
+	"github.com/getnvoi/core/internal/utils"
 )
 
 // BucketClient manages R2 buckets via Cloudflare API + returns

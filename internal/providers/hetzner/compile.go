@@ -9,10 +9,10 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/tf/internal/cloudinit"
-	"github.com/getnvoi/tf/internal/naming"
-	"github.com/getnvoi/tf/internal/runtime"
-	"github.com/getnvoi/tf/internal/state"
+	"github.com/getnvoi/core/internal/cloudinit"
+	"github.com/getnvoi/core/internal/naming"
+	"github.com/getnvoi/core/internal/runtime"
+	"github.com/getnvoi/core/internal/state"
 )
 
 const (

@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	"github.com/getnvoi/tf/internal/providers"
+	"github.com/getnvoi/core/internal/providers"
 )
 
 // reservedServerNames are YAML keys an operator must NOT pick for a

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // WaitNodeReady polls kubectl on the given shell until the named node

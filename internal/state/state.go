@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/naming"
-	"github.com/getnvoi/tf/internal/providers"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/naming"
+	"github.com/getnvoi/core/internal/providers"
 )
 
 // Backend is the resolved terraform-state backend config — bucket

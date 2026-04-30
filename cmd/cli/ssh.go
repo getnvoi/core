@@ -8,11 +8,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/tf/internal/config"
-	"github.com/getnvoi/tf/internal/install"
-	"github.com/getnvoi/tf/internal/runner"
-	"github.com/getnvoi/tf/internal/runtime"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/install"
+	"github.com/getnvoi/core/internal/runner"
+	"github.com/getnvoi/core/internal/runtime"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 func sshCmd(r *rt) *cobra.Command {

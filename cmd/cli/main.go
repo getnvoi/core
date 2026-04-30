@@ -29,15 +29,15 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/tf/internal/config"
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/naming"
-	"github.com/getnvoi/tf/internal/providers"
-	"github.com/getnvoi/tf/internal/runtime"
-	"github.com/getnvoi/tf/internal/state"
+	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/naming"
+	"github.com/getnvoi/core/internal/providers"
+	"github.com/getnvoi/core/internal/runtime"
+	"github.com/getnvoi/core/internal/state"
 
-	_ "github.com/getnvoi/tf/internal/providers/cloudflare"
-	_ "github.com/getnvoi/tf/internal/providers/hetzner"
+	_ "github.com/getnvoi/core/internal/providers/cloudflare"
+	_ "github.com/getnvoi/core/internal/providers/hetzner"
 )
 
 // rt is the cmd-local bag populated by PersistentPreRunE and closed

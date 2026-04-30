@@ -1,4 +1,4 @@
-module github.com/getnvoi/tf
+module github.com/getnvoi/core
 
 go 1.26.0
 

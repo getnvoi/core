@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // EnsureSwap allocates /swapfile sized 5% of root disk, clamped

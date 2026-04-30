@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/tf/internal/runner"
+	"github.com/getnvoi/core/internal/runner"
 )
 
 func planCmd(r *rt) *cobra.Command {

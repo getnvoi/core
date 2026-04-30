@@ -19,9 +19,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/getnvoi/tf/internal/install"
-	"github.com/getnvoi/tf/internal/log"
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/install"
+	"github.com/getnvoi/core/internal/log"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // Node identifies one node to detach. Role decides whether we run

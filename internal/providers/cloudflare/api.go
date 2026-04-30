@@ -7,7 +7,7 @@ package cloudflare
 import (
 	"net/http"
 
-	"github.com/getnvoi/tf/internal/utils"
+	"github.com/getnvoi/core/internal/utils"
 )
 
 const baseURL = "https://api.cloudflare.com/client/v4"

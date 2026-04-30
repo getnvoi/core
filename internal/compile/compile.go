@@ -11,8 +11,8 @@
 package compile
 
 import (
-	"github.com/getnvoi/tf/internal/naming"
-	"github.com/getnvoi/tf/internal/runtime"
+	"github.com/getnvoi/core/internal/naming"
+	"github.com/getnvoi/core/internal/runtime"
 )
 
 // Compile resolves the configured infra provider, asks it to emit its

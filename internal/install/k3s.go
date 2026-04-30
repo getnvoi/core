@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // k3s constants — match nvoi's pkg/utils/naming.go for cross-codebase

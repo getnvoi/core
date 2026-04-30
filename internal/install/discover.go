@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // DiscoverToken queries every master in turn for the cluster's k3s

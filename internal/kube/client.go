@@ -32,7 +32,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/getnvoi/tf/internal/ssh"
+	"github.com/getnvoi/core/internal/ssh"
 )
 
 // FieldManager identifies nvoi-tf in the apiserver's owner-tracking.
