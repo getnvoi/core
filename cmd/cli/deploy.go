@@ -63,62 +63,77 @@ func deployCmd(r *rt) *cobra.Command {
 					r.runtime.Log.Info("no terraform changes")
 				}
 
-				// ── post-apply: install ──
+				// ── post-apply: open SSH to every server ONCE,
+				// thread through install + workloads, close all at
+				// the end. Single SSH per server per command — same
+				// pattern nvoi uses; same connection that installs k3s
+				// also tunnels the kube apiserver for workloads.
 				r.runtime.Log.Step("endpoints")
 				eps, err := run.Endpoints(ctx)
 				if err != nil {
 					return err
 				}
-				if err := installCluster(ctx, r.runtime, eps); err != nil {
+				r.runtime.Log.Step("ssh")
+				shells, err := openShells(ctx, r.runtime, eps)
+				if err != nil {
+					return err
+				}
+				defer closeShells(shells)
+
+				if err := installCluster(ctx, r.runtime, eps, shells); err != nil {
 					return err
 				}
 
-				// ── workloads: kube tunnel + apply manifests ──
-				// Skipped when no services declared (nothing to apply,
-				// nothing to reconcile).
+				// ── workloads: kube tunnel via primary's shell ──
+				// Skipped when nothing to deploy.
 				if len(r.runtime.Cfg.Services) == 0 && len(r.runtime.Cfg.Registry) == 0 {
 					return nil
 				}
-				return deployWorkloads(ctx, r.runtime, eps)
+				return deployWorkloads(ctx, r.runtime, shells)
 			})
 		},
 	}
 }
 
-// installCluster is the post-terraform bootstrap pipeline:
-//   1. SSH-dial every server (cloud-init must have finished)
-//   2. ensure swap on every node
-//   3. discover any existing k3s cluster (idempotency)
-//   4. cold start: install --cluster-init on the primary master
-//   5. join secondary masters via --server <primary>:6443
-//   6. join workers via the LB private IP (or primary's private IP if N=1)
-//
-// Always uses --cluster-init regardless of master count: the cluster
-// is etcd-backed from day one, so 1↔N migration is mechanical.
-func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints) error {
-	cfg := rt.Cfg
-	primaryName := cfg.PrimaryMaster()
-	if primaryName == "" {
-		return fmt.Errorf("config has no master with primary: true (validator should have caught this)")
-	}
-
-	// 1. SSH-dial every server in parallel-ish (sequential for now;
-	// re-deploys are usually fast since cloud-init only runs once).
-	rt.Log.Step("ssh")
+// openShells dials SSH to every server in eps.Servers and returns
+// the map. On failure mid-way, any already-open shells are closed
+// so we never leak. Caller takes ownership of the returned map and
+// is responsible for `defer closeShells(shells)`.
+func openShells(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints) (map[string]*ssh.Client, error) {
 	shells := make(map[string]*ssh.Client, len(eps.Servers))
 	for _, name := range sortedServerNames(eps.Servers) {
 		srv := eps.Servers[name]
 		sh, err := install.WaitForSSH(ctx, srv.IPv4, rt.SSHPrivKey, rt.Log)
 		if err != nil {
 			closeShells(shells)
-			return fmt.Errorf("ssh %s (%s): %w", name, srv.IPv4, err)
+			return nil, fmt.Errorf("ssh %s (%s): %w", name, srv.IPv4, err)
 		}
 		shells[name] = sh
 		rt.Log.Info(fmt.Sprintf("ssh %s ready (%s)", name, srv.IPv4))
 	}
-	defer closeShells(shells)
+	return shells, nil
+}
 
-	// 2. Swap on every node.
+// installCluster is the post-terraform bootstrap pipeline:
+//   1. ensure swap on every node
+//   2. discover any existing k3s cluster (idempotency)
+//   3. cold start: install --cluster-init on the primary master
+//   4. join secondary masters via --server <primary>:6443
+//   5. join workers via the LB private IP (or primary's private IP if N=1)
+//
+// Takes pre-opened shells from the caller — the same connections
+// stay alive through the workloads phase via deployWorkloads(shells).
+//
+// Always uses --cluster-init regardless of master count: the cluster
+// is etcd-backed from day one, so 1↔N migration is mechanical.
+func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints, shells map[string]*ssh.Client) error {
+	cfg := rt.Cfg
+	primaryName := cfg.PrimaryMaster()
+	if primaryName == "" {
+		return fmt.Errorf("config has no master with primary: true (validator should have caught this)")
+	}
+
+	// 1. Swap on every node.
 	rt.Log.Step("swap")
 	for _, name := range sortedServerNames(eps.Servers) {
 		if err := install.EnsureSwap(ctx, shells[name], rt.Log); err != nil {
@@ -126,7 +141,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 		}
 	}
 
-	// 3. Build typed Nodes used by the install package (Hostname is
+	// 2. Build typed Nodes used by the install package (Hostname is
 	//    derived from the YAML key via naming.Server).
 	nodes := make(map[string]install.Node, len(eps.Servers))
 	for name, srv := range eps.Servers {
@@ -145,7 +160,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 		extraSANs = []string{eps.APIEndpoint.Private, eps.APIEndpoint.Public}
 	}
 
-	// 4. Discovery — does a cluster already exist?
+	// 3. Discovery — does a cluster already exist?
 	rt.Log.Step("k3s-discover")
 	masterShells := masterShellsOnly(shells, eps)
 	token, found, err := install.DiscoverToken(ctx, masterShells)
@@ -155,7 +170,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 
 	primaryNode := nodes[primaryName]
 
-	// 5. Cold start: install primary if no cluster yet.
+	// 4. Cold start: install primary if no cluster yet.
 	if !found {
 		rt.Log.Step("k3s-primary")
 		if err := install.InstallPrimaryMaster(ctx, shells[primaryName], primaryNode, extraSANs, rt.Log); err != nil {
@@ -173,7 +188,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 		rt.Log.Info("cluster already exists — skipping --cluster-init")
 	}
 
-	// 6. Secondary masters join.
+	// 5. Secondary masters join.
 	rt.Log.Step("k3s-secondaries")
 	for _, name := range eps.Masters() {
 		if name == primaryName {
@@ -187,7 +202,7 @@ func installCluster(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoi
 		}
 	}
 
-	// 7. Workers join via the LB (HA) or primary's private IP (N=1).
+	// 6. Workers join via the LB (HA) or primary's private IP (N=1).
 	workers := eps.Workers()
 	if len(workers) > 0 {
 		rt.Log.Step("k3s-workers")
@@ -284,29 +299,21 @@ func closeShells(shells map[string]*ssh.Client) {
 	}
 }
 
-// deployWorkloads opens a fresh SSH to the primary master, builds
-// the typed kube client over the SSH-tunneled apiserver, applies
-// every nvoi-managed manifest (registry-auth Secret, Deployments,
-// Services), and reconciles removal of stale ones.
+// deployWorkloads builds the typed kube client over the primary's
+// existing SSH connection (the same one that installed k3s — kept
+// alive by the caller's `defer closeShells`), then applies every
+// nvoi-managed manifest and reconciles removal.
 //
-// Separate SSH dial from the install pipeline (which closed all its
-// shells when it returned). Cost: ~1s for the dial. Cleanly bounded
-// scope: this function owns its connections.
-func deployWorkloads(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints) error {
+// Single SSH per server per deploy — no fresh dial here.
+func deployWorkloads(ctx context.Context, rt *runtime.Runtime, shells map[string]*ssh.Client) error {
 	primaryName := rt.Cfg.PrimaryMaster()
-	srv, ok := eps.Servers[primaryName]
+	primaryShell, ok := shells[primaryName]
 	if !ok {
-		return fmt.Errorf("primary master %s not in endpoints", primaryName)
+		return fmt.Errorf("primary master %s has no open shell", primaryName)
 	}
 
 	rt.Log.Step("kube-tunnel")
-	masterSSH, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
-	if err != nil {
-		return fmt.Errorf("ssh primary for kube tunnel: %w", err)
-	}
-	defer masterSSH.Close()
-
-	kc, err := kube.New(ctx, masterSSH)
+	kc, err := kube.New(ctx, primaryShell)
 	if err != nil {
 		return fmt.Errorf("build kube client: %w", err)
 	}
