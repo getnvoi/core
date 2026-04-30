@@ -8,14 +8,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/getnvoi/core/internal/build"
 	"github.com/getnvoi/core/internal/compile"
 	"github.com/getnvoi/core/internal/config"
 	"github.com/getnvoi/core/internal/detach"
 	"github.com/getnvoi/core/internal/install"
+	"github.com/getnvoi/core/internal/kube"
 	"github.com/getnvoi/core/internal/naming"
 	"github.com/getnvoi/core/internal/runner"
 	"github.com/getnvoi/core/internal/runtime"
 	"github.com/getnvoi/core/internal/ssh"
+	"github.com/getnvoi/core/internal/workload"
 )
 
 func deployCmd(r *rt) *cobra.Command {
@@ -25,6 +28,13 @@ func deployCmd(r *rt) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			return runWith(ctx, r.runtime, func(ctx context.Context, run *runner.Runner) error {
+				// ── pre-infra: build phase ──
+				// Conditional: build.All is a no-op when no service has
+				// build: set. Failures abort BEFORE any infra change.
+				if err := build.All(ctx, r.runtime, build.DockerRunner{}, r.runtime.Log); err != nil {
+					return err
+				}
+
 				r.runtime.Log.Step("tf-init")
 				if err := run.Init(ctx); err != nil {
 					return err
@@ -59,7 +69,17 @@ func deployCmd(r *rt) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return installCluster(ctx, r.runtime, eps)
+				if err := installCluster(ctx, r.runtime, eps); err != nil {
+					return err
+				}
+
+				// ── workloads: kube tunnel + apply manifests ──
+				// Skipped when no services declared (nothing to apply,
+				// nothing to reconcile).
+				if len(r.runtime.Cfg.Services) == 0 && len(r.runtime.Cfg.Registry) == 0 {
+					return nil
+				}
+				return deployWorkloads(ctx, r.runtime, eps)
 			})
 		},
 	}
@@ -262,6 +282,38 @@ func closeShells(shells map[string]*ssh.Client) {
 	for _, sh := range shells {
 		_ = sh.Close()
 	}
+}
+
+// deployWorkloads opens a fresh SSH to the primary master, builds
+// the typed kube client over the SSH-tunneled apiserver, applies
+// every nvoi-managed manifest (registry-auth Secret, Deployments,
+// Services), and reconciles removal of stale ones.
+//
+// Separate SSH dial from the install pipeline (which closed all its
+// shells when it returned). Cost: ~1s for the dial. Cleanly bounded
+// scope: this function owns its connections.
+func deployWorkloads(ctx context.Context, rt *runtime.Runtime, eps *runner.Endpoints) error {
+	primaryName := rt.Cfg.PrimaryMaster()
+	srv, ok := eps.Servers[primaryName]
+	if !ok {
+		return fmt.Errorf("primary master %s not in endpoints", primaryName)
+	}
+
+	rt.Log.Step("kube-tunnel")
+	masterSSH, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
+	if err != nil {
+		return fmt.Errorf("ssh primary for kube tunnel: %w", err)
+	}
+	defer masterSSH.Close()
+
+	kc, err := kube.New(ctx, masterSSH)
+	if err != nil {
+		return fmt.Errorf("build kube client: %w", err)
+	}
+	defer kc.Close()
+
+	rt.Log.Step("workloads")
+	return workload.ApplyAll(ctx, rt, kc, rt.Log)
 }
 
 // detachNode inspects the saved plan, identifies servers about to be

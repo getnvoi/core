@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/getnvoi/core/internal/providers"
 	"github.com/getnvoi/core/internal/runtime"
 	"github.com/getnvoi/core/internal/state"
+	"github.com/getnvoi/core/internal/workload"
 
 	_ "github.com/getnvoi/core/internal/providers/cloudflare"
 	_ "github.com/getnvoi/core/internal/providers/hetzner"
@@ -87,6 +89,11 @@ func newRoot(r *rt) *cobra.Command {
 			return err
 		}
 
+		// Resolve $VAR references in registry: creds against the
+		// operator's environment. From here on, every internal package
+		// sees literal usernames + passwords.
+		cfg.Registry = workload.ResolveRegistryCreds(cfg.Registry, os.Getenv)
+
 		// Optional remote-state backend. Validator already verified
 		// the provider name is registered; here we resolve creds and
 		// upsert the bucket.
@@ -111,6 +118,7 @@ func newRoot(r *rt) *cobra.Command {
 			SSHPubKey:  pubKey,
 			SSHPrivKey: privKey,
 			CacheDir:   filepath.Join(home, ".cache", naming.CacheDirSegment),
+			DeployHash: time.Now().UTC().Format("20060102-150405"),
 			Backend:    backend,
 		})
 		if err != nil {

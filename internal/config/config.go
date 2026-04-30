@@ -11,6 +11,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,11 +19,31 @@ import (
 // Config is the parsed YAML. One struct, one shape, mirrors the
 // upstream nvoi.yaml surface so porting is mechanical.
 type Config struct {
-	App       string                `yaml:"app"`
-	Env       string                `yaml:"env"`
-	Providers Providers             `yaml:"providers"`
-	SSHKey    string                `yaml:"ssh_key"` // path to public key — resolved + read at the cmd/ boundary
-	Servers   map[string]ServerSpec `yaml:"servers"`
+	App       string                 `yaml:"app"`
+	Env       string                 `yaml:"env"`
+	Providers Providers              `yaml:"providers"`
+	SSHKey    string                 `yaml:"ssh_key"` // path to public key — resolved + read at the cmd/ boundary
+	Servers   map[string]ServerSpec  `yaml:"servers"`
+	Registry  map[string]RegistryDef `yaml:"registry,omitempty"`
+	Services  map[string]ServiceSpec `yaml:"services,omitempty"`
+}
+
+// RegistryDef holds pull credentials for a single private container
+// registry. Username and Password may be literal values or `$VAR`
+// references resolved at the cmd/ boundary from os.Getenv.
+type RegistryDef struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
+// ServiceSpec describes one workload to deploy. Image is required —
+// either pre-built (`image: nginx:1.27-alpine`) or paired with `build:`
+// for code we compile locally and push.
+type ServiceSpec struct {
+	Image    string     `yaml:"image"`
+	Build    *BuildSpec `yaml:"build,omitempty"`
+	Port     int        `yaml:"port"`
+	Replicas *int       `yaml:"replicas,omitempty"` // nil → default 1
 }
 
 type Providers struct {
@@ -64,6 +85,72 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return &c, nil
+}
+
+// BuildSpec describes how to build a service's image locally before
+// the deploy proceeds. Three YAML shapes accepted:
+//
+//	build: true                                 # Context=".", Dockerfile="Dockerfile"
+//	build: ./services/api                       # Context="./services/api"
+//	build: {context: ./api, dockerfile: prod.Dockerfile}
+type BuildSpec struct {
+	Context    string `yaml:"context"`
+	Dockerfile string `yaml:"dockerfile"`
+}
+
+// UnmarshalYAML accepts bool | string | mapping for `build:`.
+func (b *BuildSpec) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if node.Tag == "!!bool" {
+			if node.Value == "true" {
+				b.Context = "."
+				b.Dockerfile = "Dockerfile"
+			}
+			return nil
+		}
+		// scalar string — context path; dockerfile defaults
+		b.Context = node.Value
+		b.Dockerfile = "Dockerfile"
+		return nil
+	case yaml.MappingNode:
+		var raw struct {
+			Context    string `yaml:"context"`
+			Dockerfile string `yaml:"dockerfile"`
+		}
+		if err := node.Decode(&raw); err != nil {
+			return err
+		}
+		b.Context = raw.Context
+		if b.Context == "" {
+			b.Context = "."
+		}
+		b.Dockerfile = raw.Dockerfile
+		if b.Dockerfile == "" {
+			b.Dockerfile = "Dockerfile"
+		}
+		return nil
+	}
+	return fmt.Errorf("build: unexpected yaml kind (%v)", node.Kind)
+}
+
+// HasBuild reports whether this service should be built locally.
+// True when build: is set with a non-empty context.
+func (s ServiceSpec) HasBuild() bool { return s.Build != nil && s.Build.Context != "" }
+
+// ImageHost returns the registry host of the service's image
+// (e.g. "ghcr.io" for "ghcr.io/myorg/api:v1"). Returns "" for bare
+// shortnames like "nginx" or "alpine" — those resolve to docker.io
+// implicitly but we don't classify them as having a registry host.
+func (s ServiceSpec) ImageHost() string {
+	img := s.Image
+	if i := strings.IndexByte(img, '/'); i >= 0 {
+		host := img[:i]
+		if strings.ContainsAny(host, ".:") {
+			return host // hostname or host:port
+		}
+	}
+	return ""
 }
 
 // PrimaryMaster returns the YAML key of the master that runs --cluster-init

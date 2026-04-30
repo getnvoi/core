@@ -82,5 +82,52 @@ func (c *Config) Validate() error {
 	// Single-master case: primary field is implicit. Setting it
 	// explicitly is allowed (forward-compat for adding masters later)
 	// but redundant.
+
+	if err := validateServices(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateServices enforces the YAML shape for services + registry:
+//
+//   - every service requires `image`
+//   - every service requires `port`
+//   - if `build:` is set: image must be fully qualified (host/...)
+//     AND that host must appear under registry: (so cluster can pull
+//     the image we're about to push)
+//   - replicas, when set, must be > 0
+//
+// Push-side auth (operator's ~/.docker/config.json) is checked at the
+// cmd/ boundary, not here — that's I/O.
+func validateServices(c *Config) error {
+	for name, svc := range c.Services {
+		if svc.Image == "" {
+			return fmt.Errorf("services.%s.image: required", name)
+		}
+		if svc.Port == 0 {
+			return fmt.Errorf("services.%s.port: required", name)
+		}
+		if svc.Replicas != nil && *svc.Replicas < 1 {
+			return fmt.Errorf("services.%s.replicas: must be >= 1 (got %d)", name, *svc.Replicas)
+		}
+		if svc.HasBuild() {
+			host := svc.ImageHost()
+			if host == "" {
+				return fmt.Errorf("services.%s: build set but image %q is a bare shortname; use a fully qualified tag (e.g. ghcr.io/org/%s)", name, svc.Image, name)
+			}
+			if _, ok := c.Registry[host]; !ok {
+				return fmt.Errorf("services.%s: build pushes to %s, but no registry: entry for that host", name, host)
+			}
+		}
+	}
+	for host, reg := range c.Registry {
+		if reg.Username == "" {
+			return fmt.Errorf("registry.%s.username: required", host)
+		}
+		if reg.Password == "" {
+			return fmt.Errorf("registry.%s.password: required", host)
+		}
+	}
 	return nil
 }

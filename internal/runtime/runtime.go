@@ -43,6 +43,13 @@ type Inputs struct {
 	SSHPrivKey []byte // pre-read PEM bytes — for SSH dial during install
 	CacheDir   string // absolute, terraform binary cache
 
+	// DeployHash is the per-deploy tag fragment (YYYYMMDD-HHMMSS UTC).
+	// Stamped on built image tags AND every nvoi-managed workload's
+	// metadata so PodSpec image strings change per deploy → rolling
+	// updates auto-trigger. Computed once at deploy start; same value
+	// flows through build phase + workload phase.
+	DeployHash string
+
 	// Backend is set when providers.storage is configured. nil means
 	// terraform stores state locally in .tf/<app>-<env>/terraform.tfstate.
 	// Set means terraform's s3 backend points at the bucket.
@@ -60,6 +67,7 @@ type Runtime struct {
 	SSHPrivKey []byte
 	CacheDir   string
 	WorkDir    string
+	DeployHash string
 	Backend    *state.Backend // nil = local state; non-nil = remote on configured bucket
 }
 
@@ -76,6 +84,7 @@ func Build(ctx context.Context, in Inputs) (*Runtime, error) {
 		SSHPrivKey: in.SSHPrivKey,
 		CacheDir:   in.CacheDir,
 		WorkDir:    naming.WorkDir(in.Cfg.App, in.Cfg.Env),
+		DeployHash: in.DeployHash,
 		Backend:    in.Backend,
 	}, nil
 }

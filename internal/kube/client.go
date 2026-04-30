@@ -92,6 +92,13 @@ func New(ctx context.Context, sh *ssh.Client) (*Client, error) {
 	return &Client{CS: cs, cfg: cfg, apiHost: apiHost, cleanup: cleanup}, nil
 }
 
+// NewForTest returns a Client wrapping the supplied clientset (typically
+// kubernetes/fake). No SSH tunnel; no cleanup. Tests pre-populate
+// state via the underlying fake's tracker.
+func NewForTest(cs kubernetes.Interface) *Client {
+	return &Client{CS: cs}
+}
+
 // Close releases the SSH tunnel listener and accept loop. Idempotent.
 func (c *Client) Close() error {
 	if c.cleanup != nil {

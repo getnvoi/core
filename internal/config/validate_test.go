@@ -83,6 +83,85 @@ func TestValidate(t *testing.T) {
 			mutate:  func(c *Config) { c.Providers.Storage = "no-such-thing" },
 			wantErr: `unknown provider "no-such-thing"`,
 		},
+
+		// services + registry validation
+		{
+			name: "service requires image",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"api": {Port: 80}}
+			},
+			wantErr: "services.api.image: required",
+		},
+		{
+			name: "service requires port",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"api": {Image: "nginx:alpine"}}
+			},
+			wantErr: "services.api.port: required",
+		},
+		{
+			name: "service replicas must be >= 1",
+			mutate: func(c *Config) {
+				zero := 0
+				c.Services = map[string]ServiceSpec{"api": {Image: "nginx:alpine", Port: 80, Replicas: &zero}}
+			},
+			wantErr: "must be >= 1",
+		},
+		{
+			name: "build requires fully-qualified image",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{"ghcr.io": {Username: "u", Password: "p"}}
+				c.Services = map[string]ServiceSpec{"api": {
+					Image: "api", // bare shortname — not allowed when build is set
+					Port:  80,
+					Build: &BuildSpec{Context: ".", Dockerfile: "Dockerfile"},
+				}}
+			},
+			wantErr: "fully qualified tag",
+		},
+		{
+			name: "build requires registry entry for image's host",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"api": {
+					Image: "ghcr.io/myorg/api",
+					Port:  80,
+					Build: &BuildSpec{Context: ".", Dockerfile: "Dockerfile"},
+				}}
+				// no registry: block at all
+			},
+			wantErr: "no registry: entry for that host",
+		},
+		{
+			name: "build with matching registry entry passes",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{"ghcr.io": {Username: "u", Password: "p"}}
+				c.Services = map[string]ServiceSpec{"api": {
+					Image: "ghcr.io/myorg/api",
+					Port:  80,
+					Build: &BuildSpec{Context: ".", Dockerfile: "Dockerfile"},
+				}}
+			},
+		},
+		{
+			name: "registry entry requires username",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{"ghcr.io": {Password: "p"}}
+			},
+			wantErr: "registry.ghcr.io.username: required",
+		},
+		{
+			name: "registry entry requires password",
+			mutate: func(c *Config) {
+				c.Registry = map[string]RegistryDef{"ghcr.io": {Username: "u"}}
+			},
+			wantErr: "registry.ghcr.io.password: required",
+		},
+		{
+			name: "service with pre-built public image and no build is fine",
+			mutate: func(c *Config) {
+				c.Services = map[string]ServiceSpec{"api": {Image: "nginx:1.27-alpine", Port: 80}}
+			},
+		},
 	}
 
 	for _, tc := range cases {

@@ -61,6 +61,77 @@ func (c *Client) ApplyService(ctx context.Context, ns string, svc *corev1.Servic
 	})
 }
 
+// ApplySecret upserts a Secret. Same Get-then-Create-or-Update +
+// retry-on-conflict pattern. Used for the registry-auth Secret.
+func (c *Client) ApplySecret(ctx context.Context, ns string, sec *corev1.Secret) error {
+	api := c.CS.CoreV1().Secrets(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, sec.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, sec, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		sec.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, sec, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// DeleteDeployment removes a Deployment. Idempotent: NotFound returns
+// nil so reconcile-on-removal can run on every deploy without
+// caring whether the Deployment ever existed.
+func (c *Client) DeleteDeployment(ctx context.Context, ns, name string) error {
+	err := c.CS.AppsV1().Deployments(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// DeleteService removes a Service. Same idempotency contract.
+func (c *Client) DeleteService(ctx context.Context, ns, name string) error {
+	err := c.CS.CoreV1().Services(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return err
+	}
+	return nil
+}
+
+// ListNvoiDeployments returns the names of every Deployment in the
+// namespace tagged with `nvoi/owner=nvoi`. Used by reconcile-on-removal:
+// any name in this list whose YAML entry is gone gets deleted.
+func (c *Client) ListNvoiDeployments(ctx context.Context, ns string) ([]string, error) {
+	list, err := c.CS.AppsV1().Deployments(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: "nvoi/owner=nvoi",
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(list.Items))
+	for _, d := range list.Items {
+		out = append(out, d.Name)
+	}
+	return out, nil
+}
+
+// ListNvoiServices is the Service equivalent of ListNvoiDeployments.
+func (c *Client) ListNvoiServices(ctx context.Context, ns string) ([]string, error) {
+	list, err := c.CS.CoreV1().Services(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: "nvoi/owner=nvoi",
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(list.Items))
+	for _, s := range list.Items {
+		out = append(out, s.Name)
+	}
+	return out, nil
+}
+
 // WaitDeploymentReady polls until ReadyReplicas == Spec.Replicas or
 // ctx expires. 5-minute timeout suits image pulls on slow networks;
 // tighter masks real failures, looser makes feedback slow.
