@@ -204,8 +204,8 @@ func TestApplyAll_AppliesTopLevelSecrets(t *testing.T) {
 				"web": {Image: "nginx", Port: 80, Secrets: []string{"DATABASE_URL"}},
 			},
 		},
-		DeployHash: "20260430-120000",
-		Secrets:    map[string]string{"DATABASE_URL": "postgres://u:p@db/x"},
+		DeployHash:   "20260430-120000",
+		SecretValues: map[string]string{"DATABASE_URL": "postgres://u:p@db/x"},
 	}
 
 	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {

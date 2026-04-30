@@ -10,7 +10,7 @@ import (
 )
 
 func TestBuildAppSecret_Empty_ReturnsNil(t *testing.T) {
-	rt := &runtime.Runtime{Secrets: nil}
+	rt := &runtime.Runtime{SecretValues: nil}
 	if got := BuildAppSecret(rt); got != nil {
 		t.Errorf("expected nil when no secrets, got %+v", got)
 	}
@@ -18,7 +18,7 @@ func TestBuildAppSecret_Empty_ReturnsNil(t *testing.T) {
 
 func TestBuildAppSecret_Shape(t *testing.T) {
 	rt := &runtime.Runtime{
-		Secrets: map[string]string{
+		SecretValues: map[string]string{
 			"DATABASE_URL":      "postgres://u:p@db:5432/x",
 			"POSTGRES_USER":     "alice",
 			"POSTGRES_PASSWORD": "ghp_xxx",

@@ -14,7 +14,7 @@ import (
 //
 // Lives at the cmd/ boundary because it reads the process environment
 // — internal packages stay env-free. The resolved map flows
-// downstream via runtime.Inputs.Secrets.
+// downstream via runtime.Inputs.SecretValues.
 func resolveSecrets(names []string, getenv func(string) string) (map[string]string, error) {
 	if len(names) == 0 {
 		return nil, nil

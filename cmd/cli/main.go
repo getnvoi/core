@@ -43,11 +43,16 @@ import (
 )
 
 // rt is the cmd-local bag populated by PersistentPreRunE and closed
-// over by every verb's RunE. The verbs read rt.cfg / rt.runtime, never
-// rebuild them.
+// over by every verb's RunE. Verbs read r.runtime; r.runtime.Cfg /
+// r.runtime.Log are canonical (rt.cfg was a duplicate of r.runtime.Cfg
+// and was dropped to remove that aliasing).
+//
+// r.log is kept distinct because it's populated BEFORE runtime.Build
+// runs — boundary errors that fail before Build still need a typed log
+// sink. Once Build succeeds, r.log and r.runtime.Log point at the same
+// underlying writer.
 type rt struct {
 	flags   runtime.Flags
-	cfg     *config.Config
 	runtime *runtime.Runtime
 	log     log.Log
 }
@@ -76,9 +81,15 @@ func newRoot(r *rt) *cobra.Command {
 		}
 
 		// Boundary I/O — all OS interaction happens here.
-		cfg, err := config.Load(r.flags.ConfigPath)
-		if err != nil {
-			return err
+		// Reuse the cfg parsed during alias expansion when paths match
+		// (eliminates a duplicate YAML parse + Validate per invocation).
+		cfg, ok := cachedConfig(r.flags.ConfigPath)
+		if !ok {
+			loaded, err := config.Load(r.flags.ConfigPath)
+			if err != nil {
+				return err
+			}
+			cfg = loaded
 		}
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -131,20 +142,20 @@ func newRoot(r *rt) *cobra.Command {
 
 		// Pure assembly downstream.
 		built, err := runtime.Build(cmd.Context(), runtime.Inputs{
-			Cfg:        cfg,
-			Flags:      r.flags,
-			Log:        r.log,
-			SSHPubKey:  pubKey,
-			SSHPrivKey: privKey,
-			CacheDir:   filepath.Join(home, ".cache", naming.CacheDirSegment),
-			DeployHash: time.Now().UTC().Format("20060102-150405"),
-			Backend:    backend,
-			Secrets:    secrets,
+			Cfg:          cfg,
+			Flags:        r.flags,
+			Log:          r.log,
+			SSHPubKey:    pubKey,
+			SSHPrivKey:   privKey,
+			CacheDir:     filepath.Join(home, ".cache", naming.CacheDirSegment),
+			DeployHash:   time.Now().UTC().Format("20060102-150405"),
+			Backend:      backend,
+			SecretValues: secrets,
 		})
 		if err != nil {
 			return err
 		}
-		r.cfg, r.runtime = cfg, built
+		r.runtime = built
 		return nil
 	}
 

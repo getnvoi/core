@@ -70,13 +70,13 @@ func TestEmitTunnel_RendersTunnelResourcesAndLocals(t *testing.T) {
 }
 
 func TestAgentWorkloads_RequiresToken(t *testing.T) {
-	if _, err := (TunnelEmitter{}).AgentWorkloads(baseCfg(), ""); err == nil {
+	if _, err := (TunnelEmitter{}).AgentWorkloads(""); err == nil {
 		t.Error("expected error for empty token")
 	}
 }
 
 func TestAgentWorkloads_BuildsSecretAndDeployment(t *testing.T) {
-	wls, err := TunnelEmitter{}.AgentWorkloads(baseCfg(), "tunnel-token-xyz")
+	wls, err := TunnelEmitter{}.AgentWorkloads("tunnel-token-xyz")
 	if err != nil {
 		t.Fatalf("AgentWorkloads: %v", err)
 	}

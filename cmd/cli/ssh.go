@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/internal/deploy"
 	"github.com/getnvoi/core/internal/install"
 	"github.com/getnvoi/core/internal/runner"
 	"github.com/getnvoi/core/internal/runtime"
@@ -54,7 +55,7 @@ Examples:
 				return fmt.Errorf("server %q not in config; available: %s", target, listServerNames(r.runtime.Cfg))
 			}
 
-			return runWith(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
+			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
 				return runOnNode(ctx, r.runtime, run, target, func(sh *ssh.Client) error {
 					return sh.RunStream(ctx, command, r.runtime.Log.Stream(), r.runtime.Log.Stream())
 				})

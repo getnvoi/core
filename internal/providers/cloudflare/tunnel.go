@@ -124,7 +124,7 @@ func (TunnelEmitter) EmitTunnel(cfg *config.Config) ([]byte, error) {
 // Two replicas, sized for a low-traffic public site. Outbound-only:
 // no hostPort, no nodeSelector pin (cloudflared dials out, doesn't
 // listen). The agent SHOULD work even if master 80/443 is closed.
-func (TunnelEmitter) AgentWorkloads(_ *config.Config, token string) ([]compile.TunnelWorkload, error) {
+func (TunnelEmitter) AgentWorkloads(token string) ([]compile.TunnelWorkload, error) {
 	if token == "" {
 		return nil, fmt.Errorf("cloudflared agent: token required (read from terraform output tunnel_token)")
 	}

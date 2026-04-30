@@ -24,9 +24,9 @@ func TestValidate(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		mutate   func(*Config)
-		wantErr  string // empty = expect success
+		name    string
+		mutate  func(*Config)
+		wantErr string // empty = expect success
 	}{
 		{name: "minimal valid", mutate: func(c *Config) {}},
 
@@ -71,13 +71,13 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "must be master or worker",
 		},
-		{
-			name: "reserved server name",
-			mutate: func(c *Config) {
-				c.Servers["default"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "worker"}
-			},
-			wantErr: "name reserved",
-		},
+		// "reserved server name" lives in validate_external_test.go —
+		// the reservation set is registered by each infra provider's
+		// init() (providers.RegisterReservedServerNames), and
+		// blank-importing internal/providers/hetzner from this
+		// package's tests would pull in the compile package, which
+		// imports config — same cycle reason as the "storage
+		// cloudflare ok" case.
 
 		{name: "storage unset is fine", mutate: func(c *Config) { c.Providers.Storage = "" }},
 		// "storage cloudflare ok" lives in validate_external_test.go —

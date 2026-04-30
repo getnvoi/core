@@ -61,6 +61,16 @@ type emitter struct{}
 // template uses for k3s nodes. Used by detach to filter plans.
 func (emitter) ServerResourceType() string { return "hcloud_server" }
 
+// hetznerReservedServerNames are YAML keys an operator must NOT pick
+// for a server, because the hetzner template uses these names for its
+// own non-server resources (network, LB, subnet). Registered into the
+// providers package via init() so the generic validator can query it
+// without importing this package.
+var hetznerReservedServerNames = map[string]bool{
+	"default": true, // hcloud_network.default, hcloud_firewall.default, hcloud_network_subnet.default
+	"cp":      true, // hcloud_load_balancer.cp + lb_network/target/service
+}
+
 // Provider declares the terraform provider this emitter relies on.
 // Aggregated by compile into the consolidated backend.tf so the
 // module ends up with exactly one `required_providers` block.

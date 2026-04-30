@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/getnvoi/core/internal/config"
@@ -8,9 +9,15 @@ import (
 	// Triggers cloudflare.init() so providers.IsRegisteredBucket
 	// ("cloudflare") returns true. Lives here (external test
 	// package) and not in validate_test.go because cloudflare's
-	// dns.go now imports internal/config — same-package
-	// blank-import would cycle.
+	// dns.go imports internal/config — same-package blank-import
+	// would cycle.
 	_ "github.com/getnvoi/core/internal/providers/cloudflare"
+
+	// Triggers hetzner.init() so
+	// providers.ReservedServerNames("hetzner") returns the registered
+	// set. Lives here for the same reason — hetzner's compile.go
+	// imports internal/runtime which imports internal/config.
+	_ "github.com/getnvoi/core/internal/providers/hetzner"
 )
 
 // TestValidate_StorageCloudflare_Registered locks the contract:
@@ -30,5 +37,30 @@ func TestValidate_StorageCloudflare_Registered(t *testing.T) {
 	}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("expected validate ok with registered bucket provider, got %v", err)
+	}
+}
+
+// TestValidate_ReservedServerName_Hetzner locks the contract: a YAML
+// server keyed "default" (or any other key the active infra emitter
+// registered as reserved) is rejected with a clear error. Per-provider
+// reservation sets are registered via
+// providers.RegisterReservedServerNames in each provider's init().
+func TestValidate_ReservedServerName_Hetzner(t *testing.T) {
+	c := &config.Config{
+		App:       "hello",
+		Env:       "dev",
+		Providers: config.Providers{Infra: "hetzner"},
+		SSHKey:    "/tmp/x.pub",
+		Servers: map[string]config.ServerSpec{
+			"master":  {Type: "cax11", Region: "nbg1", Role: "master"},
+			"default": {Type: "cax11", Region: "nbg1", Role: "worker"},
+		},
+	}
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error for reserved server name 'default', got nil")
+	}
+	if !strings.Contains(err.Error(), "name reserved") {
+		t.Fatalf("expected error containing 'name reserved', got: %v", err)
 	}
 }

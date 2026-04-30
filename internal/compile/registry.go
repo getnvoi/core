@@ -147,8 +147,11 @@ type TunnelEmitter interface {
 	// AgentWorkloads renders the in-cluster Deployment + Secret(s)
 	// the tunnel agent (cloudflared, ngrok) runs as. Called from
 	// the workload phase with the resolved token from `terraform
-	// output`.
-	AgentWorkloads(cfg *config.Config, token string) ([]TunnelWorkload, error)
+	// output`. No cfg argument: every value the agent needs is
+	// either baked into the implementation (image, replica count) or
+	// derived from the token. If a future tunnel impl needs cfg, the
+	// parameter is added back at that point.
+	AgentWorkloads(token string) ([]TunnelWorkload, error)
 }
 
 // TunnelWorkload wraps a typed k8s object the workload phase will

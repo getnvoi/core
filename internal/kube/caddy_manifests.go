@@ -2,6 +2,7 @@ package kube
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -23,9 +24,22 @@ const (
 	CaddyConfigKey      = "caddy.json"
 	CaddyDataDir        = "/data"
 	CaddyConfigStateDir = "/config"
-
-	caddySeedConfigJSON = `{"admin":{"listen":"localhost:2019"},"apps":{"http":{"servers":{"main":{"listen":[":80"],"routes":[]}}}}}`
 )
+
+// caddySeedConfigJSON is the bootstrap config Caddy boots with — pure
+// admin-API surface on localhost:2019, listening on :80 with no routes.
+// The reconciler POSTs the real config via ReloadCaddyConfig once
+// Services are applied; Caddy atomically swaps listeners with no
+// connection drops.
+//
+// Embedded so the JSON is editable as a real file (syntax highlighting,
+// linting) rather than a 100-char Go string literal. Bit-identical
+// bytes preserved across the cleanup so caddySeedChecksum() doesn't
+// change — rolling caddy on cosmetic deploys is wasted ingress
+// downtime.
+//
+//go:embed templates/caddy-seed.json
+var caddySeedConfigJSON string
 
 // caddyLabels are the labels every Caddy resource carries. Includes
 // app.kubernetes.io/name=caddy so FirstPod / Service selectors find

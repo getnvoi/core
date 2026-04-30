@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/getnvoi/core/internal/deploy"
 	"github.com/getnvoi/core/internal/install"
 	"github.com/getnvoi/core/internal/runner"
 	"github.com/getnvoi/core/internal/ssh"
@@ -45,7 +46,7 @@ Examples:
 
 			kArgs := buildLogsArgs(target, follow, tail, since)
 			primary := r.runtime.Cfg.PrimaryMaster()
-			return runWith(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
+			return deploy.WithRunner(cmd.Context(), r.runtime, func(ctx context.Context, run *runner.Runner) error {
 				return runOnNode(ctx, r.runtime, run, primary, func(sh *ssh.Client) error {
 					return install.KubectlStream(ctx, sh, os.Stdout, os.Stderr, kArgs...)
 				})

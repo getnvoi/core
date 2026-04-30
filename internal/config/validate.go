@@ -25,16 +25,6 @@ var reservedAliasNames = map[string]bool{
 	"completion": true,
 }
 
-// reservedServerNames are YAML keys an operator must NOT pick for a
-// server, because the hetzner emitter (or any future infra emitter)
-// uses these names for its own non-server resources (network, LB,
-// subnet). Keeps the assumption that "name in cfg.Servers" never
-// collides with a non-server terraform resource.
-var reservedServerNames = map[string]bool{
-	"default": true, // hcloud_network.default, hcloud_firewall.default, hcloud_network_subnet.default
-	"cp":      true, // hcloud_load_balancer.cp + lb_network/target/service
-}
-
 // Validate enforces YAML shape invariants and verifies that any
 // referenced provider is actually registered. Pure — no disk, no env.
 // File existence / tilde expansion / credential resolution happen at
@@ -64,6 +54,14 @@ func (c *Config) Validate() error {
 	if len(c.Servers) == 0 {
 		return fmt.Errorf("servers: at least one required")
 	}
+
+	// Reserved-name set is per-provider — each infra emitter declares
+	// its own collisions with non-server HCL resources via
+	// providers.RegisterReservedServerNames in its init(). Provider
+	// blank-imports in cmd/cli have already populated the registry
+	// by the time Validate runs. nil = no reservations for this
+	// provider, treated as a permissive empty set.
+	reservedServerNames := providers.ReservedServerNames(c.Providers.Infra)
 
 	masters, primaries := 0, 0
 	for name, srv := range c.Servers {

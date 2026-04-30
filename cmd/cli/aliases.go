@@ -51,11 +51,38 @@ func expandAliasArgs(args []string) ([]string, error) {
 	return append(tokens, args[1:]...), nil
 }
 
+// aliasCache holds the cfg parsed by loadConfigForAlias, keyed by the
+// resolved config path. PreRunE consults this cache before re-parsing —
+// alias-time and PreRunE-time validation are bit-identical (both call
+// config.Load → Validate), so a cache hit eliminates the second YAML
+// parse without losing any check.
+//
+// Module-level scope is fine: every cobra invocation runs in a fresh
+// process; no concurrent access.
+var (
+	aliasCachePath string
+	aliasCacheCfg  *config.Config
+)
+
+// cachedConfig returns (cfg, true) when loadConfigForAlias previously
+// parsed `path` successfully. Returns (nil, false) otherwise. PreRunE
+// uses this to skip a duplicate config.Load.
+func cachedConfig(path string) (*config.Config, bool) {
+	if aliasCacheCfg != nil && aliasCachePath == path {
+		return aliasCacheCfg, true
+	}
+	return nil, false
+}
+
 // loadConfigForAlias mirrors enough of PersistentPreRunE to look up
 // aliases. Reads the -c / --config flag from args (defaults to
 // nvoi.yaml — same as the cobra flag default) and runs config.Load.
 // Does NOT load .env: alias names + bodies are static YAML, no env
 // expansion needed at this layer.
+//
+// On success, caches the parsed cfg so PreRunE can reuse it without
+// re-parsing. Failures are NOT cached — alias expansion swallows the
+// error and falls through to PreRunE, which surfaces it cleanly.
 func loadConfigForAlias(args []string) (*config.Config, error) {
 	configPath := "nvoi.yaml"
 	for i := 0; i < len(args); i++ {
@@ -70,5 +97,10 @@ func loadConfigForAlias(args []string) (*config.Config, error) {
 			configPath = strings.TrimPrefix(args[i], "-c=")
 		}
 	}
-	return config.Load(configPath)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return nil, err
+	}
+	aliasCachePath, aliasCacheCfg = configPath, cfg
+	return cfg, nil
 }

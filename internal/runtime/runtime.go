@@ -55,33 +55,38 @@ type Inputs struct {
 	// Set means terraform's s3 backend points at the bucket.
 	Backend *state.Backend
 
-	// Secrets is the resolved name→value map for every entry in
+	// SecretValues is the resolved name→value map for every entry in
 	// `cfg.Secrets`. Populated at the cmd/ boundary against
 	// os.Getenv (today's only source — CredentialSource backends are
 	// upper-layer). Missing or empty values cause the boundary to
 	// hard-error before runtime.Build runs; downstream code can
 	// trust every requested name has a non-empty literal here.
 	//
+	// Distinct field name from cfg.Secrets ([]string of names) and
+	// ServiceSpec.Secrets ([]string of per-service whitelist) — three
+	// "secrets" fields in three structs, all different shapes; the
+	// resolved-value map gets the explicit name.
+	//
 	// Workload apply renders this into a single Opaque Secret named
 	// `nvoi-secrets`; per-service `secrets:` lists drive
 	// secretKeyRef-based env injection into each PodSpec.
-	Secrets map[string]string
+	SecretValues map[string]string
 }
 
 // Runtime is the bag every internal package accepts when it needs more
 // than just the YAML. Fields grow as we port more nvoi pieces (Creds,
 // GitRemote, DeployHash, …).
 type Runtime struct {
-	Cfg        *config.Config
-	Flags      Flags
-	Log        log.Log
-	SSHPubKey  []byte
-	SSHPrivKey []byte
-	CacheDir   string
-	WorkDir    string
-	DeployHash string
-	Backend    *state.Backend    // nil = local state; non-nil = remote on configured bucket
-	Secrets    map[string]string // resolved top-level secrets — see Inputs.Secrets
+	Cfg          *config.Config
+	Flags        Flags
+	Log          log.Log
+	SSHPubKey    []byte
+	SSHPrivKey   []byte
+	CacheDir     string
+	WorkDir      string
+	DeployHash   string
+	Backend      *state.Backend    // nil = local state; non-nil = remote on configured bucket
+	SecretValues map[string]string // resolved top-level secrets — see Inputs.SecretValues
 }
 
 // Build is pure assembly. ctx is accepted for future callers
@@ -90,15 +95,15 @@ type Runtime struct {
 func Build(ctx context.Context, in Inputs) (*Runtime, error) {
 	_ = ctx
 	return &Runtime{
-		Cfg:        in.Cfg,
-		Flags:      in.Flags,
-		Log:        in.Log,
-		SSHPubKey:  in.SSHPubKey,
-		SSHPrivKey: in.SSHPrivKey,
-		CacheDir:   in.CacheDir,
-		WorkDir:    naming.WorkDir(in.Cfg.App, in.Cfg.Env),
-		DeployHash: in.DeployHash,
-		Backend:    in.Backend,
-		Secrets:    in.Secrets,
+		Cfg:          in.Cfg,
+		Flags:        in.Flags,
+		Log:          in.Log,
+		SSHPubKey:    in.SSHPubKey,
+		SSHPrivKey:   in.SSHPrivKey,
+		CacheDir:     in.CacheDir,
+		WorkDir:      naming.WorkDir(in.Cfg.App, in.Cfg.Env),
+		DeployHash:   in.DeployHash,
+		Backend:      in.Backend,
+		SecretValues: in.SecretValues,
 	}, nil
 }

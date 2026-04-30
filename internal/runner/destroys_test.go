@@ -81,7 +81,7 @@ func TestPlanNodeDestroys(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := planNodeDestroys(tc.plan, "hcloud_server")
+			got := planTypeDestroys(tc.plan, "hcloud_server")
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("got %v want %v", got, tc.want)
 			}
@@ -89,11 +89,11 @@ func TestPlanNodeDestroys(t *testing.T) {
 	}
 }
 
-// planNodeDestroys delegates to planTypeDestroys; same walker is
-// re-used to filter tunnel-resource destroys for the pre-apply
-// drain step. Asserts the type filter is the only behavioural axis
-// — locking the contract that adding a new plan-gated drain target
-// is one constant + one call site, not a fork of the walker.
+// Asserts the same walker (planTypeDestroys) is re-used for both
+// node-resource and tunnel-resource filtering — the type filter is
+// the only behavioural axis. Locks the contract that adding a new
+// plan-gated drain target is one constant + one call site, not a
+// fork of the walker.
 func TestPlanTypeDestroys_TunnelFilter(t *testing.T) {
 	plan := &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
 		// Tunnel going away — caught.

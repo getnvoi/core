@@ -41,11 +41,13 @@ type Endpoints struct {
 	TunnelToken string
 }
 
-// Masters returns master server names sorted alphabetically.
-func (e *Endpoints) Masters() []string {
+// byRole returns server names with the given role, sorted
+// alphabetically. Shared by Masters / Workers — the only axis they
+// differ on is the role string.
+func (e *Endpoints) byRole(role string) []string {
 	names := make([]string, 0, len(e.Servers))
 	for name, s := range e.Servers {
-		if s.Role == "master" {
+		if s.Role == role {
 			names = append(names, name)
 		}
 	}
@@ -53,17 +55,11 @@ func (e *Endpoints) Masters() []string {
 	return names
 }
 
+// Masters returns master server names sorted alphabetically.
+func (e *Endpoints) Masters() []string { return e.byRole("master") }
+
 // Workers returns worker server names sorted alphabetically.
-func (e *Endpoints) Workers() []string {
-	names := make([]string, 0, len(e.Servers))
-	for name, s := range e.Servers {
-		if s.Role == "worker" {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
+func (e *Endpoints) Workers() []string { return e.byRole("worker") }
 
 // WorkerJoinTarget returns the address workers should join via:
 // LB private IP when HA, primary master's private IP otherwise. Always

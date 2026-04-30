@@ -3,8 +3,17 @@
 // pkg/provider/hetzner over.
 package hetzner
 
-import "github.com/getnvoi/core/internal/compile"
+import (
+	"github.com/getnvoi/core/internal/compile"
+	"github.com/getnvoi/core/internal/providers"
+)
 
 func init() {
 	compile.RegisterInfra("hetzner", &emitter{})
+	// Reserved YAML server keys — these names collide with non-server
+	// resources the hetzner template emits (network, LB, subnet).
+	// Validator consults this registry to reject conflicts at parse
+	// time. Lives in the provider package so the validator stays free
+	// of hetzner-specific knowledge.
+	providers.RegisterReservedServerNames("hetzner", hetznerReservedServerNames)
 }

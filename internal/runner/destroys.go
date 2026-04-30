@@ -5,41 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/hashicorp/terraform-exec/tfexec"
 	tfjson "github.com/hashicorp/terraform-json"
 )
-
-// PlanWithOut runs `terraform plan -out=<path>` and returns hasChanges.
-// The saved plan is binary-stable input for ApplyPlan, so the apply
-// does exactly what plan promised — no race window between the two.
-func (r *Runner) PlanWithOut(ctx context.Context, planPath string) (bool, error) {
-	if r.rt.Flags.JSON {
-		return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath))
-	}
-	return r.tf.Plan(ctx, tfexec.Out(planPath))
-}
-
-// PlanDestroyWithOut runs `terraform plan -destroy -out=<path>` and
-// returns hasChanges. The destroy variant of PlanWithOut: lets the
-// destroy pipeline inspect WHAT'S going away before tf actually
-// removes anything (the pre-apply drain step needs the plan to
-// decide whether the tunnel agent has to be killed first).
-func (r *Runner) PlanDestroyWithOut(ctx context.Context, planPath string) (bool, error) {
-	if r.rt.Flags.JSON {
-		return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath), tfexec.Destroy(true))
-	}
-	return r.tf.Plan(ctx, tfexec.Out(planPath), tfexec.Destroy(true))
-}
-
-// ApplyPlan applies a previously-saved plan file. Terraform won't
-// re-plan; it does exactly what's in the file. Works for both
-// regular plans and -destroy plans.
-func (r *Runner) ApplyPlan(ctx context.Context, planPath string) error {
-	if r.rt.Flags.JSON {
-		return r.tf.ApplyJSON(ctx, r.rt.Log.TFStream(), tfexec.DirOrPlan(planPath))
-	}
-	return r.tf.Apply(ctx, tfexec.DirOrPlan(planPath))
-}
 
 // PlannedNodeDestroys parses the saved plan and returns the YAML keys
 // of nodes being destroyed (including replacements — delete+create
@@ -61,14 +28,7 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 	if err != nil {
 		return nil, fmt.Errorf("read plan file %s: %w", planPath, err)
 	}
-	return planNodeDestroys(plan, serverResourceType), nil
-}
-
-// planNodeDestroys is the pure walker — pulled out so tests can pass a
-// hand-crafted *tfjson.Plan instead of needing a real terraform binary
-// + plan file on disk.
-func planNodeDestroys(plan *tfjson.Plan, serverResourceType string) []string {
-	return planTypeDestroys(plan, serverResourceType)
+	return planTypeDestroys(plan, serverResourceType), nil
 }
 
 // PlannedTunnelDestroys parses the saved plan and returns the
@@ -94,6 +54,9 @@ func (r *Runner) PlannedTunnelDestroys(ctx context.Context, planPath, tunnelReso
 // "names of resources of type T that the plan will delete." Replacement
 // (delete+create) counts as a destroy — the underlying object is
 // going away even if a new one with the same address takes its place.
+//
+// Pure — pulled out so tests can pass a hand-crafted *tfjson.Plan
+// instead of needing a real terraform binary + plan file on disk.
 func planTypeDestroys(plan *tfjson.Plan, resourceType string) []string {
 	var names []string
 	for _, rc := range plan.ResourceChanges {

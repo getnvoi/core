@@ -29,7 +29,7 @@ type Config struct {
 	// Secrets is the top-level list of secret NAMES. Each name resolves
 	// at the cmd/ boundary against os.Getenv (one source today —
 	// CredentialSource backends are an upper-layer concern). Resolved
-	// values land in `runtime.Runtime.Secrets` and are rendered into a
+	// values land in `runtime.Runtime.SecretValues` and are rendered into a
 	// single Opaque Secret named `nvoi-secrets` in the app namespace
 	// during workload apply. Per-service `secrets:` whitelists which
 	// names that service consumes via env-via-secretKeyRef injection.

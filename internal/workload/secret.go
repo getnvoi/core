@@ -15,16 +15,16 @@ import (
 // Returns nil when cfg.Secrets is empty — callers skip Apply in that
 // case.
 //
-// Resolution: takes ALREADY-RESOLVED values from rt.Secrets. The
+// Resolution: takes ALREADY-RESOLVED values from rt.SecretValues. The
 // cmd/cli boundary (resolveSecrets) reads os.Getenv before
 // runtime.Build runs, so we trust every key here has a non-empty
 // literal.
 func BuildAppSecret(rt *runtime.Runtime) *corev1.Secret {
-	if len(rt.Secrets) == 0 {
+	if len(rt.SecretValues) == 0 {
 		return nil
 	}
-	data := make(map[string][]byte, len(rt.Secrets))
-	for k, v := range rt.Secrets {
+	data := make(map[string][]byte, len(rt.SecretValues))
+	for k, v := range rt.SecretValues {
 		data[k] = []byte(v)
 	}
 	return &corev1.Secret{

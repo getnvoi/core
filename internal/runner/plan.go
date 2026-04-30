@@ -1,0 +1,39 @@
+package runner
+
+import (
+	"context"
+
+	"github.com/hashicorp/terraform-exec/tfexec"
+)
+
+// PlanWithOut runs `terraform plan -out=<path>` and returns hasChanges.
+// The saved plan is binary-stable input for ApplyPlan, so the apply
+// does exactly what plan promised — no race window between the two.
+func (r *Runner) PlanWithOut(ctx context.Context, planPath string) (bool, error) {
+	if r.rt.Flags.JSON {
+		return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath))
+	}
+	return r.tf.Plan(ctx, tfexec.Out(planPath))
+}
+
+// PlanDestroyWithOut runs `terraform plan -destroy -out=<path>` and
+// returns hasChanges. The destroy variant of PlanWithOut: lets the
+// destroy pipeline inspect WHAT'S going away before tf actually
+// removes anything (the pre-apply drain step needs the plan to
+// decide whether the tunnel agent has to be killed first).
+func (r *Runner) PlanDestroyWithOut(ctx context.Context, planPath string) (bool, error) {
+	if r.rt.Flags.JSON {
+		return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath), tfexec.Destroy(true))
+	}
+	return r.tf.Plan(ctx, tfexec.Out(planPath), tfexec.Destroy(true))
+}
+
+// ApplyPlan applies a previously-saved plan file. Terraform won't
+// re-plan; it does exactly what's in the file. Works for both
+// regular plans and -destroy plans.
+func (r *Runner) ApplyPlan(ctx context.Context, planPath string) error {
+	if r.rt.Flags.JSON {
+		return r.tf.ApplyJSON(ctx, r.rt.Log.TFStream(), tfexec.DirOrPlan(planPath))
+	}
+	return r.tf.Apply(ctx, tfexec.DirOrPlan(planPath))
+}
