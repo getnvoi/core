@@ -22,14 +22,14 @@ setup. The -- separator is required so cobra doesn't try to parse
 kubectl's own flags as its own.
 
 Examples:
-  tf kubectl -- get nodes
-  tf kubectl -- get pods -A -o wide
-  tf kubectl -- logs -n kube-system <pod>`,
+  nvoi kubectl -- get nodes
+  nvoi kubectl -- get pods -A -o wide
+  nvoi kubectl -- logs -n kube-system <pod>`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dashIdx := cmd.ArgsLenAtDash()
 			if dashIdx == -1 {
-				return fmt.Errorf("missing -- separator: tf kubectl -- <args>")
+				return fmt.Errorf("missing -- separator: nvoi kubectl -- <args>")
 			}
 			if dashIdx > 0 {
 				return fmt.Errorf("unexpected positional args before -- (got %d)", dashIdx)

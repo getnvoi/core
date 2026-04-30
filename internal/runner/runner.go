@@ -2,7 +2,7 @@
 // per command invocation. No retries, no fallbacks — terraform's own
 // behavior is the contract, including its native output format.
 //
-// Output discipline: nvoi-tf does NOT reformat terraform's events.
+// Output discipline: nvoi does NOT reformat terraform's events.
 // Terraform's text output flows through rt.Log.TFStream() (indented
 // under our step markers in text mode); --json flips to terraform's
 // -json mode and the raw stream passes through unchanged.

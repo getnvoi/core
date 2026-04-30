@@ -1,4 +1,4 @@
 .env
 .tf/
-bin/tf
+bin/nvoi
 .DS_Store

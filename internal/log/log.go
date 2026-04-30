@@ -1,6 +1,6 @@
-// Package log is the single output sink for nvoi-tf.
+// Package log is the single output sink for nvoi.
 //
-// Architecture: nvoi-tf does NOT reformat terraform's output. The Log
+// Architecture: nvoi does NOT reformat terraform's output. The Log
 // owns our own events (Step / Info / Warn / Error). For terraform's
 // output we pass through whatever terraform emits:
 //

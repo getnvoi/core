@@ -1,4 +1,4 @@
-// Package naming centralizes every deterministic name nvoi-tf produces.
+// Package naming centralizes every deterministic name nvoi produces.
 // Same env → same names → same resources, no UUIDs. Pure string
 // assembly: no env reads, no disk, no network.
 package naming
@@ -16,7 +16,7 @@ const DefaultUser = "deploy"
 // CacheDirSegment is the leaf path under the operator's cache root
 // (`~/.cache`) where the embedded terraform binary lands. Composed at
 // the cmd/ boundary — naming never reads $HOME.
-const CacheDirSegment = "nvoi-tf"
+const CacheDirSegment = "nvoi"
 
 // Prefix returns the cluster-scoped prefix shared by every resource:
 // `nvoi-{app}-{env}`.

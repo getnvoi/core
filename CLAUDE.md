@@ -1,4 +1,4 @@
-# CLAUDE.md — nvoi-tf
+# CLAUDE.md — nvoi
 
 YAML → HCL → Terraform builder. Sibling-track validation that nvoi's YAML
 surface compiles to a Terraform pack and lets TF own the resource graph,
@@ -18,7 +18,7 @@ internal/
   providers/<name>/      per-provider HCL emitter; init() registers
                          with the compile registry
 examples/                minimal YAML samples
-bin/tf                   entrypoint — sources .env, runs cmd/cli
+bin/nvoi                   entrypoint — sources .env, runs cmd/cli
 ```
 
 State backend is **local** — `terraform.tfstate` lives in
@@ -35,9 +35,9 @@ bucket creds programmatically.
 ## Run
 
 ```
-bin/tf deploy  -c examples/minimal.yaml
-bin/tf plan    -c examples/minimal.yaml
-bin/tf destroy -c examples/minimal.yaml
+bin/nvoi deploy  -c examples/minimal.yaml
+bin/nvoi plan    -c examples/minimal.yaml
+bin/nvoi destroy -c examples/minimal.yaml
 ```
 
 Hetzner env:

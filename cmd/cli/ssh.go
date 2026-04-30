@@ -25,14 +25,14 @@ Default target is the primary master. Pass a server name (matching a
 YAML key under servers:) to target a specific node.
 
 Examples:
-  tf ssh -- uptime
-  tf ssh master-1 -- ls /var/lib/rancher/k3s
-  tf ssh worker-1 -- systemctl status k3s-agent`,
+  nvoi ssh -- uptime
+  nvoi ssh master-1 -- ls /var/lib/rancher/k3s
+  nvoi ssh worker-1 -- systemctl status k3s-agent`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dashIdx := cmd.ArgsLenAtDash()
 			if dashIdx == -1 {
-				return fmt.Errorf("missing -- separator: tf ssh [target] -- <command>")
+				return fmt.Errorf("missing -- separator: nvoi ssh [target] -- <command>")
 			}
 
 			var target string
@@ -66,7 +66,7 @@ Examples:
 // runOnNode is the shared attach helper for ssh + kubectl:
 // terraform-init → read endpoints → SSH-dial the named server →
 // run action(sh) → deferred close. Hard-error if state has no record
-// of the server (operator hasn't run `tf deploy` yet).
+// of the server (operator hasn't run `nvoi deploy` yet).
 func runOnNode(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, target string, action func(sh *ssh.Client) error) error {
 	if err := run.Init(ctx); err != nil {
 		return err
@@ -77,7 +77,7 @@ func runOnNode(ctx context.Context, rt *runtime.Runtime, run *runner.Runner, tar
 	}
 	srv, ok := eps.Servers[target]
 	if !ok {
-		return fmt.Errorf("server %q not in terraform state — run `tf deploy` first", target)
+		return fmt.Errorf("server %q not in terraform state — run `nvoi deploy` first", target)
 	}
 	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, rt.SSHPrivKey)
 	if err != nil {

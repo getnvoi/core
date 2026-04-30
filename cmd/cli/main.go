@@ -52,8 +52,8 @@ type rt struct {
 
 func newRoot(r *rt) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "tf",
-		Short:         "nvoi-tf — YAML → Terraform builder",
+		Use:           "nvoi",
+		Short:         "nvoi — YAML → Terraform → k3s",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

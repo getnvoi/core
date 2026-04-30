@@ -1,5 +1,5 @@
 // Package utils — httpclient is the shared JSON-over-HTTP client every
-// provider REST API in nvoi-tf goes through. Ported from
+// provider REST API in nvoi goes through. Ported from
 // nvoi/pkg/utils/httpclient.go — same shape so future provider ports
 // (aws/scaleway/etc) drop in without rewrites.
 package utils

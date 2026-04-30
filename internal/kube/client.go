@@ -35,11 +35,11 @@ import (
 	"github.com/getnvoi/core/internal/ssh"
 )
 
-// FieldManager identifies nvoi-tf in the apiserver's owner-tracking.
+// FieldManager identifies nvoi in the apiserver's owner-tracking.
 // Updates from anyone with a different FieldManager are preserved
 // rather than overwritten — operator can edit non-managed fields with
-// kubectl without nvoi-tf "fighting" them.
-const FieldManager = "nvoi-tf"
+// kubectl without nvoi "fighting" them.
+const FieldManager = "nvoi"
 
 // Client wraps a typed Kubernetes clientset connected via SSH-forwarded
 // listener. Caller must Close() to release the listener and SSH channel
