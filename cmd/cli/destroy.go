@@ -3,10 +3,9 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/core/internal/deploy"
+	"github.com/getnvoi/core/pkg/deploy"
 )
 
-// destroyCmd is a thin cobra adapter over internal/deploy.Destroy.
 func destroyCmd(r *rt) *cobra.Command {
 	return &cobra.Command{
 		Use:   "destroy",

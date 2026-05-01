@@ -3,10 +3,9 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/core/internal/deploy"
+	"github.com/getnvoi/core/pkg/deploy"
 )
 
-// planCmd is a thin cobra adapter over internal/deploy.Plan.
 func planCmd(r *rt) *cobra.Command {
 	return &cobra.Command{
 		Use:   "plan",

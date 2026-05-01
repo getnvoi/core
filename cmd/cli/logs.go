@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/core/internal/deploy"
-	"github.com/getnvoi/core/internal/install"
-	"github.com/getnvoi/core/internal/log"
-	"github.com/getnvoi/core/internal/ssh"
+	"github.com/getnvoi/core/pkg/deploy"
+	"github.com/getnvoi/core/pkg/install"
+	"github.com/getnvoi/core/pkg/log"
+	"github.com/getnvoi/core/pkg/ssh"
 )
 
 func logsCmd(r *rt) *cobra.Command {
@@ -22,29 +22,13 @@ func logsCmd(r *rt) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs <service>",
 		Short: "Stream a service's pod logs via kubectl logs on the master",
-		Long: `Stream the logs of a service's pod.
-
-Resolves <service> against services: in nvoi.yaml. Stateful services
-(those with a storage: block) tail statefulset/<name> (pod 0);
-stateless services tail deployment/<name> (kubectl picks one pod).
-
-Output streams unmolested to stdout/stderr — pipeable to grep / jq /
-tee. Same plumbing as nvoi exec.
-
-Examples:
-  nvoi logs web
-  nvoi logs web -f
-  nvoi logs postgres --tail=100
-  nvoi logs web --since=5m`,
-		Args: cobra.ExactArgs(1),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			service := args[0]
-			target, err := execTarget(r.runtime.Cfg, service)
+			target, err := execTarget(r.runtime.Cfg, args[0])
 			if err != nil {
 				return err
 			}
 			kArgs := buildLogsArgs(target, follow, tail, since)
-
 			return deploy.RunWithSession(cmd.Context(), r.runtime, log.KindCluster, func(ctx context.Context, s *deploy.Session) error {
 				return s.OnPrimary(ctx, func(sh *ssh.Client) error {
 					return install.KubectlStream(ctx, install.KubectlSpec{
@@ -63,12 +47,6 @@ Examples:
 	return cmd
 }
 
-// buildLogsArgs assembles the kubectl argv from the resolved target
-// + flag values. Pure — no SSH, no I/O — so it tests in isolation
-// without a fake shell.
-//
-// Order is fixed so the resulting argv is deterministic across runs
-// (matters for log-comparison tests and operator muscle memory).
 func buildLogsArgs(target string, follow bool, tail int64, since string) []string {
 	out := []string{"logs", target}
 	if follow {

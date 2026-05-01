@@ -3,11 +3,9 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/getnvoi/core/internal/deploy"
+	"github.com/getnvoi/core/pkg/deploy"
 )
 
-// deployCmd is a thin cobra adapter over internal/deploy.Run. The
-// workflow lives in the deploy package; this file is just verb wiring.
 func deployCmd(r *rt) *cobra.Command {
 	return &cobra.Command{
 		Use:   "deploy",

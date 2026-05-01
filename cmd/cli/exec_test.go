@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getnvoi/core/internal/config"
+	"github.com/getnvoi/core/pkg/config"
 )
 
 func TestExecTarget_StatelessIsDeployment(t *testing.T) {
