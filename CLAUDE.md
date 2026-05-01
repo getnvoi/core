@@ -1,7 +1,14 @@
 # CLAUDE.md — nvoi
 
-YAML → terraform → k3s → workloads. Single-binary CLI. Repo `getnvoi/core`,
-binary `bin/nvoi`, module `github.com/getnvoi/core`.
+YAML → tofu (OpenTofu, MPL-2.0) → k3s → workloads. Single-binary CLI.
+Repo `getnvoi/core`, binary `bin/nvoi`, module `github.com/getnvoi/core`.
+
+The infra step shells out to a pinned OpenTofu binary auto-downloaded
+from `github.com/opentofu/opentofu` releases into the operator's cache
+on first use. We left HashiCorp Terraform behind to keep the deploy
+pipeline on a permissive licence — the `hashicorp/terraform-exec` and
+`hashicorp/terraform-json` libraries we still depend on are MPL-2.0
+and CLI-compatible with OpenTofu, so the only real swap was the binary.
 
 ## Pipeline (`nvoi deploy`)
 
@@ -15,7 +22,7 @@ detach              only when nodes leaving — drain → etcd member remove →
 drain-tunnel        only when tunnel object leaving — sweep cloudflared agent
                     in-cluster so CF accepts the DELETE
 tf-apply <plan>     applies the saved plan, no re-plan
-endpoints           parse terraform output (servers, api_endpoint, ha)
+endpoints           parse tofu output (servers, api_endpoint, ha)
 openShells          one ssh.Client per server, kept alive through end
 installCluster      swap → discover token → primary --cluster-init →
                     secondaries --server → workers via api_endpoint.private
@@ -53,26 +60,28 @@ Every cmd/cli verb is a thin cobra adapter over `RunWithSession`:
 | `cmd/cli/logs.go` | `s.OnPrimary(action)` running `install.KubectlStream` |
 | `cmd/cli/kubectl.go` | `s.OnPrimary(action)` running `install.KubectlStream` |
 
-Methods on `*Session`: `Init` (idempotent tf-init), `Endpoints` (memoized terraform output read), `OnNode(target, action)`, `OnPrimary(action)`, `Sub` via `s.Lg.Sub(kind)`.
+Methods on `*Session`: `Init` (idempotent tf-init), `Endpoints` (memoized tofu output read), `OnNode(target, action)`, `OnPrimary(action)`, `Sub` via `s.Lg.Sub(kind)`.
 
 ## Logging — JSONL canonical, text is a projection
 
 One `Event` type. Two serializers selected at `log.New(jsonl bool)`. **JSONL is canonical, full-fidelity. Text is a strict projection** — every text line maps 1:1 to a JSONL line; text drops only the `tf:` body.
 
+**Tofu always runs in `-json` internally**, regardless of the operator's `--json` flag. The runner uses the *JSON tfexec variants exclusively (`PlanJSON`/`ApplyJSON`/`DestroyJSON`), pipes events into `Log.TFStream()`, and `tfTransformer` lifts them into normalized Events. The flag only selects rendering (JSONL vs tabbed text) — one code path, two render modes. Earlier the text mode used the human-readable variants, which silently broke the transformer; we don't go back to that.
+
 | Field | Meaning |
 |---|---|
-| `time` | RFC3339 UTC. Lifted from `@timestamp` for terraform events. |
+| `time` | RFC3339 UTC. Lifted from `@timestamp` for tofu events. |
 | `kind` | Closed enum: `infra` \| `build` \| `cluster`. The deploy lifecycle's three buckets. |
-| `level` | Closed enum: `step` \| `info` \| `warn` \| `error`. Same field for nvoi events AND lifted terraform events. |
+| `level` | Closed enum: `step` \| `info` \| `warn` \| `error`. Same field for nvoi events AND lifted tofu events. |
 | `step` | populated when `level=step` (stage marker). |
-| `msg` | populated when `level≠step`. Lifted from `@message` for terraform events. |
-| `tf` | populated for kind=infra wrapped terraform events; renders only in JSONL. |
+| `msg` | populated when `level≠step`. Lifted from `@message` for tofu events. |
+| `tf` | populated for kind=infra wrapped tofu events; renders only in JSONL. |
 
 JSONL example:
 ```jsonl
 {"time":"2026-04-30T15:37:21Z","kind":"infra","level":"step","step":"compile"}
 {"time":"2026-04-30T15:37:23Z","kind":"build","level":"info","msg":"#14 [builder 6/6] RUN go build ..."}
-{"time":"2026-04-30T15:37:43Z","kind":"infra","level":"info","msg":"Terraform 1.9.5","tf":{"type":"version","terraform":"1.9.5"}}
+{"time":"2026-04-30T15:37:43Z","kind":"infra","level":"info","msg":"OpenTofu 1.11.6","tf":{"type":"version","terraform":"1.11.6"}}
 {"time":"2026-04-30T15:37:47Z","kind":"cluster","level":"step","step":"workload-postgres"}
 ```
 
@@ -80,15 +89,15 @@ Text projection (same data, tabbed):
 ```
 2026-04-30T15:37:21Z	infra	step	compile
 2026-04-30T15:37:23Z	build	info	#14 [builder 6/6] RUN go build ...
-2026-04-30T15:37:43Z	infra	info	Terraform 1.9.5
+2026-04-30T15:37:43Z	infra	info	OpenTofu 1.11.6
 2026-04-30T15:37:47Z	cluster	step	workload-postgres
 ```
 
 Pipe-friendly: `cut -f3` = level, `cut -f4` = payload. Embedded tabs in payload are sanitized to spaces so column count is invariant.
 
-`log.Log.Sub(kind)` returns a kind-scoped logger. The orchestration layer (`internal/deploy/`) scopes per phase: `rt.Log.Sub(KindBuild)` for build, `Sub(KindInfra)` for tf ops, `Sub(KindCluster)` for k3s/kube/caddy/tunnel.
+`log.Log.Sub(kind)` returns a kind-scoped logger. The orchestration layer (`internal/deploy/`) scopes per phase: `rt.Log.Sub(KindBuild)` for build, `Sub(KindInfra)` for tofu ops, `Sub(KindCluster)` for k3s/kube/caddy/tunnel.
 
-Terraform's native `-json` events are normalized at `Log.TFStream()`: `@level → level`, `@message → msg`, `@timestamp → time`, `@module` dropped, the rest folded under `tf:`. Non-JSON lines (terraform's pretty-printed `output -json` dump) are silently filtered. **NOTHING in the codebase writes to os.Stdout or os.Stderr directly.**
+Tofu's native `-json` events are normalized at `Log.TFStream()`: `@level → level`, `@message → msg`, `@timestamp → time`, `@module` dropped, the rest folded under `tf:`. Non-JSON lines (tofu's pretty-printed `output -json` dump) are silently filtered. **NOTHING in the codebase writes to os.Stdout or os.Stderr directly.**
 
 ## Layout
 
@@ -117,10 +126,12 @@ internal/
     cloudflare/          R2 BucketProvider + DNS + tunnel emitters
     hetzner/             InfraEmitter (compile.go, register.go, hetzner.tf.tmpl)
   state/                 Configure(ctx, *cfg, bp, lg): ensure state bucket
-  runner/                tfexec wrapper; plan.go (PlanWithOut, ApplyPlan,
-                         PlanDestroyWithOut), destroys.go (PlannedNodeDestroys,
-                         PlannedTunnelDestroys, planTypeDestroys),
-                         endpoints.go, runner.go, install.go (EnsureTerraform)
+  runner/                tfexec wrapper driving an OpenTofu binary;
+                         plan.go (PlanWithOut, ApplyPlan, PlanDestroyWithOut),
+                         destroys.go (PlannedNodeDestroys, PlannedTunnelDestroys,
+                         planTypeDestroys), endpoints.go, runner.go,
+                         install.go (EnsureTofu — fetches OpenTofu releases
+                         from github.com/opentofu/opentofu, sha256-verified)
   ssh/                   *Client + Shell interface (Run / RunStream / Addr / DialTCP)
   install/               wait, swap, k3s.go (constants + Node — bundles
                          Shell+Log), discover, primary (InstallPrimaryMaster),
@@ -140,7 +151,7 @@ internal/
                          ApplyAll + ReconcileRemoval (uses kube.Scope)
   log/                   Log interface; Kind/Level enums; one Event,
                          two serializers (JSONL + tabbed text projection);
-                         tfTransformer normalizes terraform's @-schema
+                         tfTransformer normalizes tofu's @-schema
   utils/                 httpclient (Request struct + Do(ctx, req))
                          shellquote / shellsplit / sortedkeys / envvars
   naming/                pure string helpers
@@ -171,9 +182,10 @@ bin/deploy           # text projection on stderr (tabbed values)
 
 ## State
 
-- Default: local at `.tf/<app>-<env>/terraform.tfstate`.
+- Default: local at `.tf/<app>-<env>/terraform.tfstate` (filename retained
+  by OpenTofu for state-format compatibility).
 - `providers.storage: cloudflare` → bucket `nvoi-{app}-{env}-tfstate` auto-created on R2,
-  terraform `s3` backend injected with creds. Auto-migrates both directions.
+  tofu `s3` backend injected with creds. Auto-migrates both directions.
 
 ## Conventions
 

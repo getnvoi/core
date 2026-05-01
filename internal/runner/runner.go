@@ -1,14 +1,15 @@
-// Package runner is the thin wrapper around terraform-exec. One Runner
-// per command invocation. No retries, no fallbacks — terraform's own
+// Package runner is the thin wrapper around terraform-exec, driving an
+// OpenTofu binary (CLI-compatible with terraform; MPL-2.0). One Runner
+// per command invocation. No retries, no fallbacks — tofu's own
 // behavior is the contract.
 //
-// Output discipline: terraform ALWAYS runs in -json mode internally.
+// Output discipline: tofu ALWAYS runs in -json mode internally.
 // Plan/Apply/Destroy use the *JSON tfexec variants and stream events
 // into rt.Log.TFStream(), where tfTransformer parses each JSON line,
 // lifts @level/@message/@timestamp, and emits normalized log Events.
 // The log layer's serializer (JSONL vs tabbed-text projection) is what
-// the operator's `--json` flag selects — terraform's invocation
-// doesn't change with the flag. One code path, two render modes.
+// the operator's `--json` flag selects — tofu's invocation doesn't
+// change with the flag. One code path, two render modes.
 //
 // Init has no -json mode → its native output is silenced. Any other
 // stray writes from tfexec (e.g. the older Output() leak) hit
@@ -30,14 +31,14 @@ type Runner struct {
 	rt *runtime.Runtime
 }
 
-// New downloads/locates terraform and points it at rt.WorkDir.
+// New downloads/locates tofu and points it at rt.WorkDir.
 // tfexec's ambient stdout/stderr are wired to io.Discard — the
 // *JSON variants we always use take their writer explicitly, so
 // the ambient pipes only catch stray output (init banner, the
-// `terraform output -json` pretty dump, etc.) which we don't want
+// `tofu output -json` pretty dump, etc.) which we don't want
 // corrupting our event stream.
 func New(ctx context.Context, rt *runtime.Runtime) (*Runner, error) {
-	bin, err := EnsureTerraform(ctx, rt.CacheDir)
+	bin, err := EnsureTofu(ctx, rt.CacheDir)
 	if err != nil {
 		return nil, err
 	}
@@ -50,9 +51,9 @@ func New(ctx context.Context, rt *runtime.Runtime) (*Runner, error) {
 	return &Runner{tf: tf, rt: rt}, nil
 }
 
-// Init runs `terraform init` with -force-copy so backend transitions
+// Init runs `tofu init` with -force-copy so backend transitions
 // (local↔remote, between buckets) auto-confirm without prompts.
-// Terraform 1.9 auto-migrates on backend change when -force-copy is
+// OpenTofu auto-migrates on backend change when -force-copy is
 // set. No-op when no migration is needed. Init has no -json mode;
 // its native output is silenced via the runner's SetStdout to
 // io.Discard.

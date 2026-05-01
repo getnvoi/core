@@ -14,7 +14,7 @@ import (
 const DefaultUser = "deploy"
 
 // CacheDirSegment is the leaf path under the operator's cache root
-// (`~/.cache`) where the embedded terraform binary lands. Composed at
+// (`~/.cache`) where the embedded tofu binary lands. Composed at
 // the cmd/ boundary — naming never reads $HOME.
 const CacheDirSegment = "nvoi"
 
@@ -35,9 +35,9 @@ func SSHKey(app, env string) string { return Prefix(app, env) + "-key" }
 // re-promote remote state.
 func StateBucket(app, env string) string { return Prefix(app, env) + "-tfstate" }
 
-// WorkDir returns the per-(app, env) terraform working directory under
+// WorkDir returns the per-(app, env) tofu working directory under
 // the operator's cwd: `.tf/{app}-{env}/`. Bundle files + `terraform.tfstate`
-// land here.
+// (filename retained by OpenTofu for state-format compat) land here.
 func WorkDir(app, env string) string { return filepath.Join(workDirRoot, app+"-"+env) }
 
 // ProviderHCL returns the .tf filename a provider's emitter writes into

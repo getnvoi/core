@@ -117,16 +117,16 @@ type StorageSpec struct {
 type Providers struct {
 	Infra string `yaml:"infra"`
 
-	// Storage is OPTIONAL. When unset, terraform state lives locally
+	// Storage is OPTIONAL. When unset, tofu state lives locally
 	// in `.tf/<app>-<env>/terraform.tfstate`. When set, the bucket
 	// `nvoi-{app}-{env}-tfstate` is auto-provisioned at deploy time
-	// and terraform's `s3` backend points at it. Transitions both
+	// and tofu's `s3` backend points at it. Transitions both
 	// directions auto-migrate state.
 	Storage string `yaml:"storage,omitempty"`
 
 	// DNS is REQUIRED when Domains is non-empty. Today: cloudflare.
-	// The named provider's emitter writes terraform resources for
-	// the domain → master (or tunnel edge) bindings; terraform owns
+	// The named provider's emitter writes tofu resources for
+	// the domain → master (or tunnel edge) bindings; tofu owns
 	// the lifecycle (drift detection, deletion) — there are no
 	// runtime API calls from nvoi to the DNS provider.
 	DNS string `yaml:"dns,omitempty"`

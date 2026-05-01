@@ -1,6 +1,6 @@
-// Package state owns the terraform-remote-state lifecycle: provision
+// Package state owns the tofu-remote-state lifecycle: provision
 // the per-(app, env) bucket via the configured BucketProvider and
-// resolve the S3-compatible credentials terraform's `backend "s3" {}`
+// resolve the S3-compatible credentials tofu's `backend "s3" {}`
 // block needs.
 //
 // Two responsibilities, one orchestration:
@@ -10,7 +10,7 @@
 //
 //  2. Credentials — returns S3-compatible access details. Used by
 //     compile to render the backend block and by deploy.go to inject
-//     into terraform-exec's subprocess env so terraform can read the
+//     into terraform-exec's subprocess env so tofu can read the
 //     state.
 package state
 
@@ -24,10 +24,10 @@ import (
 	"github.com/getnvoi/core/internal/providers"
 )
 
-// Backend is the resolved terraform-state backend config — bucket
+// Backend is the resolved tofu-state backend config — bucket
 // name + S3-compatible creds. Stamped on runtime.Runtime by the cmd/
 // boundary; consumed by the hetzner emitter (renders backend block)
-// and the runner (sets AWS_* env vars on the tf subprocess).
+// and the runner (sets AWS_* env vars on the tofu subprocess).
 type Backend struct {
 	Bucket    string
 	Endpoint  string

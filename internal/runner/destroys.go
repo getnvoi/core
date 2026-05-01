@@ -32,7 +32,7 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 }
 
 // PlannedTunnelDestroys parses the saved plan and returns the
-// terraform resource names of tunnel objects being destroyed
+// tofu resource names of tunnel objects being destroyed
 // (including replacements — delete+create counts, since the underlying
 // tunnel id changes and the in-cluster agent must be killed first
 // regardless of what comes after).
@@ -56,7 +56,7 @@ func (r *Runner) PlannedTunnelDestroys(ctx context.Context, planPath, tunnelReso
 // going away even if a new one with the same address takes its place.
 //
 // Pure — pulled out so tests can pass a hand-crafted *tfjson.Plan
-// instead of needing a real terraform binary + plan file on disk.
+// instead of needing a real tofu binary + plan file on disk.
 func planTypeDestroys(plan *tfjson.Plan, resourceType string) []string {
 	var names []string
 	for _, rc := range plan.ResourceChanges {

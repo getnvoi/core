@@ -79,7 +79,7 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 				return err
 			}
 		} else {
-			infraLg.Info("no terraform changes")
+			infraLg.Info("no tofu changes")
 		}
 
 		// ── post-apply: open SSH to every server ONCE,

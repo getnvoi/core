@@ -6,7 +6,7 @@
 //  3. delete    — `kubectl delete node` so the apiserver no longer
 //     tracks it (no ghost entries in `kubectl get nodes`)
 //
-// Sits between `terraform plan` and `terraform apply` in the deploy pipeline —
+// Sits between `tofu plan` and `tofu apply` in the deploy pipeline —
 // guarantees workloads, etcd quorum, and the apiserver's node list
 // all stay consistent before the underlying VM is destroyed.
 //

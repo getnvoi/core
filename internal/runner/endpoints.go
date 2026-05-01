@@ -23,7 +23,7 @@ type APIEndpoint struct {
 	Private string `json:"private"`
 }
 
-// Endpoints is the typed view of a provider's terraform outputs.
+// Endpoints is the typed view of a provider's tofu outputs.
 // Construction is uniform across providers; consumers (deploy.go, the
 // install package) never branch on provider name.
 type Endpoints struct {
@@ -72,13 +72,13 @@ func (e *Endpoints) WorkerJoinTarget(primaryMaster string) string {
 	return e.Servers[primaryMaster].Private
 }
 
-// Endpoints reads `terraform output -json` and parses our uniform
+// Endpoints reads `tofu output -json` and parses our uniform
 // schema. Called after Apply.
 //
 // Leak guard: tfexec v0.21's Output() — even with SetStdout(io.Discard)
-// — leaks terraform's pretty-printed `output -json` dump to the
-// process's real os.Stdout. We see it when running `bin/deploy --json`:
-// the multi-line JSON corrupts the JSONL stream. Workaround: redirect
+// — leaks tofu's pretty-printed `output -json` dump to the process's
+// real os.Stdout. We see it when running `bin/deploy --json`: the
+// multi-line JSON corrupts the JSONL stream. Workaround: redirect
 // os.Stdout to /dev/null around the Output() call. Single-threaded
 // stage (no other writers to os.Stdout during this window).
 func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
@@ -93,12 +93,12 @@ func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
 	}
 	out, err := r.tf.Output(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("terraform output: %w", err)
+		return nil, fmt.Errorf("tofu output: %w", err)
 	}
 
 	srvOut, ok := out["servers"]
 	if !ok {
-		return nil, fmt.Errorf(`terraform output "servers" missing — provider emitter must declare it`)
+		return nil, fmt.Errorf(`tofu output "servers" missing — provider emitter must declare it`)
 	}
 	var servers map[string]Server
 	if err := json.Unmarshal(srvOut.Value, &servers); err != nil {
@@ -107,7 +107,7 @@ func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
 
 	apiOut, ok := out["api_endpoint"]
 	if !ok {
-		return nil, fmt.Errorf(`terraform output "api_endpoint" missing — provider emitter must declare it`)
+		return nil, fmt.Errorf(`tofu output "api_endpoint" missing — provider emitter must declare it`)
 	}
 	var api APIEndpoint
 	if err := json.Unmarshal(apiOut.Value, &api); err != nil {

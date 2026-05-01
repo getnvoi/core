@@ -9,7 +9,7 @@ import (
 	"github.com/getnvoi/core/internal/utils"
 )
 
-// installCluster is the post-terraform bootstrap pipeline:
+// installCluster is the post-tofu bootstrap pipeline:
 //  1. ensure swap on every node
 //  2. discover any existing k3s cluster (idempotency)
 //  3. cold start: install --cluster-init on the primary master

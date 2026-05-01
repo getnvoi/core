@@ -1,5 +1,5 @@
 // Package compile turns a runtime.Runtime into an HCL Bundle ready to
-// write into a terraform working directory. Pure transformation: no
+// write into a tofu working directory. Pure transformation: no
 // I/O, no provider API calls, no state, no ctx — runs synchronously
 // in-process. Add ctx the day a step inside genuinely waits.
 //
@@ -30,7 +30,7 @@ import (
 //
 // Each provider's emitter writes ONLY its provider-config block + its
 // resources. The terraform meta-block lives in backend.tf alone —
-// terraform rejects duplicate `required_providers` blocks at the
+// tofu rejects duplicate `required_providers` blocks at the
 // module level, so per-provider declarations must aggregate.
 func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 	b := NewBundle()

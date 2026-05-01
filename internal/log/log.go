@@ -43,7 +43,7 @@ const (
 )
 
 // Level is the event's severity / marker — closed enum shared by
-// both nvoi-emitted events and lifted terraform events.
+// both nvoi-emitted events and lifted tofu events.
 type Level string
 
 const (
@@ -63,7 +63,7 @@ type Event struct {
 	Level Level
 	Step  string         // populated when Level == LevelStep
 	Msg   string         // populated when Level != LevelStep
-	TF    map[string]any // populated for lifted terraform events; rendered only in JSONL
+	TF    map[string]any // populated for lifted tofu events; rendered only in JSONL
 }
 
 // Log is the contract every internal package consumes. Constructed
@@ -80,12 +80,12 @@ type Log interface {
 	// orchestration layer (internal/deploy) to tag each phase.
 	Sub(kind Kind) Log
 
-	// TFStream returns a writer that line-buffers terraform's
-	// `-json` output, parses each line, lifts @timestamp/@level/
-	// @message to top-level Time/Level/Msg, folds the rest under
-	// TF, and emits as Events. Non-JSON lines (e.g. terraform's
-	// pretty-printed `output -json` dump) are silently dropped —
-	// the JSONL stream stays well-formed.
+	// TFStream returns a writer that line-buffers tofu's `-json`
+	// output, parses each line, lifts @timestamp/@level/@message
+	// to top-level Time/Level/Msg, folds the rest under TF, and
+	// emits as Events. Non-JSON lines (e.g. tofu's pretty-printed
+	// `output -json` dump) are silently dropped — the JSONL
+	// stream stays well-formed.
 	TFStream() io.Writer
 
 	// Stream returns a writer that line-buffers arbitrary plain-text
@@ -204,9 +204,9 @@ func (textSerializer) emit(w io.Writer, e Event) {
 
 // ── stream transformers ─────────────────────────────────────────────
 
-// tfTransformer line-buffers terraform's -json stdout, parses each
+// tfTransformer line-buffers tofu's -json stdout, parses each
 // line, lifts the @-prefixed metadata to top-level Event fields and
-// folds the rest under TF. Non-JSON lines (terraform's pretty-printed
+// folds the rest under TF. Non-JSON lines (tofu's pretty-printed
 // `output -json` dump, banner blank lines, etc.) are silently dropped
 // — guarantees the stream stays well-formed JSONL.
 type tfTransformer struct {
@@ -255,7 +255,7 @@ func (t *tfTransformer) process(line []byte) {
 		e.Msg = v
 		delete(raw, "@message")
 	}
-	delete(raw, "@module") // noise — every TF event carries terraform.ui
+	delete(raw, "@module") // noise — every event carries tofu.ui (or terraform.ui pre-fork)
 	e.TF = raw
 	if len(e.TF) == 0 {
 		e.TF = nil

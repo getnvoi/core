@@ -1,4 +1,4 @@
-// Package install runs the post-terraform-apply bootstrap stages: wait
+// Package install runs the post-tofu-apply bootstrap stages: wait
 // for SSH, ensure swap, install/join k3s. All operations idempotent —
 // safe to re-run on a converged cluster.
 package install

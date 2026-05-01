@@ -41,7 +41,7 @@ type Inputs struct {
 	Log        log.Log
 	SSHPubKey  []byte // pre-read, trimmed, non-empty — for cloud-init injection
 	SSHPrivKey []byte // pre-read PEM bytes — for SSH dial during install
-	CacheDir   string // absolute, terraform binary cache
+	CacheDir   string // absolute, tofu binary cache
 
 	// DeployHash is the per-deploy tag fragment (YYYYMMDD-HHMMSS UTC).
 	// Stamped on built image tags AND every nvoi-managed workload's
@@ -51,8 +51,8 @@ type Inputs struct {
 	DeployHash string
 
 	// Backend is set when providers.storage is configured. nil means
-	// terraform stores state locally in .tf/<app>-<env>/terraform.tfstate.
-	// Set means terraform's s3 backend points at the bucket.
+	// tofu stores state locally in .tf/<app>-<env>/terraform.tfstate.
+	// Set means tofu's s3 backend points at the bucket.
 	Backend *state.Backend
 
 	// SecretValues is the resolved name→value map for every entry in
