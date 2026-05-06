@@ -6,7 +6,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/log"
 	rt2 "github.com/getnvoi/core/pkg/runtime"
 )
@@ -18,7 +19,7 @@ import (
 //     entry, dispatched by svc.Storage presence
 //   - one Service (owner=services) per cfg.Services entry
 //
-// Then runs ReconcileRemoval to delete nvoi-managed resources whose
+// Then runs reconcileRemoval to delete nvoi-managed resources whose
 // YAML entry is gone, scoped per-owner via SweepOwned.
 //
 // Idempotent: every Apply path is Get-then-Create-or-Update with
@@ -29,7 +30,7 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 	appSecretsScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}
 	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
 
-	if sec, err := BuildRegistrySecret(r); err != nil {
+	if sec, err := buildRegistrySecret(r); err != nil {
 		return fmt.Errorf("build registry-auth: %w", err)
 	} else if sec != nil {
 		lg.Step("registry-secret")
@@ -38,35 +39,35 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 		}
 	}
 
-	if sec := BuildAppSecret(r); sec != nil {
+	if sec := buildAppSecret(r); sec != nil {
 		lg.Step("app-secret")
 		if err := kc.ApplyOwned(ctx, appSecretsScope, sec); err != nil {
 			return fmt.Errorf("apply nvoi-secrets: %w", err)
 		}
 	}
 
-	for _, name := range sortedStringKeys(r.Cfg.Services) {
+	for _, name := range utils.SortedKeys(r.Cfg.Services) {
 		svc := r.Cfg.Services[name]
 		lg.Step("workload-" + name)
 
 		var workload runtime.Object
 		if svc.IsStateful() {
-			workload = BuildStatefulSet(r, name, svc)
+			workload = buildStatefulSet(r, name, svc)
 		} else {
-			workload = BuildDeployment(r, name, svc)
+			workload = buildDeployment(r, name, svc)
 		}
 		if err := kc.ApplyOwned(ctx, servicesScope, workload); err != nil {
 			return fmt.Errorf("apply workload %s: %w", name, err)
 		}
-		if err := kc.ApplyOwned(ctx, servicesScope, BuildService(r, name, svc)); err != nil {
+		if err := kc.ApplyOwned(ctx, servicesScope, buildService(r, name, svc)); err != nil {
 			return fmt.Errorf("apply service %s: %w", name, err)
 		}
 	}
 
-	return ReconcileRemoval(ctx, r, kc, lg)
+	return reconcileRemoval(ctx, r, kc, lg)
 }
 
-// ReconcileRemoval deletes nvoi-managed resources whose YAML entry has
+// reconcileRemoval deletes nvoi-managed resources whose YAML entry has
 // been removed. Owner-scoped via SweepOwned — each step's sweep can
 // only see its own resources, so a stale registry-auth Secret never
 // gets caught by the services sweep, etc.
@@ -81,11 +82,11 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 // Plus owner-singleton sweeps for registry-auth and nvoi-secrets:
 // when operator removes registry: or empties secrets:, the orphan
 // Secret is purged.
-func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
+func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
 	declared := make([]string, 0, len(r.Cfg.Services))
 	declaredStateful := make([]string, 0)
 	declaredStateless := make([]string, 0)
-	for _, name := range sortedStringKeys(r.Cfg.Services) {
+	for _, name := range utils.SortedKeys(r.Cfg.Services) {
 		declared = append(declared, name)
 		if r.Cfg.Services[name].IsStateful() {
 			declaredStateful = append(declaredStateful, name)
@@ -117,7 +118,7 @@ func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	// nvoi-secrets singleton: keep only if secrets: declared.
 	appSecretDesired := []string(nil)
 	if len(r.Cfg.Secrets) > 0 {
-		appSecretDesired = []string{AppSecretName}
+		appSecretDesired = []string{appSecretName}
 	}
 	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}, kube.KindSecret, appSecretDesired); err != nil {
 		return fmt.Errorf("sweep stale app secret: %w", err)

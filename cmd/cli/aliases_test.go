@@ -4,31 +4,22 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/getnvoi/core/internal/utils"
+	"github.com/getnvoi/core/pkg/config"
 )
 
-// expandFromAliases is the testable core of expandAliasArgs minus
-// the disk read. Same logic, takes a pre-parsed aliases map.
-func expandFromAliases(aliases map[string]string, args []string) ([]string, error) {
-	if len(args) == 0 {
-		return args, nil
-	}
-	body, ok := aliases[args[0]]
-	if !ok {
-		return args, nil
-	}
-	tokens, err := utils.ShellSplit(body)
-	if err != nil {
-		return nil, err
-	}
-	return append(tokens, args[1:]...), nil
+// expand wraps config.ExpandAlias around an inline-built Config so each
+// test reads as "given these aliases, expanding this argv produces …".
+// The CLI-side wrapper (ExpandAliasArgs in internal/cli) only adds disk
+// loading on top — exercised live, not here.
+func expand(aliases map[string]string, args []string) ([]string, error) {
+	return config.ExpandAlias(&config.Config{Aliases: aliases}, args)
 }
 
 func TestAliasExpansion_ReplacesNameWithBody(t *testing.T) {
 	aliases := map[string]string{
 		"visits": `exec postgres -- psql -tAc "SELECT COUNT(*) FROM visits"`,
 	}
-	got, err := expandFromAliases(aliases, []string{"visits"})
+	got, err := expand(aliases, []string{"visits"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -42,7 +33,7 @@ func TestAliasExpansion_AppendsExtraArgs(t *testing.T) {
 	aliases := map[string]string{
 		"weblogs": "kubectl -- logs deploy/web",
 	}
-	got, err := expandFromAliases(aliases, []string{"weblogs", "-f", "--tail=20"})
+	got, err := expand(aliases, []string{"weblogs", "-f", "--tail=20"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -54,7 +45,7 @@ func TestAliasExpansion_AppendsExtraArgs(t *testing.T) {
 
 func TestAliasExpansion_PassesThroughUnknownName(t *testing.T) {
 	aliases := map[string]string{"visits": "exec postgres -- psql"}
-	got, err := expandFromAliases(aliases, []string{"deploy", "--config", "alt.yaml"})
+	got, err := expand(aliases, []string{"deploy", "--config", "alt.yaml"})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -65,7 +56,7 @@ func TestAliasExpansion_PassesThroughUnknownName(t *testing.T) {
 }
 
 func TestAliasExpansion_EmptyArgsPassThrough(t *testing.T) {
-	got, err := expandFromAliases(map[string]string{"x": "exec"}, nil)
+	got, err := expand(map[string]string{"x": "exec"}, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

@@ -8,7 +8,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/compile"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -20,10 +21,9 @@ var dnsTpl = template.Must(template.New("dns.tf.tmpl").
 	ParseFS(dnsTemplateFS, "templates/dns.tf.tmpl"))
 
 // DNSEmitter renders Cloudflare DNS records as terraform HCL. One
-// `cloudflare_record` per (service, domain) pair. Without
-// providers.tunnel: A records pointing at the master's public IP
-// (terraform-interpolated from hcloud_server.<primary>.ipv4_address).
-// Tunnel mode (commit #7) flips these to CNAMEs to the tunnel edge.
+// `cloudflare_record` per (service, domain) pair. A records pointing
+// at the master's public IP (terraform-interpolated from
+// hcloud_server.<primary>.ipv4_address).
 //
 // Stateless: reads cfg.Domains + cfg.Servers + the resolved zone ID
 // (from CF_ZONE_ID env var). No I/O at emit time beyond env reads —
@@ -41,17 +41,13 @@ func (DNSEmitter) Provider() compile.ProviderRequirement {
 	}
 }
 
-// recordData drives the per-record block in dns.tf.tmpl. When
-// Tunnel is true, the template emits a CNAME pointing at
-// local.tunnel_cname (the tunnel emitter writes that local). When
-// false, an A record with Target as the raw HCL expression
-// (typically `hcloud_server.master.ipv4_address`, NOT a quoted
-// string).
+// recordData drives the per-record block in dns.tf.tmpl. Always emits
+// an A record with Target as the raw HCL expression (typically
+// `hcloud_server.<primary>.ipv4_address`, NOT a quoted string).
 type recordData struct {
 	ResourceName string // sanitized terraform resource name, unique
 	Name         string // record name relative to zone (e.g. "www", "@")
-	Target       string // raw HCL expression for A-record content; ignored when Tunnel
-	Tunnel       bool   // emit CNAME → local.tunnel_cname instead of A
+	Target       string // raw HCL expression for A-record content
 }
 
 type dnsTemplateData struct {
@@ -83,32 +79,21 @@ func (DNSEmitter) EmitDNS(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("cloudflare dns: CF_ZONE required (e.g. nvoi.to)")
 	}
 
-	tunnelMode := cfg.Providers.Tunnel != ""
-
-	// In Caddy mode the A target is the master's public IPv4. In
-	// tunnel mode the template flips to CNAME → local.tunnel_cname
-	// (which the active tunnel emitter declares); the Target string
-	// here is unused on that path but we still set it so the
-	// template's else-branch is well-defined for assertion.
-	var aTarget string
-	if !tunnelMode {
-		primary := cfg.PrimaryMaster()
-		if primary == "" {
-			return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
-		}
-		aTarget = fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
+	primary := cfg.PrimaryMaster()
+	if primary == "" {
+		return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
 	}
+	aTarget := fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
 
 	// Per-deploy uniqueness: combine service + sanitized hostname so
 	// re-running with the same YAML produces a stable resource address.
 	records := make([]recordData, 0)
-	for _, svcName := range sortedStringKeys(cfg.Domains) {
+	for _, svcName := range utils.SortedKeys(cfg.Domains) {
 		for _, host := range cfg.Domains[svcName] {
 			records = append(records, recordData{
 				ResourceName: sanitizeResourceName(svcName + "_" + host),
 				Name:         recordNameFor(host, zone),
 				Target:       aTarget,
-				Tunnel:       tunnelMode,
 			})
 		}
 	}

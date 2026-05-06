@@ -3,7 +3,7 @@ package deploy
 import (
 	"context"
 
-	"github.com/getnvoi/core/pkg/build"
+	"github.com/getnvoi/core/pkg/internal/build"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 )
@@ -27,15 +27,15 @@ import (
 //	defer closeShells   one close per server, end of command
 //
 // Each phase emits through a kind-scoped sub-logger:
-//   - infraLg   — tf-init / tf-plan / tf-apply / endpoints / detach / drain-tunnel
+//   - infraLg   — tf-init / tf-plan / tf-apply / endpoints / detach
 //   - buildLg   — build phase (docker login + buildx)
 //   - clusterLg — ssh open + k3s install + workloads + ingress
 func Run(ctx context.Context, rt *runtime.Runtime) error {
 	// Cluster kind is the default scope of the Session — install /
-	// kube / caddy / tunnel work all live there. Infra-phase steps
-	// (tf-init, tf-plan, endpoints, predrains) re-scope to KindInfra
-	// via local Sub() calls. Build phase gets its own KindBuild
-	// scope handed straight to build.All.
+	// kube / caddy work all live there. Infra-phase steps (tf-init,
+	// tf-plan, endpoints, predrains) re-scope to KindInfra via local
+	// Sub() calls. Build phase gets its own KindBuild scope handed
+	// straight to build.All.
 	return RunWithSession(ctx, rt, log.KindCluster, func(ctx context.Context, s *Session) error {
 		infraLg := rt.Log.Sub(log.KindInfra)
 		buildLg := rt.Log.Sub(log.KindBuild)
@@ -67,9 +67,6 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 			// the drain calls and restore after.
 			s.Lg, infraLg = infraLg, s.Lg
 			if err := s.detachNode(ctx, planPath); err != nil {
-				return err
-			}
-			if err := s.drainTunnel(ctx, planPath); err != nil {
 				return err
 			}
 			s.Lg, infraLg = infraLg, s.Lg

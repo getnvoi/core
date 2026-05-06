@@ -1,9 +1,10 @@
-// Package deploy is the orchestration layer above internal/build,
-// internal/install, internal/detach, internal/kube, internal/runner,
-// internal/workload. Three exported entry points — Run / Destroy / Plan
-// — back the deploy/destroy/plan verbs. RunWithSession is a fourth
-// entry point used by ad-hoc cmd/cli verbs (ssh / exec / logs /
-// kubectl) that need a Session to read endpoints + dial SSH.
+// Package deploy is the orchestration layer above install, workload,
+// and the library-internal build / cloudinit / compile / detach /
+// kube / runner packages (under pkg/internal). Three exported entry
+// points — Run / Destroy / Plan — back the deploy/destroy/plan verbs.
+// RunWithSession is a fourth entry point used by ad-hoc cmd/cli verbs
+// (ssh / exec / logs / kubectl) that need a Session to read endpoints
+// + dial SSH.
 //
 // cmd/cli stays a thin OS boundary (env, disk, alias expansion,
 // runtime.Build); every workflow lives here.
@@ -14,9 +15,9 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/runner"
 	"github.com/getnvoi/core/pkg/log"
-	"github.com/getnvoi/core/pkg/runner"
 	"github.com/getnvoi/core/pkg/runtime"
 	"github.com/getnvoi/core/pkg/ssh"
 )
@@ -58,10 +59,10 @@ type Session struct {
 }
 
 // RunWithSession is the entry point cmd/cli verbs use when they need
-// a Session (compile + tf-init + endpoints + SSH). Wraps WithRunner:
+// a Session (compile + tf-init + endpoints + SSH). Wraps withRunner:
 // builds a kind-scoped Session, hands it to fn, returns fn's error.
 func RunWithSession(ctx context.Context, rt *runtime.Runtime, kind log.Kind, fn func(context.Context, *Session) error) error {
-	return WithRunner(ctx, rt, func(ctx context.Context, run *runner.Runner) error {
+	return withRunner(ctx, rt, func(ctx context.Context, run *runner.Runner) error {
 		s := &Session{Rt: rt, Run: run, Lg: rt.Log.Sub(kind)}
 		return fn(ctx, s)
 	})

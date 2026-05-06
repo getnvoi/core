@@ -30,16 +30,6 @@ type Endpoints struct {
 	Servers     map[string]Server
 	APIEndpoint APIEndpoint
 	HA          bool
-
-	// TunnelToken is the agent-registration token a tunnel emitter
-	// surfaces via `output "tunnel_token"`. Empty when no tunnel is
-	// configured. The workload phase reads it to render the
-	// cloudflared / ngrok agent's Secret.
-	//
-	// DNS handoff stays tf-internal (via local.tunnel_cname referenced
-	// by the DNS emitter); the token is the ONE value nvoi has to
-	// transport across the tf → kube boundary.
-	TunnelToken string
 }
 
 // byRole returns server names with the given role, sorted
@@ -119,16 +109,9 @@ func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
 		_ = json.Unmarshal(haOut.Value, &ha)
 	}
 
-	tunnelToken := ""
-	if tt, ok := out["tunnel_token"]; ok {
-		// sensitive output — value is a JSON-encoded string
-		_ = json.Unmarshal(tt.Value, &tunnelToken)
-	}
-
 	return &Endpoints{
 		Servers:     servers,
 		APIEndpoint: api,
 		HA:          ha,
-		TunnelToken: tunnelToken,
 	}, nil
 }

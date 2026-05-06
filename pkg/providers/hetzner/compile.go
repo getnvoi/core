@@ -9,8 +9,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/cloudinit"
-	"github.com/getnvoi/core/pkg/compile"
+	"github.com/getnvoi/core/pkg/internal/cloudinit"
+	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/runtime"
 )
@@ -96,9 +96,7 @@ type templateData struct {
 	PrimaryMaster string // used by outputs in non-HA mode (any master Key works; we pick the first)
 
 	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 when
-	// the master serves Caddy directly. True iff domains: is declared
-	// AND providers.tunnel is unset. Tunnel mode closes the ports —
-	// all ingress flows through the agent's outbound connection.
+	// the master serves Caddy directly. True iff domains: is declared.
 	PublicHTTPIngress bool
 }
 
@@ -176,7 +174,7 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		Servers:           servers,
 		HA:                len(masters) >= 2,
 		PrimaryMaster:     masters[0], // alphabetically first by sort above
-		PublicHTTPIngress: len(cfg.Domains) > 0 && cfg.Providers.Tunnel == "",
+		PublicHTTPIngress: len(cfg.Domains) > 0,
 	}
 
 	var buf bytes.Buffer

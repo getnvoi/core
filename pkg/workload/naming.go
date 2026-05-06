@@ -5,6 +5,13 @@ package workload
 // when we need isolation.
 const namespace = "default"
 
+// appSecretName is the single Opaque Secret in the app namespace that
+// holds resolved values for every entry in cfg.Secrets. Per-service
+// `secrets:` whitelists drive secretKeyRef-based env injection from
+// it; the Secret object itself is created/updated by ApplyAll on
+// every deploy.
+const appSecretName = "nvoi-secrets"
+
 // Label keys carried by nvoi-managed workloads.
 //
 // Build* functions stamp kube.LabelOwner explicitly (using
@@ -15,15 +22,15 @@ const namespace = "default"
 // self-describing (a manifest is correct without going through
 // ApplyOwned to inspect it).
 //
-// LabelService is the per-service identifier the headless / ClusterIP
+// labelService is the per-service identifier the headless / ClusterIP
 // Service uses in its pod selector. Stable across deploys (no
-// LabelDeployHash on selectors — selector changes orphan pods).
+// labelDeployHash on selectors — selector changes orphan pods).
 //
-// LabelDeployHash is stamped on workload metadata AND pod-template
+// labelDeployHash is stamped on workload metadata AND pod-template
 // metadata (NEVER on selectors). Reading `kubectl get -L
 // nvoi/deploy-hash` answers "which deploy last touched this".
 //
-// LabelAppName mirrors the upstream nvoi convention
+// labelAppName mirrors the upstream nvoi convention
 // (`app.kubernetes.io/name`) and is the discriminator the
 // topologySpread constraint uses to group a single service's
 // replicas. Every pod for service `foo` gets
@@ -32,17 +39,11 @@ const namespace = "default"
 // LabelNvoiRole is the operator-readable node label applied by
 // kube.LabelNode at deploy time, with the YAML server key as its
 // value (e.g. "master", "worker-1"). Pods reference it via
-// nodeSelector / nodeAffinity for placement.
+// nodeSelector / nodeAffinity for placement. Exported because
+// pkg/deploy reads it when stamping node labels.
 const (
-	LabelService    = "nvoi/service"
-	LabelDeployHash = "nvoi/deploy-hash"
-	LabelAppName    = "app.kubernetes.io/name"
+	labelService    = "nvoi/service"
+	labelDeployHash = "nvoi/deploy-hash"
+	labelAppName    = "app.kubernetes.io/name"
 	LabelNvoiRole   = "nvoi-role"
 )
-
-// AppSecretName is the single Opaque Secret in the app namespace that
-// holds resolved values for every entry in cfg.Secrets. Per-service
-// `secrets:` whitelists drive secretKeyRef-based env injection from
-// it; the Secret object itself is created/updated by ApplyAll on
-// every deploy.
-const AppSecretName = "nvoi-secrets"

@@ -50,12 +50,12 @@ func applyNodePlacement(podSpec *corev1.PodSpec, name string, servers []string) 
 		MaxSkew:           1,
 		TopologyKey:       LabelNvoiRole,
 		WhenUnsatisfiable: corev1.ScheduleAnyway,
-		LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{LabelAppName: name}},
+		LabelSelector:     &metav1.LabelSelector{MatchLabels: map[string]string{labelAppName: name}},
 	}}
 }
 
 // secretEnvVars produces the secretKeyRef-based env entries for each
-// declared name. The shared Secret (AppSecretName) holds resolved
+// declared name. The shared Secret (appSecretName) holds resolved
 // values for every entry in cfg.Secrets; per-service whitelists
 // (svc.Secrets) drive which keys land in this PodSpec.
 //
@@ -73,7 +73,7 @@ func secretEnvVars(names []string) []corev1.EnvVar {
 			Name: n,
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: AppSecretName},
+					LocalObjectReference: corev1.LocalObjectReference{Name: appSecretName},
 					Key:                  n,
 				},
 			},

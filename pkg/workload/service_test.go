@@ -6,12 +6,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
 func TestBuildService_Shape(t *testing.T) {
-	svc := BuildService(&runtime.Runtime{}, "api", config.ServiceSpec{Port: 8080})
+	svc := buildService(&runtime.Runtime{}, "api", config.ServiceSpec{Port: 8080})
 
 	if svc.Name != "api" || svc.Namespace != "default" {
 		t.Errorf("name/ns: %s/%s", svc.Name, svc.Namespace)
@@ -19,18 +19,18 @@ func TestBuildService_Shape(t *testing.T) {
 	if svc.Spec.Type != corev1.ServiceTypeClusterIP {
 		t.Errorf("type: got %s want ClusterIP", svc.Spec.Type)
 	}
-	if svc.Labels[kube.LabelOwner] != kube.OwnerServices || svc.Labels[LabelService] != "api" {
+	if svc.Labels[kube.LabelOwner] != kube.OwnerServices || svc.Labels[labelService] != "api" {
 		t.Errorf("labels: %v", svc.Labels)
 	}
-	// Selector strictly contains LabelService. NOT LabelDeployHash
+	// Selector strictly contains labelService. NOT labelDeployHash
 	// (selector mutations orphan pods every roll) and NOT
 	// kube.LabelOwner (owner is a sweep concern; selectors are
 	// immutable post-Create so putting owner there means destroy +
 	// recreate for any taxonomy change).
-	if svc.Spec.Selector[LabelService] != "api" {
-		t.Errorf("selector[%s]: got %q want api", LabelService, svc.Spec.Selector[LabelService])
+	if svc.Spec.Selector[labelService] != "api" {
+		t.Errorf("selector[%s]: got %q want api", labelService, svc.Spec.Selector[labelService])
 	}
-	if _, hashOnSelector := svc.Spec.Selector[LabelDeployHash]; hashOnSelector {
+	if _, hashOnSelector := svc.Spec.Selector[labelDeployHash]; hashOnSelector {
 		t.Error("selector must NOT include deploy-hash")
 	}
 	if _, ownerOnSelector := svc.Spec.Selector[kube.LabelOwner]; ownerOnSelector {
@@ -45,7 +45,7 @@ func TestBuildService_Shape(t *testing.T) {
 }
 
 func TestBuildService_StatefulIsHeadless(t *testing.T) {
-	svc := BuildService(&runtime.Runtime{}, "postgres", config.ServiceSpec{
+	svc := buildService(&runtime.Runtime{}, "postgres", config.ServiceSpec{
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "1Gi", MountPath: "/data"},
 	})
@@ -55,7 +55,7 @@ func TestBuildService_StatefulIsHeadless(t *testing.T) {
 }
 
 func TestBuildService_StatelessIsClusterIP(t *testing.T) {
-	svc := BuildService(&runtime.Runtime{}, "web", config.ServiceSpec{Port: 8080})
+	svc := buildService(&runtime.Runtime{}, "web", config.ServiceSpec{Port: 8080})
 	if svc.Spec.ClusterIP == "None" {
 		t.Error("stateless service must NOT be headless")
 	}

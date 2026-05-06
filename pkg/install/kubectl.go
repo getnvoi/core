@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/ssh"
 )
 
@@ -68,7 +69,7 @@ func KubectlExec(ctx context.Context, target string, spec KubectlSpec) error {
 	wrapped := make([]string, 0, 3+len(spec.Args))
 	wrapped = append(wrapped, "exec", target, "--")
 	for _, a := range spec.Args {
-		wrapped = append(wrapped, shellQuote(a))
+		wrapped = append(wrapped, utils.ShellQuote(a))
 	}
 	spec.Args = wrapped
 	return KubectlStream(ctx, spec)

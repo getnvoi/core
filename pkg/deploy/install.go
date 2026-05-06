@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/install"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
 )
 
@@ -30,7 +31,7 @@ func (s *Session) installCluster(ctx context.Context) error {
 
 	// 1. Swap on every node.
 	s.Lg.Step("swap")
-	for _, name := range sortedStringKeys(eps.Servers) {
+	for _, name := range utils.SortedKeys(eps.Servers) {
 		if err := install.EnsureSwap(ctx, shells[name], s.Lg); err != nil {
 			return fmt.Errorf("swap %s: %w", name, err)
 		}

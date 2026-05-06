@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getnvoi/core/pkg/compile"
 	"github.com/getnvoi/core/pkg/config"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/testutil/hcltest"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 	"github.com/getnvoi/core/pkg/state"
-	"github.com/getnvoi/core/pkg/testutil/hcltest"
 
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
 )

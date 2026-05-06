@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/getnvoi/core/pkg/detach"
+	"github.com/getnvoi/core/pkg/internal/detach"
 	"github.com/getnvoi/core/pkg/log"
-	"github.com/getnvoi/core/pkg/testutil/sshfake"
+	"github.com/getnvoi/core/pkg/internal/testutil/sshfake"
 )
 
 // silentLog discards everything; tests assert on sh.Calls instead.

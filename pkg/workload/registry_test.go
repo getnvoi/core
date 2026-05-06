@@ -13,7 +13,7 @@ import (
 
 func TestBuildRegistrySecret_NoRegistry_ReturnsNil(t *testing.T) {
 	rt := &runtime.Runtime{Cfg: &config.Config{}}
-	got, err := BuildRegistrySecret(rt)
+	got, err := buildRegistrySecret(rt)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestBuildRegistrySecret_PerHostAuthsEntry(t *testing.T) {
 		},
 	}
 
-	s, err := BuildRegistrySecret(rt)
+	s, err := buildRegistrySecret(rt)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

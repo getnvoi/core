@@ -11,7 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 	"github.com/getnvoi/core/pkg/workload"

@@ -62,7 +62,7 @@ func TestApplyNodePlacement_MultiServer_AffinityAndSpread(t *testing.T) {
 	if c.MaxSkew != 1 || c.TopologyKey != LabelNvoiRole || c.WhenUnsatisfiable != corev1.ScheduleAnyway {
 		t.Errorf("topologySpread: %+v", c)
 	}
-	if c.LabelSelector == nil || c.LabelSelector.MatchLabels[LabelAppName] != "web" {
+	if c.LabelSelector == nil || c.LabelSelector.MatchLabels[labelAppName] != "web" {
 		t.Errorf("topologySpread label selector: %+v", c.LabelSelector)
 	}
 }
@@ -81,8 +81,8 @@ func TestSecretEnvVars_DeterministicOrder(t *testing.T) {
 			continue
 		}
 		ref := e.ValueFrom.SecretKeyRef
-		if ref.Name != AppSecretName {
-			t.Errorf("%s ref.Name = %q want %q", e.Name, ref.Name, AppSecretName)
+		if ref.Name != appSecretName {
+			t.Errorf("%s ref.Name = %q want %q", e.Name, ref.Name, appSecretName)
 		}
 		if ref.Key != e.Name {
 			t.Errorf("%s ref.Key = %q want %q (env name)", e.Name, ref.Key, e.Name)

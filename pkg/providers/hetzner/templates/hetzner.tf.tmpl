@@ -65,10 +65,8 @@ resource "hcloud_firewall" "default" {
     source_ips = [{{ .NetworkCIDR | hcl }}]
   }
 {{ if .PublicHTTPIngress }}
-  # Caddy on the master holds hostPort 80/443 directly. Tunnel mode
-  # closes these (all ingress flows through the cloudflared / ngrok
-  # agent's outbound connection); the rules only emit when domains:
-  # is set AND providers.tunnel is unset.
+  # Ingress controller holds 80/443 on the master directly. Rules
+  # only emit when domains: is set.
   rule {
     direction  = "in"
     protocol   = "tcp"

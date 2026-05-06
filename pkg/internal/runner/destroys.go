@@ -31,29 +31,11 @@ func (r *Runner) PlannedNodeDestroys(ctx context.Context, planPath, serverResour
 	return planTypeDestroys(plan, serverResourceType), nil
 }
 
-// PlannedTunnelDestroys parses the saved plan and returns the
-// tofu resource names of tunnel objects being destroyed
-// (including replacements — delete+create counts, since the underlying
-// tunnel id changes and the in-cluster agent must be killed first
-// regardless of what comes after).
-//
-// Same shape as PlannedNodeDestroys: plan-driven, type-filtered, no
-// branching on provider name. The TunnelResourceType is resolved via
-// compile.TunnelResourceType(cfg.Providers.Tunnel) at the cmd/
-// boundary so the runner stays provider-agnostic.
-func (r *Runner) PlannedTunnelDestroys(ctx context.Context, planPath, tunnelResourceType string) ([]string, error) {
-	plan, err := r.tf.ShowPlanFile(ctx, planPath)
-	if err != nil {
-		return nil, fmt.Errorf("read plan file %s: %w", planPath, err)
-	}
-	return planTypeDestroys(plan, tunnelResourceType), nil
-}
-
-// planTypeDestroys is the shared pure walker — both nodes and tunnels
-// (and any future plan-gated drain target) want the same primitive:
-// "names of resources of type T that the plan will delete." Replacement
-// (delete+create) counts as a destroy — the underlying object is
-// going away even if a new one with the same address takes its place.
+// planTypeDestroys is the shared pure walker — any future plan-gated
+// drain target wants the same primitive: "names of resources of type T
+// that the plan will delete." Replacement (delete+create) counts as a
+// destroy — the underlying object is going away even if a new one with
+// the same address takes its place.
 //
 // Pure — pulled out so tests can pass a hand-crafted *tfjson.Plan
 // instead of needing a real tofu binary + plan file on disk.

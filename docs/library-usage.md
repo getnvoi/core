@@ -1,5 +1,20 @@
 # Library Usage
 
+## Stability
+
+Pre-1.0. **Any 0.x release may introduce breaking changes** to package
+layout, exported types, and function signatures. Pin a specific commit
+or tag in your `go.mod` if you depend on `github.com/getnvoi/core/pkg/...`:
+
+```
+require github.com/getnvoi/core v0.0.0-YYYYMMDDHHMMSS-<commit>
+```
+
+A stability promise will be documented when v1 lands. Until then, the
+public surface is the set of packages directly under `pkg/` (excluding
+`pkg/internal/`) — anything imported from `pkg/internal/` is not part
+of the API and the Go compiler will refuse the import anyway.
+
 ## Contract
 
 `nvoi` library packages do not read files, env vars, home directories, or cwd.

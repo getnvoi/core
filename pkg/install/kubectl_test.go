@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/testutil/sshfake"
+	"github.com/getnvoi/core/pkg/internal/testutil/sshfake"
 )
 
 func TestKubectlExec_AssemblesQuotedCommand(t *testing.T) {

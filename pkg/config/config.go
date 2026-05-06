@@ -53,9 +53,7 @@ type Config struct {
 
 	// Domains maps a service name to its public hostnames. Requires
 	// providers.dns when non-empty. Each key must exist in services:.
-	// When providers.tunnel is unset, ingress flows: master 80/443 →
-	// in-cluster Caddy → Service. With tunnel set, ingress flows
-	// through the tunnel agent's CNAME and Caddy is purged.
+	// Ingress flows: master 80/443 → in-cluster Caddy → Service.
 	Domains Domains `yaml:"domains,omitempty"`
 
 	// ACMEEmail is the contact address Caddy registers with Let's
@@ -124,18 +122,11 @@ type Providers struct {
 	Storage string `yaml:"storage,omitempty"`
 
 	// DNS is REQUIRED when Domains is non-empty. Today: cloudflare.
-	// The named provider's emitter writes tofu resources for
-	// the domain → master (or tunnel edge) bindings; tofu owns
-	// the lifecycle (drift detection, deletion) — there are no
-	// runtime API calls from nvoi to the DNS provider.
+	// The named provider's emitter writes tofu resources for the
+	// domain → master IP bindings; tofu owns the lifecycle (drift
+	// detection, deletion) — there are no runtime API calls from
+	// nvoi to the DNS provider.
 	DNS string `yaml:"dns,omitempty"`
-
-	// Tunnel is OPTIONAL. When set, the DNS provider points
-	// hostnames at the tunnel's CNAME edge instead of the master
-	// IP, the in-cluster tunnel agent runs in place of Caddy, and
-	// the Hetzner firewall keeps 80/443 closed (all ingress flows
-	// through the tunnel). Today: cloudflare | ngrok.
-	Tunnel string `yaml:"tunnel,omitempty"`
 }
 
 // Domains maps service names to public hostnames. Each service must

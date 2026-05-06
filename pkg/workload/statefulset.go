@@ -7,15 +7,15 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-// BuildStatefulSet produces the typed StatefulSet for any service
-// declaring `storage:`. Mirrors BuildDeployment with two additions:
+// buildStatefulSet produces the typed StatefulSet for any service
+// declaring `storage:`. Mirrors buildDeployment with two additions:
 //
 //   - serviceName references the headless Service of the same name
-//     (BuildService emits ClusterIP=None when storage is set), giving
+//     (buildService emits ClusterIP=None when storage is set), giving
 //     each pod stable DNS via the Service's per-pod records;
 //   - VolumeClaimTemplates declares the PVC the pod's container
 //     mounts at svc.Storage.MountPath. StorageClassName left nil → k8s
@@ -28,7 +28,7 @@ import (
 // StatefulSet's (delete the StatefulSet → PVC is preserved by k8s
 // policy until explicitly reclaimed; `nvoi destroy` tears the node
 // down which takes the hostPath volume with it).
-func BuildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.StatefulSet {
+func buildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.StatefulSet {
 	replicas := int32(1)
 	if svc.Replicas != nil {
 		replicas = int32(*svc.Replicas)
@@ -49,7 +49,7 @@ func BuildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) 
 					Name: name + "-data",
 					Labels: map[string]string{
 						kube.LabelOwner: kube.OwnerServices,
-						LabelService:    name,
+						labelService:    name,
 					},
 				},
 				Spec: corev1.PersistentVolumeClaimSpec{

@@ -4,19 +4,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/getnvoi/core/pkg/compile"
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/detach"
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/detach"
 	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/ssh"
 )
 
 // predrainSpec describes one pre-tf-apply drain step. Run / Destroy
-// build a spec per drain target (nodes leaving = detachNode;
-// tunnel-resource leaving = drainTunnel) and hand it to
-// (*Session).predrain.
+// build a spec per drain target (nodes leaving → detachNode) and hand
+// it to (*Session).predrain.
 //
 // Body closes over whatever it needs from the enclosing scope (Session
 // + spec data); predrain itself stays narrow.
@@ -25,12 +23,11 @@ type predrainSpec struct {
 	ResourceType string                                          // tf resource type to filter the plan for (e.g. "hcloud_server")
 	Control      string                                          // YAML key of the master to dial for the drain (survivor / primary)
 	Leaving      []string                                        // names the plan will delete; if empty, predrain is a no-op
-	Label        string                                          // operator-facing step name ("detach", "drain-tunnel")
-	Body         func(ctx context.Context, sh *ssh.Client) error // per-flavour drain work (kubectl drain, kube sweep, etc.)
+	Label        string                                          // operator-facing step name ("detach")
+	Body         func(ctx context.Context, sh *ssh.Client) error // per-flavour drain work (kubectl drain, etc.)
 }
 
-// predrain is the shared skeleton for the two pre-tf-apply drain
-// steps:
+// predrain is the shared skeleton for pre-tf-apply drain steps:
 //
 //  1. If spec.Leaving is empty, return nil — no work.
 //  2. Look up the control master's IPv4 in the session's memoized
@@ -110,60 +107,6 @@ func (s *Session) detachNode(ctx context.Context, planPath string) error {
 				}
 			}
 			detach.Nodes(ctx, sh, nodes, s.Lg)
-			return nil
-		},
-	})
-}
-
-// drainTunnel inspects the saved plan and, if any tunnel resource is
-// going to delete (or replace), pre-emptively kills the in-cluster
-// cloudflared agent before tf-apply runs. CF's API rejects tunnel
-// DELETE while connections are alive — see
-// terraform-provider-cloudflare#5255 — and the provider has no
-// force_destroy, no /connections cleanup call, no retry. Killing the
-// agent here drops the connections so tf-apply succeeds in one pass.
-//
-// Plan-driven: zero cost on no-op deploys (filter returns empty);
-// fires automatically on `nvoi destroy`, on Caddy←tunnel mode
-// switches, and on tunnel-replacement (rename, secret rotation).
-func (s *Session) drainTunnel(ctx context.Context, planPath string) error {
-	if s.Rt.Cfg.Providers.Tunnel == "" {
-		return nil
-	}
-	tunnelType, err := compile.TunnelResourceType(s.Rt.Cfg.Providers.Tunnel)
-	if err != nil {
-		return fmt.Errorf("tunnel resource type: %w", err)
-	}
-	leaving, err := s.Run.PlannedTunnelDestroys(ctx, planPath, tunnelType)
-	if err != nil {
-		return fmt.Errorf("plan tunnel destroys: %w", err)
-	}
-
-	return s.predrain(ctx, predrainSpec{
-		PlanPath:     planPath,
-		ResourceType: tunnelType,
-		Control:      s.Rt.Cfg.PrimaryMaster(),
-		Leaving:      leaving,
-		Label:        "drain-tunnel",
-		Body: func(ctx context.Context, sh *ssh.Client) error {
-			kc, err := kube.New(ctx, sh)
-			if err != nil {
-				return fmt.Errorf("kube tunnel: %w", err)
-			}
-			defer kc.Close()
-
-			// Sweep every owner=tunnel-agent resource — pod
-			// termination drops cloudflared's outbound connections,
-			// which clears CF's active-connections gate on the
-			// subsequent tf-apply DELETE.
-			scope := kube.Scope{Namespace: "default", Owner: kube.OwnerTunnelAgent}
-			for _, kind := range []kube.Kind{
-				kube.KindDeployment, kube.KindSecret, kube.KindConfigMap,
-			} {
-				if err := kc.SweepOwned(ctx, scope, kind, nil); err != nil {
-					s.Lg.Warn(fmt.Sprintf("sweep tunnel-agent %s: %s", kind, err))
-				}
-			}
 			return nil
 		},
 	})

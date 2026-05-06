@@ -1,11 +1,8 @@
 // Package workload turns config.ServiceSpec / RegistryDef into typed
-// Kubernetes manifests (Deployment, StatefulSet, Service, Secret).
-// Pure transforms: no apiserver calls, no I/O. The kube package's
-// ApplyOwned does the actual writes.
-//
-// Each Build* function returns a self-describing object — its labels
-// match what kube.ApplyOwned would stamp, so the manifest is
-// inspectable at build time without an apply pass.
+// Kubernetes manifests and applies them via the kube package. The
+// only public entry points are ApplyAll (full per-deploy reconcile)
+// and ResolveRegistryCreds (env-var expansion at the cmd boundary).
+// All builders are package-internal.
 package workload
 
 import (
@@ -15,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -87,26 +84,26 @@ func podTemplateFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) co
 func objectLabels(rt *runtime.Runtime, name string) map[string]string {
 	return map[string]string{
 		kube.LabelOwner: kube.OwnerServices,
-		LabelService:    name,
-		LabelDeployHash: rt.DeployHash,
+		labelService:    name,
+		labelDeployHash: rt.DeployHash,
 	}
 }
 
 // podLabels are the labels on every pod in the Deployment/StatefulSet's
-// template. Includes LabelAppName (for topologySpread grouping) on top
+// template. Includes labelAppName (for topologySpread grouping) on top
 // of objectLabels.
 func podLabels(rt *runtime.Runtime, name string) map[string]string {
 	out := objectLabels(rt, name)
-	out[LabelAppName] = name
+	out[labelAppName] = name
 	return out
 }
 
 // serviceSelector is the stable selector both the Deployment /
 // StatefulSet and the Service share. Strict architectural rule:
 //
-//   - INCLUDES   LabelService (per-service identifier; unique by
+//   - INCLUDES   labelService (per-service identifier; unique by
 //     construction).
-//   - EXCLUDES   LabelDeployHash (selector mutations orphan pods on
+//   - EXCLUDES   labelDeployHash (selector mutations orphan pods on
 //     every roll).
 //   - EXCLUDES   kube.LabelOwner (owner is a sweep-scope concern, not
 //     a selection concern). StatefulSet/Deployment
@@ -117,17 +114,17 @@ func podLabels(rt *runtime.Runtime, name string) map[string]string {
 //     keep it OUT of selectors so the architecture stays
 //     evolvable.
 //
-// LabelService alone is unique enough to discriminate pods — no
+// labelService alone is unique enough to discriminate pods — no
 // other system writes pods with `nvoi/service=<our-name>` keys.
 func serviceSelector(name string) map[string]string {
-	return map[string]string{LabelService: name}
+	return map[string]string{labelService: name}
 }
 
-// BuildDeployment turns a service spec into a typed Deployment.
+// buildDeployment turns a service spec into a typed Deployment.
 // Replicas: explicit ServiceSpec.Replicas wins; nil → default 1.
-// Selector matches the pod-template via LabelOwner+LabelService —
+// Selector matches the pod-template via LabelOwner+labelService —
 // stable across deploys.
-func BuildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.Deployment {
+func buildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.Deployment {
 	replicas := int32(1)
 	if svc.Replicas != nil {
 		replicas = int32(*svc.Replicas)

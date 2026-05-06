@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/getnvoi/core/pkg/build"
+	"github.com/getnvoi/core/pkg/internal/build"
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"

@@ -5,8 +5,9 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/install"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/log"
-	"github.com/getnvoi/core/pkg/runner"
+	"github.com/getnvoi/core/pkg/internal/runner"
 	"github.com/getnvoi/core/pkg/runtime"
 	"github.com/getnvoi/core/pkg/ssh"
 )
@@ -20,7 +21,7 @@ import (
 // precondition for k3s install + kube tunnel, both kind=cluster.
 func openShells(ctx context.Context, rt *runtime.Runtime, lg log.Log, eps *runner.Endpoints) (map[string]*ssh.Client, error) {
 	shells := make(map[string]*ssh.Client, len(eps.Servers))
-	for _, name := range sortedStringKeys(eps.Servers) {
+	for _, name := range utils.SortedKeys(eps.Servers) {
 		srv := eps.Servers[name]
 		sh, err := install.WaitForSSH(ctx, srv.IPv4, rt.SSHPrivKey, lg)
 		if err != nil {

@@ -21,8 +21,7 @@ func (r *Runner) PlanWithOut(ctx context.Context, planPath string) (bool, error)
 // PlanDestroyWithOut runs `tofu plan -destroy -out=<path>` and
 // returns hasChanges. The destroy variant of PlanWithOut: lets the
 // destroy pipeline inspect WHAT'S going away before tofu actually
-// removes anything (the pre-apply drain step needs the plan to
-// decide whether the tunnel agent has to be killed first).
+// removes anything.
 func (r *Runner) PlanDestroyWithOut(ctx context.Context, planPath string) (bool, error) {
 	return r.tf.PlanJSON(ctx, r.rt.Log.TFStream(), tfexec.Out(planPath), tfexec.Destroy(true))
 }

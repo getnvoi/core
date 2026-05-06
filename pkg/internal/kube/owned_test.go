@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 )
 
 // labeled returns the standard owner-label set ApplyOwned would stamp.
@@ -103,10 +103,9 @@ func TestSweepOwned_DeletesOrphan_KeepsDesired(t *testing.T) {
 	}
 }
 
-// Migration cleanup: SweepOwned with desired=nil purges every resource
-// of the owner+kind. This is the cross-mode primitive for the
-// caddy ↔ tunnel transition (operator flips providers.tunnel; old
-// mode's footprint sweeps in one call).
+// SweepOwned with desired=nil purges every resource of the
+// owner+kind. The "purge everything for this owner" primitive — used
+// for one-time migrations or full removal of an owner's footprint.
 func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerCaddy)}},

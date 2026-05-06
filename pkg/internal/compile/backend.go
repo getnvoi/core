@@ -40,16 +40,8 @@ func emitBackend(rt *nvoiRuntime.Runtime) ([]byte, error) {
 		reqs = append(reqs, dns.Provider())
 	}
 
-	if rt.Cfg.Providers.Tunnel != "" {
-		tun, err := ResolveTunnel(rt.Cfg.Providers.Tunnel)
-		if err != nil {
-			return nil, err
-		}
-		reqs = append(reqs, tun.Providers()...)
-	}
-
-	// Dedupe by alias — multiple emitters can declare the same
-	// provider (CF DNS + CF Tunnel both want cloudflare). Last
+	// Dedupe by alias — emitters may declare the same provider
+	// (e.g. CF DNS + a future CF resource both want cloudflare). Last
 	// declaration wins; the slice is small so a linear scan is fine.
 	deduped := reqs[:0]
 	seen := make(map[string]bool, len(reqs))

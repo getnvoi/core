@@ -89,28 +89,24 @@ func TestPlanNodeDestroys(t *testing.T) {
 	}
 }
 
-// Asserts the same walker (planTypeDestroys) is re-used for both
-// node-resource and tunnel-resource filtering — the type filter is
-// the only behavioural axis. Locks the contract that adding a new
-// plan-gated drain target is one constant + one call site, not a
-// fork of the walker.
-func TestPlanTypeDestroys_TunnelFilter(t *testing.T) {
+// Asserts the same walker (planTypeDestroys) generalises across
+// arbitrary resource types — the type filter is the only behavioural
+// axis. Locks the contract that adding a new plan-gated drain target
+// is one constant + one call site, not a fork of the walker.
+func TestPlanTypeDestroys_GenericTypeFilter(t *testing.T) {
 	plan := &tfjson.Plan{ResourceChanges: []*tfjson.ResourceChange{
-		// Tunnel going away — caught.
-		rc("cloudflare_zero_trust_tunnel_cloudflared", "main", change(tfjson.ActionDelete)),
-		// Tunnel-config going away — NOT caught (only the tunnel
-		// object itself triggers the drain).
-		rc("cloudflare_zero_trust_tunnel_cloudflared_config", "main", change(tfjson.ActionDelete)),
-		// Server going away — NOT caught when filter is tunnel.
+		// Other-typed resource going away — caught when filter matches.
+		rc("hcloud_volume", "data", change(tfjson.ActionDelete)),
+		// Different-typed resource going away — NOT caught.
 		rc("hcloud_server", "master", change(tfjson.ActionDelete)),
-		// Tunnel being replaced — caught (delete leg of replace).
-		rc("cloudflare_zero_trust_tunnel_cloudflared", "rotated", change(tfjson.ActionDelete, tfjson.ActionCreate)),
-		// Tunnel being created (no destroy) — NOT caught.
-		rc("cloudflare_zero_trust_tunnel_cloudflared", "new", change(tfjson.ActionCreate)),
+		// Volume being replaced — caught (delete leg of replace).
+		rc("hcloud_volume", "rotated", change(tfjson.ActionDelete, tfjson.ActionCreate)),
+		// Volume being created (no destroy) — NOT caught.
+		rc("hcloud_volume", "new", change(tfjson.ActionCreate)),
 	}}
 
-	got := planTypeDestroys(plan, "cloudflare_zero_trust_tunnel_cloudflared")
-	want := []string{"main", "rotated"}
+	got := planTypeDestroys(plan, "hcloud_volume")
+	want := []string{"data", "rotated"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v want %v", got, want)
 	}

@@ -4,7 +4,7 @@
 package hetzner
 
 import (
-	"github.com/getnvoi/core/pkg/compile"
+	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/providers"
 )
 

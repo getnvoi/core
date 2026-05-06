@@ -25,11 +25,10 @@ const LabelOwner = "nvoi/owner"
 // Adding a new step = one new const. No exclusion lists, no per-step
 // grep filters, no name allowlists.
 const (
-	OwnerServices    = "services"     // Deployment + StatefulSet + Service per cfg.Services entry
-	OwnerRegistry    = "registry"     // dockerconfigjson Secret for imagePullSecrets
-	OwnerAppSecrets  = "app-secrets"  // Opaque Secret holding cfg.Secrets values
-	OwnerCaddy       = "caddy"        // in-cluster Caddy + ACME PVC + ConfigMap (Phase B)
-	OwnerTunnelAgent = "tunnel-agent" // cloudflared / ngrok agent Deployment + Secret (Phase B)
+	OwnerServices   = "services"    // Deployment + StatefulSet + Service per cfg.Services entry
+	OwnerRegistry   = "registry"    // dockerconfigjson Secret for imagePullSecrets
+	OwnerAppSecrets = "app-secrets" // Opaque Secret holding cfg.Secrets values
+	OwnerCaddy      = "caddy"       // in-cluster Caddy + ACME PVC + ConfigMap
 )
 
 // Kind names a typed resource kind ApplyOwned / SweepOwned / ListOwned
@@ -97,8 +96,7 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 
 // SweepOwned deletes every resource of `kind` in scope.Namespace
 // carrying nvoi/owner=<scope.Owner> whose name is NOT in `desired`.
-// Pass desired=nil to sweep ALL resources for that owner+kind — the
-// migration-cleanup idiom for cross-mode transitions (caddy ↔ tunnel).
+// Pass desired=nil to sweep ALL resources for that owner+kind.
 //
 // Owner-scoped: each reconcile step's sweep can never see another
 // step's resources. NotFound on Delete is silently ignored —

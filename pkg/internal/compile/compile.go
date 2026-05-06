@@ -26,7 +26,6 @@ import (
 //	                      Provider() declaration
 //	<infra-provider>.tf   provider "X" {} + servers/network/firewall
 //	<dns-provider>-dns.tf provider "X" {} + cloudflare_record etc
-//	(<tunnel> joins in commit #7)
 //
 // Each provider's emitter writes ONLY its provider-config block + its
 // resources. The terraform meta-block lives in backend.tf alone —
@@ -51,14 +50,8 @@ func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 	}
 	b.Set(naming.ProviderHCL(rt.Cfg.Providers.Infra), infraHCL)
 
-	// DNS records are tf-managed in BOTH modes:
-	//   - Caddy: A record per (service, domain) → master IPv4.
-	//   - Tunnel: CNAME per (service, domain) → local.tunnel_cname
-	//     (declared by the active TunnelEmitter).
-	// The DNS emitter reads cfg.Providers.Tunnel to flip its template
-	// branch. Mode-switch downtime (records flip atomically with the
-	// agent still bootstrapping in the workload phase) is accepted by
-	// design — see CLAUDE.md.
+	// DNS records are tf-managed: A record per (service, domain) →
+	// master IPv4.
 	if len(rt.Cfg.Domains) > 0 && rt.Cfg.Providers.DNS != "" {
 		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
 		if err != nil {
@@ -69,18 +62,6 @@ func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 			return nil, err
 		}
 		b.Set(rt.Cfg.Providers.DNS+"-dns.tf", dnsHCL)
-	}
-
-	if rt.Cfg.Providers.Tunnel != "" && len(rt.Cfg.Domains) > 0 {
-		tun, err := ResolveTunnel(rt.Cfg.Providers.Tunnel)
-		if err != nil {
-			return nil, err
-		}
-		tunHCL, err := tun.EmitTunnel(rt)
-		if err != nil {
-			return nil, err
-		}
-		b.Set(rt.Cfg.Providers.Tunnel+"-tunnel.tf", tunHCL)
 	}
 
 	return b, nil

@@ -9,7 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -27,7 +28,7 @@ type dockerAuthEntry struct {
 	Auth     string `json:"auth"` // base64(username:password)
 }
 
-// BuildRegistrySecret renders the kubernetes.io/dockerconfigjson
+// buildRegistrySecret renders the kubernetes.io/dockerconfigjson
 // Secret holding pull credentials for every registry host declared
 // in YAML. Returns nil when no registry: block — caller skips Apply
 // in that case.
@@ -35,7 +36,7 @@ type dockerAuthEntry struct {
 // Resolution: this function takes ALREADY-RESOLVED creds (literal
 // strings, not $VAR refs). The cmd/cli boundary expands env-var
 // references before handing the runtime down.
-func BuildRegistrySecret(rt *runtime.Runtime) (*corev1.Secret, error) {
+func buildRegistrySecret(rt *runtime.Runtime) (*corev1.Secret, error) {
 	if len(rt.RegistryCreds) == 0 {
 		return nil, nil
 	}
@@ -79,8 +80,8 @@ func ResolveRegistryCreds(in map[string]config.RegistryDef, getenv func(string) 
 	out := make(map[string]config.RegistryDef, len(in))
 	for host, reg := range in {
 		out[host] = config.RegistryDef{
-			Username: resolveVar(reg.Username, getenv),
-			Password: resolveVar(reg.Password, getenv),
+			Username: utils.ResolveVar(reg.Username, getenv),
+			Password: utils.ResolveVar(reg.Password, getenv),
 		}
 	}
 	return out
