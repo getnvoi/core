@@ -3,20 +3,19 @@ package deploy
 import (
 	"context"
 	"fmt"
+	"strings"
 
-	"github.com/getnvoi/core/pkg/compile"
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/detach"
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/detach"
 	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/ssh"
 )
 
 // predrainSpec describes one pre-tf-apply drain step. Run / Destroy
-// build a spec per drain target (nodes leaving = detachNode;
-// tunnel-resource leaving = drainTunnel) and hand it to
-// (*Session).predrain.
+// build a spec per drain target (nodes leaving → detachNode) and hand
+// it to (*Session).predrain.
 //
 // Body closes over whatever it needs from the enclosing scope (Session
 // + spec data); predrain itself stays narrow.
@@ -25,12 +24,11 @@ type predrainSpec struct {
 	ResourceType string                                          // tf resource type to filter the plan for (e.g. "hcloud_server")
 	Control      string                                          // YAML key of the master to dial for the drain (survivor / primary)
 	Leaving      []string                                        // names the plan will delete; if empty, predrain is a no-op
-	Label        string                                          // operator-facing step name ("detach", "drain-tunnel")
-	Body         func(ctx context.Context, sh *ssh.Client) error // per-flavour drain work (kubectl drain, kube sweep, etc.)
+	Label        string                                          // operator-facing step name ("detach")
+	Body         func(ctx context.Context, sh *ssh.Client) error // per-flavour drain work (kubectl drain, etc.)
 }
 
-// predrain is the shared skeleton for the two pre-tf-apply drain
-// steps:
+// predrain is the shared skeleton for pre-tf-apply drain steps:
 //
 //  1. If spec.Leaving is empty, return nil — no work.
 //  2. Look up the control master's IPv4 in the session's memoized
@@ -115,60 +113,6 @@ func (s *Session) detachNode(ctx context.Context, planPath string) error {
 	})
 }
 
-// drainTunnel inspects the saved plan and, if any tunnel resource is
-// going to delete (or replace), pre-emptively kills the in-cluster
-// cloudflared agent before tf-apply runs. CF's API rejects tunnel
-// DELETE while connections are alive — see
-// terraform-provider-cloudflare#5255 — and the provider has no
-// force_destroy, no /connections cleanup call, no retry. Killing the
-// agent here drops the connections so tf-apply succeeds in one pass.
-//
-// Plan-driven: zero cost on no-op deploys (filter returns empty);
-// fires automatically on `nvoi destroy`, on Caddy←tunnel mode
-// switches, and on tunnel-replacement (rename, secret rotation).
-func (s *Session) drainTunnel(ctx context.Context, planPath string) error {
-	if s.Rt.Cfg.Providers.Tunnel == "" {
-		return nil
-	}
-	tunnelType, err := compile.TunnelResourceType(s.Rt.Cfg.Providers.Tunnel)
-	if err != nil {
-		return fmt.Errorf("tunnel resource type: %w", err)
-	}
-	leaving, err := s.Run.PlannedTunnelDestroys(ctx, planPath, tunnelType)
-	if err != nil {
-		return fmt.Errorf("plan tunnel destroys: %w", err)
-	}
-
-	return s.predrain(ctx, predrainSpec{
-		PlanPath:     planPath,
-		ResourceType: tunnelType,
-		Control:      s.Rt.Cfg.PrimaryMaster(),
-		Leaving:      leaving,
-		Label:        "drain-tunnel",
-		Body: func(ctx context.Context, sh *ssh.Client) error {
-			kc, err := kube.New(ctx, sh)
-			if err != nil {
-				return fmt.Errorf("kube tunnel: %w", err)
-			}
-			defer kc.Close()
-
-			// Sweep every owner=tunnel-agent resource — pod
-			// termination drops cloudflared's outbound connections,
-			// which clears CF's active-connections gate on the
-			// subsequent tf-apply DELETE.
-			scope := kube.Scope{Namespace: "default", Owner: kube.OwnerTunnelAgent}
-			for _, kind := range []kube.Kind{
-				kube.KindDeployment, kube.KindSecret, kube.KindConfigMap,
-			} {
-				if err := kc.SweepOwned(ctx, scope, kind, nil); err != nil {
-					s.Lg.Warn(fmt.Sprintf("sweep tunnel-agent %s: %s", kind, err))
-				}
-			}
-			return nil
-		},
-	})
-}
-
 // pickSurvivorMaster returns the YAML key of any master NOT in the
 // leaving set — used as the SSH source for detach. Picks the
 // alphabetically-first survivor for determinism.
@@ -193,4 +137,76 @@ func pickSurvivorMaster(cfg *config.Config, leaving []string) string {
 		}
 	}
 	return pick
+}
+
+// drainCertificates deletes cert-manager Certificate resources cluster-wide
+// before tofu destroys the cluster. cert-manager's Challenge finalizer
+// runs the DNS-01 solver's Cleanup() in response, which removes the
+// `_acme-challenge.<domain>` TXT records via the DNS provider's API.
+// Without this step, those scratch TXT records orphan in the operator's
+// zone — tofu doesn't manage them (cert-manager wrote them out-of-band)
+// so `tf destroy` can't clean them up.
+//
+// Best-effort throughout: every failure path warns and proceeds with the
+// destroy. Worst case is the TXT records stay orphan, which is the
+// status quo without this step. Bounded waits (60s) keep the destroy
+// from hanging if cert-manager is unhealthy.
+//
+// Skipped silently when:
+//   - Endpoints output is unreadable (cluster never existed / state corrupt)
+//   - No master is reachable (everything's already torn down)
+//   - SSH to master fails (master is down — destroy will clean it up regardless)
+//   - No Certificate resources exist (cluster never had domains)
+func (s *Session) drainCertificates(ctx context.Context) error {
+	eps, err := s.Run.Endpoints(ctx)
+	if err != nil {
+		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: cannot read endpoints (%v); skipping", err))
+		return nil
+	}
+
+	// Pick any reachable master. Destroy targets ALL nodes; we just
+	// need one alive long enough to issue the kubectl delete.
+	var masterName string
+	for name, srv := range eps.Servers {
+		if srv.Role == "master" && srv.IPv4 != "" {
+			masterName = name
+			break
+		}
+	}
+	if masterName == "" {
+		return nil
+	}
+	srv := eps.Servers[masterName]
+
+	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, s.Rt.SSHPrivKey)
+	if err != nil {
+		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: ssh %s (%s): %v; skipping", masterName, srv.IPv4, err))
+		return nil
+	}
+	defer sh.Close()
+
+	out, err := install.Kubectl(ctx, sh, "get", "certificate", "-A", "-o", "name", "--ignore-not-found")
+	if err != nil {
+		// Likely cert-manager CRDs aren't installed (cluster never had
+		// domains). That's the silent-skip case.
+		return nil
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil
+	}
+
+	s.Lg.Step("drain-cert-manager")
+	s.Lg.Info("deleting Certificate resources; cert-manager finalizers clean up _acme-challenge TXT records via the DNS provider API")
+
+	if out, err := install.Kubectl(ctx, sh, "delete", "certificate", "--all", "-A", "--timeout=60s"); err != nil {
+		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: delete: %v (out: %s)", err, strings.TrimSpace(string(out))))
+		// Continue to wait — kubectl delete may have queued the
+		// deletion even if the CLI returned an error.
+	}
+	if out, err := install.Kubectl(ctx, sh, "wait", "--for=delete", "certificate", "--all", "-A", "--timeout=60s"); err != nil {
+		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: wait: %v (out: %s) — proceeding to destroy; orphan TXT records possible", err, strings.TrimSpace(string(out))))
+		return nil
+	}
+	s.Lg.Info("Certificate finalizers complete; TXT records cleaned via provider API")
+	return nil
 }

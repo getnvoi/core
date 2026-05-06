@@ -1,7 +1,7 @@
 // Package log is the single output sink for nvoi.
 //
-// One canonical Event type. Two serializers: JSONL (canonical,
-// full-fidelity) and text (tabbed projection of the same Event).
+// One canonical event type. Two serializers: JSONL (canonical,
+// full-fidelity) and text (tabbed projection of the same event).
 // The text view is a strict projection — every text line maps 1:1 to
 // a JSONL line. JSONL is the source of truth; text loses only the
 // `tf:` body (operator-readable terminals don't want a nested JSON
@@ -30,10 +30,10 @@ import (
 // lifecycle's three buckets.
 //
 //   - KindInfra: YAML→HCL, tfexec init/plan/apply/destroy/output,
-//     endpoints read, node detach, tunnel pre-apply drain.
+//     endpoints read, node detach.
 //   - KindBuild: docker login + buildx build/push.
 //   - KindCluster: k3s install + node prep, kube tunnel + apply +
-//     sweep, caddy admin, tunnel agent.
+//     sweep, caddy admin.
 type Kind string
 
 const (
@@ -42,27 +42,29 @@ const (
 	KindCluster Kind = "cluster"
 )
 
-// Level is the event's severity / marker — closed enum shared by
-// both nvoi-emitted events and lifted tofu events.
-type Level string
+// level is the event's severity / marker — closed enum shared by
+// both nvoi-emitted events and lifted tofu events. Internal: callers
+// emit through Step/Info/Warn/Error, never construct levels directly.
+type level string
 
 const (
-	LevelStep  Level = "step"  // stage transition
-	LevelInfo  Level = "info"  // informational
-	LevelWarn  Level = "warn"  // operator-relevant warning
-	LevelError Level = "error" // hard failure
+	levelStep  level = "step"  // stage transition
+	levelInfo  level = "info"  // informational
+	levelWarn  level = "warn"  // operator-relevant warning
+	levelError level = "error" // hard failure
 )
 
-// Event is the canonical record. Every Step/Info/Warn/Error call,
+// event is the canonical record. Every Step/Info/Warn/Error call,
 // every line that flows through TFStream / Stream, lands here. JSONL
-// serializer encodes Events directly; text serializer is a strict
-// projection (drops `tf:`).
-type Event struct {
+// serializer encodes events directly; text serializer is a strict
+// projection (drops `tf:`). Internal — the JSONL schema is the public
+// contract, not this Go shape.
+type event struct {
 	Time  time.Time
 	Kind  Kind
-	Level Level
-	Step  string         // populated when Level == LevelStep
-	Msg   string         // populated when Level != LevelStep
+	Level level
+	Step  string         // populated when Level == levelStep
+	Msg   string         // populated when Level != levelStep
 	TF    map[string]any // populated for lifted tofu events; rendered only in JSONL
 }
 
@@ -83,14 +85,14 @@ type Log interface {
 	// TFStream returns a writer that line-buffers tofu's `-json`
 	// output, parses each line, lifts @timestamp/@level/@message
 	// to top-level Time/Level/Msg, folds the rest under TF, and
-	// emits as Events. Non-JSON lines (e.g. tofu's pretty-printed
+	// emits as events. Non-JSON lines (e.g. tofu's pretty-printed
 	// `output -json` dump) are silently dropped — the JSONL
 	// stream stays well-formed.
 	TFStream() io.Writer
 
 	// Stream returns a writer that line-buffers arbitrary plain-text
 	// output (SSH command stdout, buildx output) and emits each
-	// non-empty line as a LevelInfo Event scoped to the logger's kind.
+	// non-empty line as a levelInfo event scoped to the logger's kind.
 	Stream() io.Writer
 }
 
@@ -119,7 +121,7 @@ func NewWith(jsonl bool, w io.Writer) Log {
 // ── core impl ────────────────────────────────────────────────────────
 
 type serializer interface {
-	emit(w io.Writer, e Event)
+	emit(w io.Writer, e event)
 }
 
 type logger struct {
@@ -137,7 +139,7 @@ func (l *logger) Sub(kind Kind) Log {
 	return &logger{mu: l.mu, out: l.out, ser: l.ser, kind: kind}
 }
 
-func (l *logger) emit(e Event) {
+func (l *logger) emit(e event) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
@@ -149,10 +151,10 @@ func (l *logger) emit(e Event) {
 	l.ser.emit(l.out, e)
 }
 
-func (l *logger) Step(name string)    { l.emit(Event{Level: LevelStep, Step: name}) }
-func (l *logger) Info(msg string)     { l.emit(Event{Level: LevelInfo, Msg: msg}) }
-func (l *logger) Warn(msg string)     { l.emit(Event{Level: LevelWarn, Msg: msg}) }
-func (l *logger) Error(err error)     { l.emit(Event{Level: LevelError, Msg: err.Error()}) }
+func (l *logger) Step(name string)    { l.emit(event{Level: levelStep, Step: name}) }
+func (l *logger) Info(msg string)     { l.emit(event{Level: levelInfo, Msg: msg}) }
+func (l *logger) Warn(msg string)     { l.emit(event{Level: levelWarn, Msg: msg}) }
+func (l *logger) Error(err error)     { l.emit(event{Level: levelError, Msg: err.Error()}) }
 func (l *logger) TFStream() io.Writer { return &tfTransformer{lg: l} }
 func (l *logger) Stream() io.Writer   { return &lineTransformer{lg: l} }
 
@@ -165,13 +167,13 @@ type jsonSerializer struct{}
 type eventWire struct {
 	Time  string         `json:"time"`
 	Kind  Kind           `json:"kind"`
-	Level Level          `json:"level"`
+	Level level          `json:"level"`
 	Step  string         `json:"step,omitempty"`
 	Msg   string         `json:"msg,omitempty"`
 	TF    map[string]any `json:"tf,omitempty"`
 }
 
-func (jsonSerializer) emit(w io.Writer, e Event) {
+func (jsonSerializer) emit(w io.Writer, e event) {
 	wire := eventWire{
 		Time:  e.Time.UTC().Format(time.RFC3339),
 		Kind:  e.Kind,
@@ -190,11 +192,11 @@ func (jsonSerializer) emit(w io.Writer, e Event) {
 type textSerializer struct{}
 
 // emit writes "time\tkind\tlevel\tpayload\n". Payload = step for
-// LevelStep, msg otherwise. Tabs / newlines in payload are replaced
+// levelStep, msg otherwise. Tabs / newlines in payload are replaced
 // with spaces so downstream `cut -f4` always sees exactly the field.
-func (textSerializer) emit(w io.Writer, e Event) {
+func (textSerializer) emit(w io.Writer, e event) {
 	payload := e.Step
-	if e.Level != LevelStep {
+	if e.Level != levelStep {
 		payload = e.Msg
 	}
 	payload = strings.NewReplacer("\t", " ", "\n", " ", "\r", "").Replace(payload)
@@ -205,7 +207,7 @@ func (textSerializer) emit(w io.Writer, e Event) {
 // ── stream transformers ─────────────────────────────────────────────
 
 // tfTransformer line-buffers tofu's -json stdout, parses each
-// line, lifts the @-prefixed metadata to top-level Event fields and
+// line, lifts the @-prefixed metadata to top-level event fields and
 // folds the rest under TF. Non-JSON lines (tofu's pretty-printed
 // `output -json` dump, banner blank lines, etc.) are silently dropped
 // — guarantees the stream stays well-formed JSONL.
@@ -240,7 +242,7 @@ func (t *tfTransformer) process(line []byte) {
 	if err := json.Unmarshal(line, &raw); err != nil {
 		return // malformed line — drop
 	}
-	e := Event{Level: LevelInfo}
+	e := event{Level: levelInfo}
 	if v, ok := raw["@timestamp"].(string); ok {
 		if ts, err := time.Parse(time.RFC3339Nano, v); err == nil {
 			e.Time = ts
@@ -263,19 +265,19 @@ func (t *tfTransformer) process(line []byte) {
 	t.lg.emit(e)
 }
 
-func mapTFLevel(tfLevel string) Level {
+func mapTFLevel(tfLevel string) level {
 	switch tfLevel {
 	case "error":
-		return LevelError
+		return levelError
 	case "warn":
-		return LevelWarn
+		return levelWarn
 	default:
-		return LevelInfo
+		return levelInfo
 	}
 }
 
 // lineTransformer line-wraps arbitrary plain-text output (SSH command
-// stdout, buildx output). Each non-empty line becomes a LevelInfo Event
+// stdout, buildx output). Each non-empty line becomes a levelInfo event
 // scoped to the parent logger's kind.
 type lineTransformer struct {
 	lg  *logger
@@ -297,7 +299,7 @@ func (t *lineTransformer) Write(p []byte) (int, error) {
 		if len(line) == 0 {
 			continue
 		}
-		t.lg.emit(Event{Level: LevelInfo, Msg: string(line)})
+		t.lg.emit(event{Level: levelInfo, Msg: string(line)})
 	}
 	return len(p), nil
 }

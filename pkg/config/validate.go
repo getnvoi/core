@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/providers"
 )
 
@@ -119,18 +120,13 @@ func (c *Config) Validate() error {
 //   - every key in Domains must be a declared service
 //   - every hostname is DNS-1123-shaped (lowercase letters / digits /
 //     dashes / dots; labels ≤63 chars; total ≤253 chars)
-//   - providers.tunnel requires providers.dns (tunnel writes CNAMEs
-//     via the DNS provider; without it there's nowhere to put them)
 //
 // Provider name registration happens inside the compile package
-// (RegisterDNS / RegisterTunnel via blank-imports in cmd/cli/main.go).
-// We don't validate registration here — the validator stays env-free
-// to keep tests pure; unknown providers fail at compile time with a
-// clear "unknown infra provider %q" / "unknown dns provider %q".
+// (RegisterDNS via blank-imports in cmd/cli/main.go). We don't
+// validate registration here — the validator stays env-free to keep
+// tests pure; unknown providers fail at compile time with a clear
+// "unknown infra provider %q" / "unknown dns provider %q".
 func validateDomains(c *Config) error {
-	if c.Providers.Tunnel != "" && c.Providers.DNS == "" {
-		return fmt.Errorf("providers.tunnel requires providers.dns (tunnel CNAMEs must be written somewhere)")
-	}
 	if len(c.Domains) == 0 {
 		return nil
 	}
@@ -204,7 +200,7 @@ func validateAliases(c *Config) error {
 		if strings.TrimSpace(body) == "" {
 			return fmt.Errorf("aliases.%s: empty body", name)
 		}
-		if _, err := shellSplit(body); err != nil {
+		if _, err := utils.ShellSplit(body); err != nil {
 			return fmt.Errorf("aliases.%s: %w", name, err)
 		}
 	}

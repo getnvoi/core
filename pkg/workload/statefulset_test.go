@@ -3,17 +3,46 @@ package workload
 import (
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-func TestBuildStatefulSet_Shape(t *testing.T) {
-	rt := &runtime.Runtime{
-		Cfg:        &config.Config{App: "hello", Env: "dev"},
-		DeployHash: "20260430-120000",
+// mustBuildStatefulSet wraps buildStatefulSet for tests; minimalRT and
+// the per-test runtimes always seed a master so the placement-resolution
+// error path is unreachable here. Any error means a real bug.
+func mustBuildStatefulSet(t *testing.T, rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.StatefulSet {
+	t.Helper()
+	ss, err := buildStatefulSet(rt, name, svc)
+	if err != nil {
+		t.Fatalf("buildStatefulSet %s: %v", name, err)
 	}
-	ss := BuildStatefulSet(rt, "postgres", config.ServiceSpec{
+	return ss
+}
+
+// minimalRT returns a Runtime with one master in cfg.Servers — the
+// minimum needed by buildStatefulSet / buildDeployment so default
+// placement resolution lands on a real key. Tests that don't care
+// about placement details use this.
+func minimalRT() *runtime.Runtime {
+	return &runtime.Runtime{
+		Cfg: &config.Config{
+			App: "hello",
+			Env: "dev",
+			Servers: map[string]config.ServerSpec{
+				"master": {Role: "master"},
+			},
+		},
+		DeployHash: "h",
+	}
+}
+
+func TestBuildStatefulSet_Shape(t *testing.T) {
+	rt := minimalRT()
+	rt.DeployHash = "20260430-120000"
+	ss := mustBuildStatefulSet(t,rt, "postgres", config.ServiceSpec{
 		Image:   "postgres:16",
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "10Gi", MountPath: "/var/lib/postgresql/data"},
@@ -28,14 +57,14 @@ func TestBuildStatefulSet_Shape(t *testing.T) {
 	if got := *ss.Spec.Replicas; got != 1 {
 		t.Errorf("default replicas: got %d want 1", got)
 	}
-	// Selector contains LabelService only. NOT deploy-hash (orphans
+	// Selector contains labelService only. NOT deploy-hash (orphans
 	// pods on every roll). NOT owner (selector immutability + owner
 	// taxonomy evolution = destroy required for every taxonomy change).
 	sel := ss.Spec.Selector.MatchLabels
-	if sel[LabelService] != "postgres" {
-		t.Errorf("selector: got %v want %s=postgres", sel, LabelService)
+	if sel[labelService] != "postgres" {
+		t.Errorf("selector: got %v want %s=postgres", sel, labelService)
 	}
-	if _, ok := sel[LabelDeployHash]; ok {
+	if _, ok := sel[labelDeployHash]; ok {
 		t.Error("selector must NOT contain deploy-hash")
 	}
 	if _, ok := sel[kube.LabelOwner]; ok {
@@ -44,8 +73,8 @@ func TestBuildStatefulSet_Shape(t *testing.T) {
 }
 
 func TestBuildStatefulSet_VolumeClaimTemplate(t *testing.T) {
-	rt := &runtime.Runtime{Cfg: &config.Config{}, DeployHash: "h"}
-	ss := BuildStatefulSet(rt, "postgres", config.ServiceSpec{
+	rt := minimalRT()
+	ss := mustBuildStatefulSet(t,rt, "postgres", config.ServiceSpec{
 		Image:   "postgres:16",
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "20Gi", MountPath: "/data"},
@@ -67,8 +96,8 @@ func TestBuildStatefulSet_VolumeClaimTemplate(t *testing.T) {
 }
 
 func TestBuildStatefulSet_VolumeMountWired(t *testing.T) {
-	rt := &runtime.Runtime{Cfg: &config.Config{}, DeployHash: "h"}
-	ss := BuildStatefulSet(rt, "postgres", config.ServiceSpec{
+	rt := minimalRT()
+	ss := mustBuildStatefulSet(t,rt, "postgres", config.ServiceSpec{
 		Image:   "postgres:16",
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "10Gi", MountPath: "/var/lib/postgresql/data"},
@@ -84,8 +113,8 @@ func TestBuildStatefulSet_VolumeMountWired(t *testing.T) {
 }
 
 func TestBuildStatefulSet_SecretEnvInjected(t *testing.T) {
-	rt := &runtime.Runtime{Cfg: &config.Config{}, DeployHash: "h"}
-	ss := BuildStatefulSet(rt, "postgres", config.ServiceSpec{
+	rt := minimalRT()
+	ss := mustBuildStatefulSet(t,rt, "postgres", config.ServiceSpec{
 		Image:   "postgres:16",
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "1Gi", MountPath: "/data"},
@@ -99,18 +128,25 @@ func TestBuildStatefulSet_SecretEnvInjected(t *testing.T) {
 	if env[0].Name != "POSTGRES_PASSWORD" || env[1].Name != "POSTGRES_USER" {
 		t.Errorf("env not sorted: %+v", env)
 	}
-	if env[0].ValueFrom.SecretKeyRef.Name != AppSecretName {
+	if env[0].ValueFrom.SecretKeyRef.Name != appSecretName {
 		t.Errorf("secretKeyRef.Name: %q", env[0].ValueFrom.SecretKeyRef.Name)
 	}
 }
 
-func TestBuildStatefulSet_DefaultPlacementIsMaster(t *testing.T) {
-	rt := &runtime.Runtime{Cfg: &config.Config{}, DeployHash: "h"}
-	ss := BuildStatefulSet(rt, "postgres", config.ServiceSpec{
+func TestBuildStatefulSet_DefaultPlacementSingleMaster(t *testing.T) {
+	rt := &runtime.Runtime{
+		Cfg: &config.Config{
+			Servers: map[string]config.ServerSpec{
+				"master": {Role: "master"},
+			},
+		},
+		DeployHash: "h",
+	}
+	ss := mustBuildStatefulSet(t,rt, "postgres", config.ServiceSpec{
 		Image:   "postgres:16",
 		Port:    5432,
 		Storage: &config.StorageSpec{Size: "1Gi", MountPath: "/data"},
-		// No Servers set → defaults to ["master"]
+		// No Servers set → defaults to the master YAML key
 	})
 	if got := ss.Spec.Template.Spec.NodeSelector[LabelNvoiRole]; got != "master" {
 		t.Errorf("default placement should pin to master, got %v", ss.Spec.Template.Spec.NodeSelector)

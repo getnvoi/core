@@ -8,7 +8,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/compile"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -20,10 +21,9 @@ var dnsTpl = template.Must(template.New("dns.tf.tmpl").
 	ParseFS(dnsTemplateFS, "templates/dns.tf.tmpl"))
 
 // DNSEmitter renders Cloudflare DNS records as terraform HCL. One
-// `cloudflare_record` per (service, domain) pair. Without
-// providers.tunnel: A records pointing at the master's public IP
-// (terraform-interpolated from hcloud_server.<primary>.ipv4_address).
-// Tunnel mode (commit #7) flips these to CNAMEs to the tunnel edge.
+// `cloudflare_record` per (service, domain) pair. A records pointing
+// at the master's public IP (terraform-interpolated from
+// hcloud_server.<primary>.ipv4_address).
 //
 // Stateless: reads cfg.Domains + cfg.Servers + the resolved zone ID
 // (from CF_ZONE_ID env var). No I/O at emit time beyond env reads —
@@ -41,17 +41,37 @@ func (DNSEmitter) Provider() compile.ProviderRequirement {
 	}
 }
 
-// recordData drives the per-record block in dns.tf.tmpl. When
-// Tunnel is true, the template emits a CNAME pointing at
-// local.tunnel_cname (the tunnel emitter writes that local). When
-// false, an A record with Target as the raw HCL expression
-// (typically `hcloud_server.master.ipv4_address`, NOT a quoted
-// string).
+// CertManagerSolver returns the cert-manager DNS-01 solver YAML for
+// Cloudflare. cert-manager reads the CF API token from a k8s Secret
+// nvoi materializes from rt.Providers.Cloudflare.APIToken (resolved at
+// the cmd/cli boundary from CLOUDFLARE_API_TOKEN / CF_API_KEY).
+//
+// The solver YAML is the inner block of a ClusterIssuer's
+// `spec.acme.solvers` list — caller wraps it.
+func (DNSEmitter) CertManagerSolver(rt *runtime.Runtime) (string, []compile.SolverSecret, error) {
+	if rt.Providers.Cloudflare == nil || rt.Providers.Cloudflare.APIToken == "" {
+		return "", nil, fmt.Errorf("cloudflare cert-manager solver: APIToken required")
+	}
+	const solver = `      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token`
+	secrets := []compile.SolverSecret{{
+		Name:  "cloudflare-api-token",
+		Key:   "api-token",
+		Value: rt.Providers.Cloudflare.APIToken,
+	}}
+	return solver, secrets, nil
+}
+
+// recordData drives the per-record block in dns.tf.tmpl. Always emits
+// an A record with Target as the raw HCL expression (typically
+// `hcloud_server.<primary>.ipv4_address`, NOT a quoted string).
 type recordData struct {
 	ResourceName string // sanitized terraform resource name, unique
 	Name         string // record name relative to zone (e.g. "www", "@")
-	Target       string // raw HCL expression for A-record content; ignored when Tunnel
-	Tunnel       bool   // emit CNAME → local.tunnel_cname instead of A
+	Target       string // raw HCL expression for A-record content
 }
 
 type dnsTemplateData struct {
@@ -83,32 +103,41 @@ func (DNSEmitter) EmitDNS(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("cloudflare dns: CF_ZONE required (e.g. nvoi.to)")
 	}
 
-	tunnelMode := cfg.Providers.Tunnel != ""
+	primary := cfg.PrimaryMaster()
+	if primary == "" {
+		return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
+	}
 
-	// In Caddy mode the A target is the master's public IPv4. In
-	// tunnel mode the template flips to CNAME → local.tunnel_cname
-	// (which the active tunnel emitter declares); the Target string
-	// here is unused on that path but we still set it so the
-	// template's else-branch is well-defined for assertion.
-	var aTarget string
-	if !tunnelMode {
-		primary := cfg.PrimaryMaster()
-		if primary == "" {
-			return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
+	// HA + domains → DNS A points at the cloud LB's public IP (LB
+	// distributes 80/443 across all masters → real HA HTTP).
+	// Otherwise → primary master's public IP (single-master path).
+	// Provider-specific reference (hcloud_load_balancer.cp.ipv4 /
+	// hcloud_server.<primary>.ipv4_address) is the same coupling we
+	// already accepted between the cloudflare DNS emitter and the
+	// hetzner infra emitter — they share the tofu module and reference
+	// each other's resources.
+	masters := 0
+	for _, s := range cfg.Servers {
+		if s.Role == "master" {
+			masters++
 		}
+	}
+	var aTarget string
+	if masters >= 2 && len(cfg.Domains) > 0 {
+		aTarget = "hcloud_load_balancer.cp.ipv4"
+	} else {
 		aTarget = fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
 	}
 
 	// Per-deploy uniqueness: combine service + sanitized hostname so
 	// re-running with the same YAML produces a stable resource address.
 	records := make([]recordData, 0)
-	for _, svcName := range sortedStringKeys(cfg.Domains) {
+	for _, svcName := range utils.SortedKeys(cfg.Domains) {
 		for _, host := range cfg.Domains[svcName] {
 			records = append(records, recordData{
 				ResourceName: sanitizeResourceName(svcName + "_" + host),
 				Name:         recordNameFor(host, zone),
 				Target:       aTarget,
-				Tunnel:       tunnelMode,
 			})
 		}
 	}

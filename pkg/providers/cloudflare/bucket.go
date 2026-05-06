@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/providers"
 )
 
 // BucketClient manages R2 buckets via Cloudflare API + returns
 // S3-compatible credentials suitable for terraform's s3 backend.
 type BucketClient struct {
-	api       *HTTPClient
+	api       *utils.HTTPClient
 	apiKey    string
 	accountID string
 	creds     *providers.BucketCredentials
@@ -43,7 +44,7 @@ func (c *BucketClient) ValidateCredentials(ctx context.Context) error {
 }
 
 func (c *BucketClient) EnsureBucket(ctx context.Context, name string) error {
-	err := c.api.Do(ctx, Request{
+	err := c.api.Do(ctx, utils.Request{
 		Method: "POST",
 		Path:   fmt.Sprintf("/accounts/%s/r2/buckets", c.accountID),
 		Body:   map[string]string{"name": name},
@@ -52,7 +53,7 @@ func (c *BucketClient) EnsureBucket(ctx context.Context, name string) error {
 		return nil
 	}
 	// 409 = already exists — success (idempotent).
-	var apiErr *APIError
+	var apiErr *utils.APIError
 	if errors.As(err, &apiErr) && apiErr.HTTPStatus() == 409 {
 		return nil
 	}
@@ -60,12 +61,12 @@ func (c *BucketClient) EnsureBucket(ctx context.Context, name string) error {
 }
 
 func (c *BucketClient) DeleteBucket(ctx context.Context, name string) error {
-	err := c.api.Do(ctx, Request{
+	err := c.api.Do(ctx, utils.Request{
 		Method: "DELETE",
 		Path:   fmt.Sprintf("/accounts/%s/r2/buckets/%s", c.accountID, name),
 	})
 	if err != nil {
-		if IsNotFound(err) {
+		if utils.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("delete bucket %s: %w", name, err)
@@ -101,7 +102,7 @@ func (c *BucketClient) tokenVerify(ctx context.Context) (string, error) {
 			ID string `json:"id"`
 		} `json:"result"`
 	}
-	if err := c.api.Do(ctx, Request{Method: "GET", Path: "/user/tokens/verify", Result: &result}); err != nil {
+	if err := c.api.Do(ctx, utils.Request{Method: "GET", Path: "/user/tokens/verify", Result: &result}); err != nil {
 		return "", err
 	}
 	if result.Result.ID == "" {

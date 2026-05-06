@@ -4,11 +4,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-// BuildAppSecret renders the single Opaque Secret holding resolved
+// buildAppSecret renders the single Opaque Secret holding resolved
 // values for every entry in cfg.Secrets. Per-service `secrets:`
 // whitelists pull from this object via secretKeyRef.
 //
@@ -19,7 +19,7 @@ import (
 // cmd/cli boundary (resolveSecrets) reads os.Getenv before
 // runtime.Build runs, so we trust every key here has a non-empty
 // literal.
-func BuildAppSecret(rt *runtime.Runtime) *corev1.Secret {
+func buildAppSecret(rt *runtime.Runtime) *corev1.Secret {
 	if len(rt.SecretValues) == 0 {
 		return nil
 	}
@@ -29,7 +29,7 @@ func BuildAppSecret(rt *runtime.Runtime) *corev1.Secret {
 	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      AppSecretName,
+			Name:      appSecretName,
 			Namespace: namespace,
 			Labels: map[string]string{
 				kube.LabelOwner: kube.OwnerAppSecrets,

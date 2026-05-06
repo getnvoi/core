@@ -356,12 +356,6 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "not a valid DNS hostname",
 		},
-		{
-			name:    "tunnel without dns rejected",
-			mutate:  func(c *Config) { c.Providers.Tunnel = "cloudflare" },
-			wantErr: "providers.tunnel requires providers.dns",
-		},
-
 		// aliases
 		{
 			name: "valid alias",

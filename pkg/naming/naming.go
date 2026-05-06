@@ -25,11 +25,6 @@ func Prefix(app, env string) string { return fmt.Sprintf("nvoi-%s-%s", app, env)
 // Server returns the provider-side server name for the given short name.
 func Server(app, env, name string) string { return Prefix(app, env) + "-" + name }
 
-// SSHKey returns the provider-side SSH key resource name (kept for the
-// day a provider uses a managed key resource — Hetzner injects via
-// cloud-init today).
-func SSHKey(app, env string) string { return Prefix(app, env) + "-key" }
-
 // StateBucket returns the object-storage bucket holding TF remote state.
 // Unused while the state backend is local; preserved as the seam to
 // re-promote remote state.

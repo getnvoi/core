@@ -10,7 +10,7 @@ import (
 	"github.com/getnvoi/core/pkg/install"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/ssh"
-	"github.com/getnvoi/core/pkg/testutil/sshfake"
+	"github.com/getnvoi/core/pkg/internal/testutil/sshfake"
 )
 
 func silentLog() log.Log { return log.NewWith(false, io.Discard) }

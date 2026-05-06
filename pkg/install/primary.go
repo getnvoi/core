@@ -38,8 +38,6 @@ func InstallPrimaryMaster(ctx context.Context, self Node, extraSANs []string) er
 	execArgs := strings.Join([]string{
 		"server",
 		"--cluster-init",
-		"--disable traefik",
-		"--disable servicelb",
 		"--write-kubeconfig-mode 644",
 		"--node-ip " + self.Private,
 		"--advertise-address " + self.Private,

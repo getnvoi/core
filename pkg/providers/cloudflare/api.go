@@ -6,12 +6,14 @@ package cloudflare
 
 import (
 	"net/http"
+
+	"github.com/getnvoi/core/pkg/internal/utils"
 )
 
 const baseURL = "https://api.cloudflare.com/client/v4"
 
-func newAPI(apiKey, label string) *HTTPClient {
-	return &HTTPClient{
+func newAPI(apiKey, label string) *utils.HTTPClient {
+	return &utils.HTTPClient{
 		BaseURL: baseURL,
 		SetAuth: func(r *http.Request) {
 			r.Header.Set("Authorization", "Bearer "+apiKey)

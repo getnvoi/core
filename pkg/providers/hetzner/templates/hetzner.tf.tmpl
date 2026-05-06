@@ -65,10 +65,9 @@ resource "hcloud_firewall" "default" {
     source_ips = [{{ .NetworkCIDR | hcl }}]
   }
 {{ if .PublicHTTPIngress }}
-  # Caddy on the master holds hostPort 80/443 directly. Tunnel mode
-  # closes these (all ingress flows through the cloudflared / ngrok
-  # agent's outbound connection); the rules only emit when domains:
-  # is set AND providers.tunnel is unset.
+  # Single-master + domains: the master IS the public face for HTTP/S.
+  # Traefik (k3s default ingress controller) holds hostPort 80/443 on
+  # the master via klipper-lb; firewall opens those ports to the world.
   rule {
     direction  = "in"
     protocol   = "tcp"
@@ -80,6 +79,24 @@ resource "hcloud_firewall" "default" {
     protocol   = "tcp"
     port       = "443"
     source_ips = ["0.0.0.0/0", "::/0"]
+  }
+{{ end }}
+{{ if .LBHTTPIngress }}
+  # HA + domains: public traffic enters the cloud LB (which has a public
+  # IPv4) and is dispatched across masters via private network. Masters
+  # only need 80/443 reachable from the private subnet — no public
+  # exposure beyond SSH.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "80"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
+  }
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "443"
+    source_ips = [{{ .NetworkCIDR | hcl }}]
   }
 {{ end }}
 }
@@ -122,11 +139,21 @@ resource "hcloud_server" {{ .Key | hcl }} {
 }
 {{ end }}
 {{ if .HA }}
-# ── HA control-plane load balancer ─────────────────────────────────────
-# Auto-emitted because Servers has ≥2 masters. Public IPv4 for kubectl;
-# backend traffic stays on the private network (use_private_ip=true).
-# Targets enroll via label selector — adding/removing masters in the
-# YAML re-targets the LB without changing this block.
+# ── HA load balancer ───────────────────────────────────────────────────
+# Auto-emitted because Servers has ≥2 masters.
+#
+# Two faces:
+#   - 6443 (always): k3s API for cluster-internal joins. Workers and
+#     secondary masters point at the LB private IP. Stays reachable
+#     even after the originally-primary master dies.
+#   - 80 + 443 (only when LBHTTPIngress, i.e. domains set): public
+#     HTTPS ingress, TCP pass-through. Traefik on each master answers
+#     via klipper-lb hostPort. cert-manager-issued certs come from a
+#     k8s Secret each Traefik replica reads — no replication issue.
+#
+# Without domains: LB has no public IPv4 (disable_public_interface =
+# true). The cluster still has zero public ingress beyond SSH on
+# masters.
 
 resource "hcloud_load_balancer" "cp" {
   name               = "${local.prefix}-cp"
@@ -139,8 +166,11 @@ resource "hcloud_load_balancer" "cp" {
 }
 
 resource "hcloud_load_balancer_network" "cp" {
-  load_balancer_id = hcloud_load_balancer.cp.id
-  subnet_id        = hcloud_network_subnet.default.id
+  load_balancer_id        = hcloud_load_balancer.cp.id
+  subnet_id               = hcloud_network_subnet.default.id
+{{ if not .LBHTTPIngress }}
+  enable_public_interface = false
+{{- end }}
 }
 
 resource "hcloud_load_balancer_target" "cp" {
@@ -156,7 +186,51 @@ resource "hcloud_load_balancer_service" "cp" {
   protocol         = "tcp"
   listen_port      = 6443
   destination_port = 6443
+
+  # Tighter than Hetzner's default (interval=15s, retries=3 → ~45s to
+  # mark a target healthy/unhealthy). With 5×2 we converge in ~10s,
+  # which matters during scale events: a fresh master joins the pool
+  # ~30s sooner, and a doomed master gets declassified ~30s sooner so
+  # the LB stops sending traffic to it during tofu destroy.
+  health_check {
+    protocol = "tcp"
+    port     = 6443
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
 }
+{{ if .LBHTTPIngress }}
+resource "hcloud_load_balancer_service" "http" {
+  load_balancer_id = hcloud_load_balancer.cp.id
+  protocol         = "tcp"
+  listen_port      = 80
+  destination_port = 80
+
+  health_check {
+    protocol = "tcp"
+    port     = 80
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
+}
+
+resource "hcloud_load_balancer_service" "https" {
+  load_balancer_id = hcloud_load_balancer.cp.id
+  protocol         = "tcp"
+  listen_port      = 443
+  destination_port = 443
+
+  health_check {
+    protocol = "tcp"
+    port     = 443
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
+}
+{{ end }}
 {{ end }}
 
 # ── Outputs ────────────────────────────────────────────────────────────
@@ -176,7 +250,7 @@ output "servers" {
 
 output "api_endpoint" {
   value = {
-    public  = {{ if .HA }}hcloud_load_balancer.cp.ipv4{{ else }}hcloud_server.{{ .PrimaryMaster }}.ipv4_address{{ end }}
+    public  = {{ if .LBHTTPIngress }}hcloud_load_balancer.cp.ipv4{{ else }}hcloud_server.{{ .PrimaryMaster }}.ipv4_address{{ end }}
     private = {{ if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}one([for n in hcloud_server.{{ .PrimaryMaster }}.network : n.ip]){{ end }}
   }
 }

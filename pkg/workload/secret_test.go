@@ -5,13 +5,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
 func TestBuildAppSecret_Empty_ReturnsNil(t *testing.T) {
 	rt := &runtime.Runtime{SecretValues: nil}
-	if got := BuildAppSecret(rt); got != nil {
+	if got := buildAppSecret(rt); got != nil {
 		t.Errorf("expected nil when no secrets, got %+v", got)
 	}
 }
@@ -24,11 +24,11 @@ func TestBuildAppSecret_Shape(t *testing.T) {
 			"POSTGRES_PASSWORD": "ghp_xxx",
 		},
 	}
-	s := BuildAppSecret(rt)
+	s := buildAppSecret(rt)
 	if s == nil {
 		t.Fatal("Secret nil")
 	}
-	if s.Name != AppSecretName || s.Namespace != "default" {
+	if s.Name != appSecretName || s.Namespace != "default" {
 		t.Errorf("name/ns: %s/%s", s.Name, s.Namespace)
 	}
 	if s.Type != corev1.SecretTypeOpaque {

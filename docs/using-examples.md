@@ -35,7 +35,7 @@ It includes:
 - registry credentials
 - secrets
 - domains
-- tunnel and DNS providers
+- DNS provider
 - aliases
 
 Use it the same way:

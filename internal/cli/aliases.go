@@ -1,11 +1,9 @@
 package cli
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/internal/utils"
 )
 
 var (
@@ -24,6 +22,11 @@ func CachedConfig(path string) (*config.Config, bool) {
 	return cachedConfig(path)
 }
 
+// ExpandAliasArgs is the CLI-side wrapper around config.ExpandAlias.
+// Extracts the config path from argv (-c / --config), loads the YAML,
+// and delegates the actual expansion to the library. Load failures
+// pass through silently — args are returned unchanged so cobra can
+// produce its own "config not found" error in the usual place.
 func ExpandAliasArgs(args []string) ([]string, error) {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return args, nil
@@ -32,15 +35,7 @@ func ExpandAliasArgs(args []string) ([]string, error) {
 	if err != nil {
 		return args, nil
 	}
-	body, ok := cfg.Aliases[args[0]]
-	if !ok {
-		return args, nil
-	}
-	tokens, err := utils.ShellSplit(body)
-	if err != nil {
-		return nil, fmt.Errorf("alias %s: %w", args[0], err)
-	}
-	return append(tokens, args[1:]...), nil
+	return config.ExpandAlias(cfg, args)
 }
 
 func loadConfigForAlias(args []string) (*config.Config, error) {
@@ -64,4 +59,3 @@ func loadConfigForAlias(args []string) (*config.Config, error) {
 	aliasCachePath, aliasCacheCfg = configPath, cfg
 	return cfg, nil
 }
-

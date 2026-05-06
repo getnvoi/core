@@ -1,6 +1,6 @@
 package cloudflare
 
-import "github.com/getnvoi/core/pkg/compile"
+import "github.com/getnvoi/core/pkg/internal/compile"
 
 // init registers the Cloudflare DNS emitter with the compile registry.
 // Triggered by a blank import in cmd/cli/main.go — same pattern as the

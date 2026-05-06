@@ -6,24 +6,24 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-// BuildService turns a ServiceSpec into a typed Service. ClusterIP
+// buildService turns a ServiceSpec into a typed Service. ClusterIP
 // for stateless workloads (Deployment), headless (ClusterIP="None")
 // when the service is stateful (storage set → StatefulSet). Headless
 // is what gives each StatefulSet pod its stable DNS — required for
 // the pod-identity guarantees the StatefulSet contract makes.
 //
-// Selector matches the pod template via LabelOwner+LabelService
+// Selector matches the pod template via LabelOwner+labelService
 // (stable across deploys). Port name "http" matches the container
 // port; downstream consumers (Caddy / ingress / sibling services)
 // can target it by name.
-func BuildService(_ *runtime.Runtime, name string, svc config.ServiceSpec) *corev1.Service {
+func buildService(_ *runtime.Runtime, name string, svc config.ServiceSpec) *corev1.Service {
 	labels := map[string]string{
 		kube.LabelOwner: kube.OwnerServices,
-		LabelService:    name,
+		labelService:    name,
 	}
 	spec := corev1.ServiceSpec{
 		Type:     corev1.ServiceTypeClusterIP,

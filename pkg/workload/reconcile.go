@@ -6,7 +6,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/getnvoi/core/pkg/kube"
+	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/log"
 	rt2 "github.com/getnvoi/core/pkg/runtime"
 )
@@ -17,8 +18,11 @@ import (
 //   - one Deployment OR StatefulSet (owner=services) per cfg.Services
 //     entry, dispatched by svc.Storage presence
 //   - one Service (owner=services) per cfg.Services entry
+//   - one Ingress (owner=ingress) per cfg.Services entry that has
+//     domains in cfg.Domains. References cert-manager-issued TLS
+//     Secrets — caller must apply cert-manager + Certificates first.
 //
-// Then runs ReconcileRemoval to delete nvoi-managed resources whose
+// Then runs reconcileRemoval to delete nvoi-managed resources whose
 // YAML entry is gone, scoped per-owner via SweepOwned.
 //
 // Idempotent: every Apply path is Get-then-Create-or-Update with
@@ -28,8 +32,9 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 	registryScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerRegistry}
 	appSecretsScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}
 	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
+	ingressScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerIngress}
 
-	if sec, err := BuildRegistrySecret(r); err != nil {
+	if sec, err := buildRegistrySecret(r); err != nil {
 		return fmt.Errorf("build registry-auth: %w", err)
 	} else if sec != nil {
 		lg.Step("registry-secret")
@@ -38,35 +43,52 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 		}
 	}
 
-	if sec := BuildAppSecret(r); sec != nil {
+	if sec := buildAppSecret(r); sec != nil {
 		lg.Step("app-secret")
 		if err := kc.ApplyOwned(ctx, appSecretsScope, sec); err != nil {
 			return fmt.Errorf("apply nvoi-secrets: %w", err)
 		}
 	}
 
-	for _, name := range sortedStringKeys(r.Cfg.Services) {
+	for _, name := range utils.SortedKeys(r.Cfg.Services) {
 		svc := r.Cfg.Services[name]
 		lg.Step("workload-" + name)
 
-		var workload runtime.Object
+		var (
+			workload runtime.Object
+			err      error
+		)
 		if svc.IsStateful() {
-			workload = BuildStatefulSet(r, name, svc)
+			workload, err = buildStatefulSet(r, name, svc)
 		} else {
-			workload = BuildDeployment(r, name, svc)
+			workload, err = buildDeployment(r, name, svc)
+		}
+		if err != nil {
+			return fmt.Errorf("build workload %s: %w", name, err)
 		}
 		if err := kc.ApplyOwned(ctx, servicesScope, workload); err != nil {
 			return fmt.Errorf("apply workload %s: %w", name, err)
 		}
-		if err := kc.ApplyOwned(ctx, servicesScope, BuildService(r, name, svc)); err != nil {
+		if err := kc.ApplyOwned(ctx, servicesScope, buildService(r, name, svc)); err != nil {
 			return fmt.Errorf("apply service %s: %w", name, err)
+		}
+
+		// Ingress: only emit when this service has domains. cert-manager
+		// is responsible for the TLS Secret each Ingress references; we
+		// applied the per-domain Certificate resources upstream of this
+		// reconcile.
+		if domains := r.Cfg.Domains[name]; len(domains) > 0 {
+			lg.Step("ingress-" + name)
+			if err := kc.ApplyOwned(ctx, ingressScope, buildIngress(name, svc, domains)); err != nil {
+				return fmt.Errorf("apply ingress %s: %w", name, err)
+			}
 		}
 	}
 
-	return ReconcileRemoval(ctx, r, kc, lg)
+	return reconcileRemoval(ctx, r, kc, lg)
 }
 
-// ReconcileRemoval deletes nvoi-managed resources whose YAML entry has
+// reconcileRemoval deletes nvoi-managed resources whose YAML entry has
 // been removed. Owner-scoped via SweepOwned — each step's sweep can
 // only see its own resources, so a stale registry-auth Secret never
 // gets caught by the services sweep, etc.
@@ -81,16 +103,20 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 // Plus owner-singleton sweeps for registry-auth and nvoi-secrets:
 // when operator removes registry: or empties secrets:, the orphan
 // Secret is purged.
-func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
+func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
 	declared := make([]string, 0, len(r.Cfg.Services))
 	declaredStateful := make([]string, 0)
 	declaredStateless := make([]string, 0)
-	for _, name := range sortedStringKeys(r.Cfg.Services) {
+	declaredIngress := make([]string, 0)
+	for _, name := range utils.SortedKeys(r.Cfg.Services) {
 		declared = append(declared, name)
 		if r.Cfg.Services[name].IsStateful() {
 			declaredStateful = append(declaredStateful, name)
 		} else {
 			declaredStateless = append(declaredStateless, name)
+		}
+		if len(r.Cfg.Domains[name]) > 0 {
+			declaredIngress = append(declaredIngress, name)
 		}
 	}
 
@@ -117,10 +143,16 @@ func ReconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	// nvoi-secrets singleton: keep only if secrets: declared.
 	appSecretDesired := []string(nil)
 	if len(r.Cfg.Secrets) > 0 {
-		appSecretDesired = []string{AppSecretName}
+		appSecretDesired = []string{appSecretName}
 	}
 	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}, kube.KindSecret, appSecretDesired); err != nil {
 		return fmt.Errorf("sweep stale app secret: %w", err)
+	}
+
+	// Ingress: keep only services with non-empty domains. Drop a
+	// service from cfg.Domains and the orphan Ingress purges next deploy.
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerIngress}, kube.KindIngress, declaredIngress); err != nil {
+		return fmt.Errorf("sweep stale ingresses: %w", err)
 	}
 
 	_ = lg // currently silent on per-sweep info; future per-name logging hook lives here

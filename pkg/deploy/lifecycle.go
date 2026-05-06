@@ -6,16 +6,17 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/getnvoi/core/pkg/compile"
+	"github.com/getnvoi/core/pkg/internal/compile"
+	"github.com/getnvoi/core/pkg/internal/runner"
 	"github.com/getnvoi/core/pkg/log"
-	"github.com/getnvoi/core/pkg/runner"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-// WithRunner is the shared orchestration primitive: compile YAML →
+// withRunner is the shared orchestration primitive: compile YAML →
 // write bundle → build runner → run action. Used internally by Run /
-// Destroy / Plan, AND by ad-hoc cmd/cli verbs (ssh, exec, logs,
-// kubectl) that need a runner to read endpoints before dialing SSH.
+// Destroy / Plan, plus the ad-hoc verbs that go through
+// RunWithSession (ssh, exec, logs, kubectl) — they reach it via
+// RunWithSession, never directly.
 //
 // Bundle and Runner live as locals — they are produced here, consumed
 // here, and never stashed on a struct.
@@ -23,7 +24,7 @@ import (
 // Steps emitted here (compile / write-bundle / tf-binary) all carry
 // kind=infra — they're the operator-side preparation phase before
 // anything cluster- or build-side runs.
-func WithRunner(ctx context.Context, rt *runtime.Runtime, action func(context.Context, *runner.Runner) error) error {
+func withRunner(ctx context.Context, rt *runtime.Runtime, action func(context.Context, *runner.Runner) error) error {
 	lg := rt.Log.Sub(log.KindInfra)
 	lg.Step("compile")
 	bundle, err := compile.Compile(rt)

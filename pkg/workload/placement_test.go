@@ -1,29 +1,77 @@
 package workload
 
 import (
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/getnvoi/core/pkg/config"
 )
 
-func TestApplyNodePlacement_DefaultIsMaster(t *testing.T) {
+func TestApplyNodePlacement_EmptyReturnsError(t *testing.T) {
+	// Caller is supposed to resolve via defaultPlacementKeys before
+	// calling. Empty servers means the cluster has no candidate
+	// nodes — config.Validate enforces ≥1 master, so this is
+	// effectively unreachable at runtime; the error path keeps a
+	// future validator regression from silently scheduling pods on
+	// arbitrary nodes.
 	var pod corev1.PodSpec
-	applyNodePlacement(&pod, "web", nil)
+	if err := applyNodePlacement(&pod, "web", nil); err == nil {
+		t.Fatal("expected error on empty servers; applyNodePlacement returned nil")
+	}
+	if pod.NodeSelector != nil || pod.Affinity != nil {
+		t.Errorf("error path must leave podSpec untouched: nodeSelector=%v affinity=%v", pod.NodeSelector, pod.Affinity)
+	}
+}
 
-	if got := pod.NodeSelector[LabelNvoiRole]; got != "master" {
-		t.Errorf("default placement should pin to master via %s, got %v", LabelNvoiRole, pod.NodeSelector)
+func TestDefaultPlacementKeys_PrefersWorkers(t *testing.T) {
+	cfg := &config.Config{Servers: map[string]config.ServerSpec{
+		"master-1": {Role: "master"},
+		"master-2": {Role: "master"},
+		"worker-1": {Role: "worker"},
+		"worker-2": {Role: "worker"},
+	}}
+	got := defaultPlacementKeys(cfg)
+	want := []string{"worker-1", "worker-2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("default-with-workers: got %v want %v", got, want)
 	}
-	if pod.Affinity != nil {
-		t.Error("0-server case must use nodeSelector only, not Affinity")
+}
+
+func TestDefaultPlacementKeys_FallsBackToMastersWhenNoWorkers(t *testing.T) {
+	cfg := &config.Config{Servers: map[string]config.ServerSpec{
+		"master-1": {Role: "master"},
+		"master-2": {Role: "master"},
+		"master-3": {Role: "master"},
+	}}
+	got := defaultPlacementKeys(cfg)
+	want := []string{"master-1", "master-2", "master-3"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("default-without-workers: got %v want %v", got, want)
 	}
-	if len(pod.TopologySpreadConstraints) != 0 {
-		t.Error("0-server case must not set topologySpreadConstraints")
+}
+
+func TestDefaultPlacementKeys_SingleMasterCommonCase(t *testing.T) {
+	// Common config: one master named `master:`. Old hardcoded
+	// ["master"] fallback worked here by coincidence (YAML key matched
+	// role). New resolver returns the same answer for the right reason
+	// — actual master keys.
+	cfg := &config.Config{Servers: map[string]config.ServerSpec{
+		"master": {Role: "master"},
+	}}
+	got := defaultPlacementKeys(cfg)
+	want := []string{"master"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("single-master: got %v want %v", got, want)
 	}
 }
 
 func TestApplyNodePlacement_SingleServer_NodeSelector(t *testing.T) {
 	var pod corev1.PodSpec
-	applyNodePlacement(&pod, "web", []string{"worker-1"})
+	if err := applyNodePlacement(&pod, "web", []string{"worker-1"}); err != nil {
+		t.Fatalf("applyNodePlacement: %v", err)
+	}
 
 	if got := pod.NodeSelector[LabelNvoiRole]; got != "worker-1" {
 		t.Errorf("single-server placement: got %v want nvoi-role=worker-1", pod.NodeSelector)
@@ -35,7 +83,9 @@ func TestApplyNodePlacement_SingleServer_NodeSelector(t *testing.T) {
 
 func TestApplyNodePlacement_MultiServer_AffinityAndSpread(t *testing.T) {
 	var pod corev1.PodSpec
-	applyNodePlacement(&pod, "web", []string{"worker-1", "worker-2", "worker-3"})
+	if err := applyNodePlacement(&pod, "web", []string{"worker-1", "worker-2", "worker-3"}); err != nil {
+		t.Fatalf("applyNodePlacement: %v", err)
+	}
 
 	if pod.NodeSelector != nil {
 		t.Error("multi-server case must NOT set nodeSelector")
@@ -62,7 +112,7 @@ func TestApplyNodePlacement_MultiServer_AffinityAndSpread(t *testing.T) {
 	if c.MaxSkew != 1 || c.TopologyKey != LabelNvoiRole || c.WhenUnsatisfiable != corev1.ScheduleAnyway {
 		t.Errorf("topologySpread: %+v", c)
 	}
-	if c.LabelSelector == nil || c.LabelSelector.MatchLabels[LabelAppName] != "web" {
+	if c.LabelSelector == nil || c.LabelSelector.MatchLabels[labelAppName] != "web" {
 		t.Errorf("topologySpread label selector: %+v", c.LabelSelector)
 	}
 }
@@ -81,8 +131,8 @@ func TestSecretEnvVars_DeterministicOrder(t *testing.T) {
 			continue
 		}
 		ref := e.ValueFrom.SecretKeyRef
-		if ref.Name != AppSecretName {
-			t.Errorf("%s ref.Name = %q want %q", e.Name, ref.Name, AppSecretName)
+		if ref.Name != appSecretName {
+			t.Errorf("%s ref.Name = %q want %q", e.Name, ref.Name, appSecretName)
 		}
 		if ref.Key != e.Name {
 			t.Errorf("%s ref.Key = %q want %q (env name)", e.Name, ref.Key, e.Name)
