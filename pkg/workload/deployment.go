@@ -61,20 +61,26 @@ func containerFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) core
 // Carries the full label set (owner + service + deploy-hash + app-name
 // for topology-spread), node placement, and imagePullSecrets when
 // `registry:` is declared.
-func podTemplateFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) corev1.PodTemplateSpec {
+func podTemplateFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) (corev1.PodTemplateSpec, error) {
 	pod := corev1.PodTemplateSpec{
 		ObjectMeta: metav1.ObjectMeta{Labels: podLabels(rt, name)},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{containerFor(rt, name, svc)},
 		},
 	}
-	applyNodePlacement(&pod.Spec, name, svc.Servers)
+	servers := svc.Servers
+	if len(servers) == 0 {
+		servers = defaultPlacementKeys(rt.Cfg)
+	}
+	if err := applyNodePlacement(&pod.Spec, name, servers); err != nil {
+		return pod, err
+	}
 	if len(rt.RegistryCreds) > 0 {
 		pod.Spec.ImagePullSecrets = []corev1.LocalObjectReference{
 			{Name: registrySecretName},
 		}
 	}
-	return pod
+	return pod, nil
 }
 
 // objectLabels are the labels on the Deployment / StatefulSet itself
@@ -124,10 +130,14 @@ func serviceSelector(name string) map[string]string {
 // Replicas: explicit ServiceSpec.Replicas wins; nil → default 1.
 // Selector matches the pod-template via LabelOwner+labelService —
 // stable across deploys.
-func buildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.Deployment {
+func buildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) (*appsv1.Deployment, error) {
 	replicas := int32(1)
 	if svc.Replicas != nil {
 		replicas = int32(*svc.Replicas)
+	}
+	template, err := podTemplateFor(rt, name, svc)
+	if err != nil {
+		return nil, err
 	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -138,7 +148,7 @@ func buildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) *
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: serviceSelector(name)},
-			Template: podTemplateFor(rt, name, svc),
+			Template: template,
 		},
-	}
+	}, nil
 }

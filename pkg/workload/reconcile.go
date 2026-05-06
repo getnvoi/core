@@ -54,11 +54,17 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 		svc := r.Cfg.Services[name]
 		lg.Step("workload-" + name)
 
-		var workload runtime.Object
+		var (
+			workload runtime.Object
+			err      error
+		)
 		if svc.IsStateful() {
-			workload = buildStatefulSet(r, name, svc)
+			workload, err = buildStatefulSet(r, name, svc)
 		} else {
-			workload = buildDeployment(r, name, svc)
+			workload, err = buildDeployment(r, name, svc)
+		}
+		if err != nil {
+			return fmt.Errorf("build workload %s: %w", name, err)
 		}
 		if err := kc.ApplyOwned(ctx, servicesScope, workload); err != nil {
 			return fmt.Errorf("apply workload %s: %w", name, err)

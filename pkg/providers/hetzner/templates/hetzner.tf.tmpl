@@ -186,6 +186,19 @@ resource "hcloud_load_balancer_service" "cp" {
   protocol         = "tcp"
   listen_port      = 6443
   destination_port = 6443
+
+  # Tighter than Hetzner's default (interval=15s, retries=3 → ~45s to
+  # mark a target healthy/unhealthy). With 5×2 we converge in ~10s,
+  # which matters during scale events: a fresh master joins the pool
+  # ~30s sooner, and a doomed master gets declassified ~30s sooner so
+  # the LB stops sending traffic to it during tofu destroy.
+  health_check {
+    protocol = "tcp"
+    port     = 6443
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
 }
 {{ if .LBHTTPIngress }}
 resource "hcloud_load_balancer_service" "http" {
@@ -193,6 +206,14 @@ resource "hcloud_load_balancer_service" "http" {
   protocol         = "tcp"
   listen_port      = 80
   destination_port = 80
+
+  health_check {
+    protocol = "tcp"
+    port     = 80
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
 }
 
 resource "hcloud_load_balancer_service" "https" {
@@ -200,6 +221,14 @@ resource "hcloud_load_balancer_service" "https" {
   protocol         = "tcp"
   listen_port      = 443
   destination_port = 443
+
+  health_check {
+    protocol = "tcp"
+    port     = 443
+    interval = 5
+    timeout  = 4
+    retries  = 2
+  }
 }
 {{ end }}
 {{ end }}

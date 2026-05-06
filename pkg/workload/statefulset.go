@@ -28,10 +28,14 @@ import (
 // StatefulSet's (delete the StatefulSet → PVC is preserved by k8s
 // policy until explicitly reclaimed; `nvoi destroy` tears the node
 // down which takes the hostPath volume with it).
-func buildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) *appsv1.StatefulSet {
+func buildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) (*appsv1.StatefulSet, error) {
 	replicas := int32(1)
 	if svc.Replicas != nil {
 		replicas = int32(*svc.Replicas)
+	}
+	template, err := podTemplateFor(rt, name, svc)
+	if err != nil {
+		return nil, err
 	}
 	return &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -43,7 +47,7 @@ func buildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) 
 			Replicas:    &replicas,
 			ServiceName: name,
 			Selector:    &metav1.LabelSelector{MatchLabels: serviceSelector(name)},
-			Template:    podTemplateFor(rt, name, svc),
+			Template:    template,
 			VolumeClaimTemplates: []corev1.PersistentVolumeClaim{{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: name + "-data",
@@ -62,5 +66,5 @@ func buildStatefulSet(rt *runtime.Runtime, name string, svc config.ServiceSpec) 
 				},
 			}},
 		},
-	}
+	}, nil
 }

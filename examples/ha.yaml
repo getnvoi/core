@@ -1,6 +1,9 @@
 app: hello
 env: ha
-providers: {infra: hetzner}
+providers:
+  infra: hetzner
+  dns: cloudflare
+acme_email: ops@nvoi.to
 ssh_key: ~/.ssh/id_rsa.pub
 servers:
   master-1: {type: cax21, region: nbg1, role: master, primary: true}
@@ -8,3 +11,9 @@ servers:
   master-3: {type: cax21, region: nbg1, role: master}
   worker-1: {type: cax11, region: nbg1, role: worker}
   worker-2: {type: cax11, region: nbg1, role: worker}
+services:
+  whoami:
+    image: traefik/whoami
+    port: 80
+domains:
+  whoami: [ha.nvoi.to]

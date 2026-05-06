@@ -21,7 +21,13 @@ func silentLog() log.Log { return log.NewWith(false, io.Discard) }
 
 func makeRuntime(services map[string]config.ServiceSpec, registry map[string]config.RegistryDef) *runtime.Runtime {
 	return &runtime.Runtime{
-		Cfg:           &config.Config{App: "hello", Env: "dev", Services: services, Registry: registry},
+		Cfg: &config.Config{
+			App:      "hello",
+			Env:      "dev",
+			Servers:  map[string]config.ServerSpec{"master": {Role: "master"}},
+			Services: services,
+			Registry: registry,
+		},
 		RegistryCreds: registry,
 		DeployHash:    "20260430-120000",
 	}
@@ -200,6 +206,7 @@ func TestApplyAll_AppliesTopLevelSecrets(t *testing.T) {
 		Cfg: &config.Config{
 			App:     "hello",
 			Env:     "dev",
+			Servers: map[string]config.ServerSpec{"master": {Role: "master"}},
 			Secrets: []string{"DATABASE_URL"}, // declared in YAML so the Secret survives ReconcileRemoval
 			Services: map[string]config.ServiceSpec{
 				"web": {Image: "nginx", Port: 80, Secrets: []string{"DATABASE_URL"}},
