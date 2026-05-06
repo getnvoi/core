@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
+	"github.com/getnvoi/core/pkg/ssh"
 	"github.com/getnvoi/core/pkg/workload"
 )
 
@@ -19,11 +21,17 @@ import (
 //
 // Single SSH per server per deploy — no fresh dial here.
 //
-// Order matters: labels MUST land before workloads. New pods
-// scheduled with a nodeSelector on a not-yet-labeled node hang
-// Pending until the label arrives.
+// Order matters:
+//  1. Node labels MUST land before workloads — pods scheduled with a
+//     nodeSelector on a not-yet-labeled node hang Pending.
+//  2. cert-manager + ClusterIssuer + Certificates MUST land before
+//     workload Ingresses — Ingresses reference TLS Secret names that
+//     cert-manager creates in response to the Certificate resources.
+//     (Ingress applies even before cert lands; Traefik just refuses
+//     TLS until the Secret exists. Cert is async; warn-and-continue.)
 //
-// Stamps s.kc on the session so the ingress phase reuses it.
+// Stamps s.kc on the session so verbs that need a kube client after
+// deploy can reuse it.
 func (s *Session) deployWorkloads(ctx context.Context) error {
 	rt, eps, shells := s.Rt, s.eps, s.shells
 	primaryName := rt.Cfg.PrimaryMaster()
@@ -52,75 +60,72 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
 	}
 
+	// Ingress prerequisites: install cert-manager, apply ClusterIssuer
+	// + per-domain Certificates BEFORE workload.ApplyAll runs (which
+	// applies Ingress resources referencing the cert Secrets).
+	if len(rt.Cfg.Domains) > 0 {
+		if err := s.applyCertInfrastructure(ctx, primaryShell); err != nil {
+			return err
+		}
+	}
+	_ = eps // reserved for future per-endpoint logic
+	_ = primaryShell
+
 	s.Lg.Step("workloads")
 	if err := workload.ApplyAll(ctx, rt, kc, s.Lg); err != nil {
 		return err
 	}
-
-	if len(eps.Servers) == 0 || len(rt.Cfg.Domains) == 0 {
-		return nil
-	}
-	return s.deployIngress(ctx)
+	return nil
 }
 
-// deployIngress is the post-workloads ingress reconcile. EnsureCaddy
-// in kube-system, reload its config via the admin API (atomic listener
-// swap), per-domain WaitForCaddyCert + WaitForCaddyHTTPS from inside
-// the pod.
-func (s *Session) deployIngress(ctx context.Context) error {
-	rt, kc := s.Rt, s.kc
+// applyCertInfrastructure stands up cert-manager and the per-domain
+// Certificate resources whose Secrets the Ingress layer consumes.
+//
+// Steps:
+//  1. kubectl apply the cert-manager release manifest (URL apply).
+//  2. Wait for cert-manager Deployments to be Available (CRDs +
+//     admission hooks must answer before ClusterIssuer / Certificate
+//     creates succeed).
+//  3. Apply the DNS provider's solver Secrets (resolved creds).
+//  4. Apply the singleton ClusterIssuer wrapping the solver.
+//  5. Apply one Certificate per declared domain (cert-manager handles
+//     issuance + renewal asynchronously; we don't block on it).
+func (s *Session) applyCertInfrastructure(ctx context.Context, sh ssh.Shell) error {
+	rt := s.Rt
 
-	s.Lg.Step("caddy")
-	if err := kc.EnsureCaddy(ctx); err != nil {
-		return fmt.Errorf("ensure caddy: %w", err)
-	}
-
-	// Resolve per-service ports from the live Services we just applied.
-	routes := make([]kube.CaddyRoute, 0, len(rt.Cfg.Domains))
-	for _, svcName := range utils.SortedKeys(rt.Cfg.Domains) {
-		port, err := kc.GetServicePort(ctx, "default", svcName)
-		if err != nil {
-			return fmt.Errorf("ingress: service %q port: %w", svcName, err)
-		}
-		routes = append(routes, kube.CaddyRoute{
-			Service: svcName,
-			Port:    port,
-			Domains: rt.Cfg.Domains[svcName],
-		})
-	}
-
-	configJSON, err := kube.BuildCaddyConfig(kube.CaddyConfigInput{
-		Namespace: "default",
-		Routes:    routes,
-		ACMEEmail: rt.Cfg.ACMEEmail,
-	})
-	if err != nil {
-		return fmt.Errorf("build caddy config: %w", err)
-	}
-
-	s.Lg.Step("caddy-reload")
-	if err := kc.ReloadCaddyConfig(ctx, configJSON); err != nil {
+	if err := kube.ApplyCertManager(ctx, sh, s.Lg); err != nil {
 		return err
 	}
-	s.Lg.Info("caddy config loaded")
 
-	// Per-domain cert + HTTPS verification. Warn-and-continue posture:
-	// timeouts surface but don't fail the deploy. Caddy retries ACME.
+	dns, err := compile.ResolveDNS(rt.Cfg.Providers.DNS)
+	if err != nil {
+		return fmt.Errorf("resolve dns provider: %w", err)
+	}
+	solverYAML, secrets, err := dns.CertManagerSolver(rt)
+	if err != nil {
+		return fmt.Errorf("dns cert-manager solver: %w", err)
+	}
+
+	s.Lg.Step("cert-manager-secrets")
+	if y := kube.BuildSolverSecretsYAML(secrets); y != nil {
+		if err := kube.ApplyYAML(ctx, sh, y); err != nil {
+			return fmt.Errorf("apply solver secrets: %w", err)
+		}
+	}
+
+	s.Lg.Step("cluster-issuer")
+	issuerYAML := kube.BuildClusterIssuerYAML(rt.Cfg.ACMEEmail, solverYAML)
+	if err := kube.ApplyYAML(ctx, sh, issuerYAML); err != nil {
+		return fmt.Errorf("apply cluster issuer: %w", err)
+	}
+
 	for _, svcName := range utils.SortedKeys(rt.Cfg.Domains) {
 		for _, domain := range rt.Cfg.Domains[svcName] {
 			s.Lg.Step("cert-" + domain)
-			if err := kc.WaitForCaddyCert(ctx, domain); err != nil {
-				s.Lg.Warn(fmt.Sprintf("%s: certificate not issued in time — next deploy re-verifies (%v)", domain, err))
-				continue
+			y, _ := kube.BuildCertificateYAML("default", domain)
+			if err := kube.ApplyYAML(ctx, sh, y); err != nil {
+				return fmt.Errorf("apply certificate %s: %w", domain, err)
 			}
-			s.Lg.Info(fmt.Sprintf("certificate ready: %s", domain))
-
-			s.Lg.Step("https-" + domain)
-			if err := kc.WaitForCaddyHTTPS(ctx, domain, "/healthz"); err != nil {
-				s.Lg.Warn(fmt.Sprintf("https://%s/healthz: probe failed — next deploy re-verifies (%v)", domain, err))
-				continue
-			}
-			s.Lg.Info(fmt.Sprintf("https live: https://%s/", domain))
 		}
 	}
 	return nil

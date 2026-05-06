@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -147,6 +148,27 @@ func (c *Client) applyPVC(ctx context.Context, ns string, pvc *corev1.Persistent
 		pvc.ResourceVersion = existing.ResourceVersion
 		pvc.Spec = existing.Spec
 		_, err = api.Update(ctx, pvc, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyIngress is a Get → Create-or-Update for k8s Ingress resources.
+// Idempotent; preserves Status (Traefik writes load-balancer state
+// there async).
+func (c *Client) applyIngress(ctx context.Context, ns string, ing *networkingv1.Ingress) error {
+	api := c.CS.NetworkingV1().Ingresses(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, ing.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, ing, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		ing.ResourceVersion = existing.ResourceVersion
+		ing.Status = existing.Status
+		_, err = api.Update(ctx, ing, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
 	})
 }

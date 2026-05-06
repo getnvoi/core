@@ -25,10 +25,17 @@ openShells          one ssh.Client per server, kept alive through end
 installCluster      swap → discover token → primary --cluster-init →
                     secondaries --server → workers via api_endpoint.private
 kube-tunnel         kube.New(primaryShell) — apiserver via the same SSH
+cert-manager        only when domains: kubectl apply cert-manager.yaml,
+                    wait Available, apply solver Secret + ClusterIssuer +
+                    per-domain Certificate (cert-manager handles ACME
+                    asynchronously via the providers.dns DNS-01 solver)
 workloads           registry-auth Secret → Deployments → Services →
+                    Ingresses (referencing cert-manager TLS Secrets) →
                     reconcile (delete nvoi-managed objects no longer in YAML)
 defer closeShells   one close per server, end of command
 ```
+
+Ingress controller is k3s's built-in Traefik — we don't `--disable traefik` or `--disable servicelb` anymore. klipper-lb exposes Traefik on every node's hostPort 80/443. Single master: DNS A → master IP. HA: cloud LB → masters' 80/443 via private network → klipper-lb → Traefik → Service.
 
 ## Architecture rules (non-negotiable)
 
@@ -93,7 +100,7 @@ Text projection (same data, tabbed):
 
 Pipe-friendly: `cut -f3` = level, `cut -f4` = payload. Embedded tabs in payload are sanitized to spaces so column count is invariant.
 
-`log.Log.Sub(kind)` returns a kind-scoped logger. The orchestration layer (`pkg/deploy/`) scopes per phase: `rt.Log.Sub(KindBuild)` for build, `Sub(KindInfra)` for tofu ops, `Sub(KindCluster)` for k3s/kube/caddy.
+`log.Log.Sub(kind)` returns a kind-scoped logger. The orchestration layer (`pkg/deploy/`) scopes per phase: `rt.Log.Sub(KindBuild)` for build, `Sub(KindInfra)` for tofu ops, `Sub(KindCluster)` for k3s/kube/cert-manager/ingress.
 
 Tofu's native `-json` events are normalized at `Log.TFStream()`: `@level → level`, `@message → msg`, `@timestamp → time`, `@module` dropped, the rest folded under `tf:`. Non-JSON lines (tofu's pretty-printed `output -json` dump) are silently filtered. **NOTHING in the codebase writes to os.Stdout or os.Stderr directly.**
 
@@ -172,7 +179,8 @@ pkg/                     PUBLIC SURFACE (10 packages):
                          etcd.go
     kube/                client.go (SSH-tunneled apiserver) + apply.go +
                          owned.go (Scope + ApplyOwned/ListOwned/SweepOwned)
-                         + caddy.go + caddy_config.go + caddy_manifests.go
+                         + certmanager.go (cert-manager + ClusterIssuer
+                         + per-domain Certificate appliers via kubectl)
                          + exec.go + labels.go
     runner/              tfexec wrapper driving an OpenTofu binary;
                          plan.go (PlanWithOut, ApplyPlan,
@@ -219,7 +227,7 @@ bin/deploy           # text projection on stderr (tabbed values)
 - Every server in YAML = a k3s node. Reserved YAML keys are per-provider — registered via `providers.RegisterReservedServerNames(provider, set)` in each emitter's init(). Hetzner reserves `default`, `cp`.
 - HA emerges automatically from N≥2 masters (LB auto-emitted, label-selector targets).
   Exactly one master must have `primary: true` when N≥2; implicit for N=1.
-- Workloads tagged via `kube.Scope{Namespace, Owner}`. `kube.ApplyOwned` stamps `nvoi/owner=<owner>`; `kube.SweepOwned` filters by it. Owner taxonomy: `services` / `registry` / `app-secrets` / `caddy`.
+- Workloads tagged via `kube.Scope{Namespace, Owner}`. `kube.ApplyOwned` stamps `nvoi/owner=<owner>`; `kube.SweepOwned` filters by it. Owner taxonomy: `services` / `registry` / `app-secrets` / `ingress`.
 - `registry:` block is the ONE source of truth for credentials — same creds drive
   push (operator's docker daemon, via `docker login --password-stdin`) AND pull
   (cluster's `imagePullSecret`).
@@ -230,7 +238,7 @@ bin/deploy           # text projection on stderr (tabbed values)
 
 `bin/test` → `go test -timeout 30s ./...`. Covered: config, compile, runner
 (plan-walker), log, detach, install (cmd construction), state, providers/cloudflare,
-build, workload, kube (apply + owned + caddy), internal/cli (dotenv, secrets,
+build, workload, kube (apply + owned), internal/cli (dotenv, secrets,
 sshkey, inputs, alias expansion via cmd/cli). Untested by design: `kube` tunnel,
 `runner` tfexec wrapper, `cmd/cli` cobra wiring (verb dispatch only — verb
 bodies live in pkg/deploy and internal/cli, both covered) — validated by live deploys.

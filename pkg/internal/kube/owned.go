@@ -6,6 +6,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,7 +29,7 @@ const (
 	OwnerServices   = "services"    // Deployment + StatefulSet + Service per cfg.Services entry
 	OwnerRegistry   = "registry"    // dockerconfigjson Secret for imagePullSecrets
 	OwnerAppSecrets = "app-secrets" // Opaque Secret holding cfg.Secrets values
-	OwnerCaddy      = "caddy"       // in-cluster Caddy + ACME PVC + ConfigMap
+	OwnerIngress    = "ingress"     // per-service Ingress resources (Traefik consumes them)
 )
 
 // Kind names a typed resource kind ApplyOwned / SweepOwned / ListOwned
@@ -43,6 +44,7 @@ const (
 	KindSecret      Kind = "Secret"
 	KindConfigMap   Kind = "ConfigMap"
 	KindPVC         Kind = "PersistentVolumeClaim"
+	KindIngress     Kind = "Ingress"
 )
 
 // Scope is the (namespace, owner) pair every owned-resource operation
@@ -89,6 +91,8 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applyConfigMap(ctx, ns, o)
 	case *corev1.PersistentVolumeClaim:
 		return c.applyPVC(ctx, ns, o)
+	case *networkingv1.Ingress:
+		return c.applyIngress(ctx, ns, o)
 	default:
 		return fmt.Errorf("ApplyOwned: unsupported kind %T", obj)
 	}
@@ -172,6 +176,8 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.CoreV1().ConfigMaps(ns).List(ctx, opts)
 	case KindPVC:
 		return c.CS.CoreV1().PersistentVolumeClaims(ns).List(ctx, opts)
+	case KindIngress:
+		return c.CS.NetworkingV1().Ingresses(ns).List(ctx, opts)
 	default:
 		return nil, fmt.Errorf("listOwned: unsupported kind %q", kind)
 	}
@@ -195,6 +201,8 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		return ignoreNotFound(c.CS.CoreV1().ConfigMaps(ns).Delete(ctx, name, opts))
 	case KindPVC:
 		return ignoreNotFound(c.CS.CoreV1().PersistentVolumeClaims(ns).Delete(ctx, name, opts))
+	case KindIngress:
+		return ignoreNotFound(c.CS.NetworkingV1().Ingresses(ns).Delete(ctx, name, opts))
 	default:
 		return fmt.Errorf("deleteByKind: unsupported kind %q", kind)
 	}

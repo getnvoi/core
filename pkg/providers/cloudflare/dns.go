@@ -41,6 +41,30 @@ func (DNSEmitter) Provider() compile.ProviderRequirement {
 	}
 }
 
+// CertManagerSolver returns the cert-manager DNS-01 solver YAML for
+// Cloudflare. cert-manager reads the CF API token from a k8s Secret
+// nvoi materializes from rt.Providers.Cloudflare.APIToken (resolved at
+// the cmd/cli boundary from CLOUDFLARE_API_TOKEN / CF_API_KEY).
+//
+// The solver YAML is the inner block of a ClusterIssuer's
+// `spec.acme.solvers` list — caller wraps it.
+func (DNSEmitter) CertManagerSolver(rt *runtime.Runtime) (string, []compile.SolverSecret, error) {
+	if rt.Providers.Cloudflare == nil || rt.Providers.Cloudflare.APIToken == "" {
+		return "", nil, fmt.Errorf("cloudflare cert-manager solver: APIToken required")
+	}
+	const solver = `      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token`
+	secrets := []compile.SolverSecret{{
+		Name:  "cloudflare-api-token",
+		Key:   "api-token",
+		Value: rt.Providers.Cloudflare.APIToken,
+	}}
+	return solver, secrets, nil
+}
+
 // recordData drives the per-record block in dns.tf.tmpl. Always emits
 // an A record with Target as the raw HCL expression (typically
 // `hcloud_server.<primary>.ipv4_address`, NOT a quoted string).
@@ -83,7 +107,27 @@ func (DNSEmitter) EmitDNS(rt *runtime.Runtime) ([]byte, error) {
 	if primary == "" {
 		return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
 	}
-	aTarget := fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
+
+	// HA + domains → DNS A points at the cloud LB's public IP (LB
+	// distributes 80/443 across all masters → real HA HTTP).
+	// Otherwise → primary master's public IP (single-master path).
+	// Provider-specific reference (hcloud_load_balancer.cp.ipv4 /
+	// hcloud_server.<primary>.ipv4_address) is the same coupling we
+	// already accepted between the cloudflare DNS emitter and the
+	// hetzner infra emitter — they share the tofu module and reference
+	// each other's resources.
+	masters := 0
+	for _, s := range cfg.Servers {
+		if s.Role == "master" {
+			masters++
+		}
+	}
+	var aTarget string
+	if masters >= 2 && len(cfg.Domains) > 0 {
+		aTarget = "hcloud_load_balancer.cp.ipv4"
+	} else {
+		aTarget = fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
+	}
 
 	// Per-deploy uniqueness: combine service + sanitized hostname so
 	// re-running with the same YAML produces a stable resource address.

@@ -39,8 +39,6 @@ func JoinSecondaryMaster(ctx context.Context, spec SecondaryJoinSpec) error {
 		"server",
 		"--server https://" + primary.Private + ":6443",
 		"--token " + spec.Token,
-		"--disable traefik",
-		"--disable servicelb",
 		"--write-kubeconfig-mode 644",
 		"--node-ip " + self.Private,
 		"--advertise-address " + self.Private,

@@ -73,6 +73,32 @@ func ServerResourceType(provider string) (string, error) {
 type DNSEmitter interface {
 	EmitDNS(rt *nvoiRuntime.Runtime) ([]byte, error)
 	Provider() ProviderRequirement
+
+	// CertManagerSolver returns the YAML fragment for cert-manager's
+	// `solvers` block in a ClusterIssuer, plus the credential Secrets
+	// that solver references. The solver YAML is indented for nesting
+	// under `spec.acme.solvers:` (a list element starting with
+	// `- dns01:`); the nvoi cert-manager applier wraps it in the
+	// surrounding ClusterIssuer YAML.
+	//
+	// SolverSecrets carry already-resolved provider credentials read
+	// from the runtime (env vars are flowed in via runtime.Build at the
+	// cmd boundary). nvoi materializes each as a k8s Secret in the
+	// cert-manager namespace before applying the ClusterIssuer.
+	//
+	// Provider-agnostic by design — nvoi never branches on provider
+	// name; each emitter declares its own solver shape.
+	CertManagerSolver(rt *nvoiRuntime.Runtime) (solverYAML string, secrets []SolverSecret, err error)
+}
+
+// SolverSecret is a runtime-resolved credential cert-manager needs
+// (via DNS-01). nvoi materializes a k8s Secret in the cert-manager
+// namespace named .Name with .Key → .Value. The solver YAML
+// references it by (.Name, .Key).
+type SolverSecret struct {
+	Name  string // e.g. "cloudflare-api-token"
+	Key   string // e.g. "api-token"
+	Value string // resolved cred (e.g. the CF API token bytes)
 }
 
 var dnsEmitters = map[string]DNSEmitter{}

@@ -108,15 +108,15 @@ func TestSweepOwned_DeletesOrphan_KeepsDesired(t *testing.T) {
 // for one-time migrations or full removal of an owner's footprint.
 func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 	cs := fake.NewSimpleClientset(
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerCaddy)}},
-		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerCaddy)}},
-		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "caddy-data", Namespace: "kube-system", Labels: labeled(kube.OwnerCaddy)}},
-		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "caddy-config", Namespace: "kube-system", Labels: labeled(kube.OwnerCaddy)}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "caddy-data", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "caddy-config", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
 	)
 	c := kube.NewForTest(cs)
 
 	for _, kind := range []kube.Kind{kube.KindDeployment, kube.KindService, kube.KindPVC, kube.KindConfigMap} {
-		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "kube-system", Owner: kube.OwnerCaddy}, kind, nil); err != nil {
+		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "kube-system", Owner: kube.OwnerIngress}, kind, nil); err != nil {
 			t.Fatalf("SweepOwned %s: %v", kind, err)
 		}
 	}
@@ -138,7 +138,7 @@ func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 func TestSweepOwned_NeverCrossesOwnerBoundaries(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "ns", Labels: labeled(kube.OwnerCaddy)}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "ns", Labels: labeled(kube.OwnerIngress)}},
 		// Unmanaged — no owner label.
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "external", Namespace: "ns"}},
 	)
@@ -182,7 +182,7 @@ func TestListOwned_OnlyMatchingOwner(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
-		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "ns", Labels: labeled(kube.OwnerCaddy)}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "ns", Labels: labeled(kube.OwnerIngress)}},
 	)
 	c := kube.NewForTest(cs)
 

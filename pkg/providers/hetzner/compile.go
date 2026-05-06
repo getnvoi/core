@@ -95,9 +95,17 @@ type templateData struct {
 	HA            bool
 	PrimaryMaster string // used by outputs in non-HA mode (any master Key works; we pick the first)
 
-	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 when
-	// the master serves Caddy directly. True iff domains: is declared.
+	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 from
+	// 0.0.0.0/0 — the single-master path where the master IS the public
+	// face. True iff domains is declared AND HA is false.
 	PublicHTTPIngress bool
+
+	// LBHTTPIngress opens hcloud_firewall.default for 80/443 from the
+	// private subnet only AND emits 80/443 services on the public LB.
+	// True iff domains is declared AND HA. The LB has a public IPv4
+	// (HA + domains is the only path with public ingress beyond SSH);
+	// LB → masters traffic stays on the private network.
+	LBHTTPIngress bool
 }
 
 type serverData struct {
@@ -164,6 +172,8 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("no masters in servers (validator should have rejected)")
 	}
 
+	ha := len(masters) >= 2
+	hasDomains := len(cfg.Domains) > 0
 	data := templateData{
 		App:               cfg.App,
 		Env:               cfg.Env,
@@ -172,9 +182,10 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		NetworkSubnet:     networkSubnet,
 		NetworkZone:       zone,
 		Servers:           servers,
-		HA:                len(masters) >= 2,
+		HA:                ha,
 		PrimaryMaster:     masters[0], // alphabetically first by sort above
-		PublicHTTPIngress: len(cfg.Domains) > 0,
+		PublicHTTPIngress: hasDomains && !ha,
+		LBHTTPIngress:     hasDomains && ha,
 	}
 
 	var buf bytes.Buffer
