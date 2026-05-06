@@ -29,6 +29,19 @@ func Destroy(ctx context.Context, rt *runtime.Runtime) error {
 			return nil
 		}
 
+		// Pre-destroy: drain cert-manager. Deleting Certificate
+		// resources triggers cert-manager's Challenge finalizers,
+		// which call the DNS-01 solver's Cleanup() and remove the
+		// scratch `_acme-challenge.<domain>` TXT records via the
+		// provider's API. Without this, those records orphan in
+		// the operator's zone — tofu can't clean them up because
+		// they were never in tfstate.
+		//
+		// Best-effort: drain failures warn but don't block destroy.
+		if err := s.drainCertificates(ctx); err != nil {
+			return err
+		}
+
 		s.Lg.Step("tf-destroy")
 		return s.Run.ApplyPlan(ctx, planPath)
 	})
