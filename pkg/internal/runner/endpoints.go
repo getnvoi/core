@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"sort"
+
+	"github.com/hashicorp/terraform-exec/tfexec"
 )
 
 // Server is one entry in the `output "servers"` map. Mirrors the HCL
@@ -23,6 +25,16 @@ type APIEndpoint struct {
 	Private string `json:"private"`
 }
 
+// TunnelOutput is the `tunnel` tofu output emitted only when the
+// cloudflare DNS emitter runs in ingress=cloudflare mode. Empty ID
+// identifies "tunnel output absent" — callers branch on HasTunnel()
+// rather than threading a separate flag.
+type TunnelOutput struct {
+	ID    string `json:"id"`
+	CName string `json:"cname"`
+	Token string `json:"token"`
+}
+
 // Endpoints is the typed view of a provider's tofu outputs.
 // Construction is uniform across providers; consumers (deploy.go, the
 // install package) never branch on provider name.
@@ -30,7 +42,13 @@ type Endpoints struct {
 	Servers     map[string]Server
 	APIEndpoint APIEndpoint
 	HA          bool
+	Tunnel      TunnelOutput // zero-value when absent (Traefik mode)
 }
+
+// HasTunnel reports whether tofu emitted a populated `tunnel` output.
+// True when ingress mode is cloudflare AND tofu apply has run; false
+// in Traefik mode or before the first apply.
+func (e *Endpoints) HasTunnel() bool { return e.Tunnel.ID != "" }
 
 // byRole returns server names with the given role, sorted
 // alphabetically. Shared by Masters / Workers — the only axis they
@@ -85,7 +103,14 @@ func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tofu output: %w", err)
 	}
+	return parseEndpoints(out)
+}
 
+// parseEndpoints decodes a tfexec output map into the uniform
+// Endpoints shape. Pure — extracted so it's testable without invoking
+// tfexec. The required outputs (`servers`, `api_endpoint`) are
+// provider-emitter contracts; `ha` and `tunnel` are optional.
+func parseEndpoints(out map[string]tfexec.OutputMeta) (*Endpoints, error) {
 	srvOut, ok := out["servers"]
 	if !ok {
 		return nil, fmt.Errorf(`tofu output "servers" missing — provider emitter must declare it`)
@@ -109,9 +134,17 @@ func (r *Runner) Endpoints(ctx context.Context) (*Endpoints, error) {
 		_ = json.Unmarshal(haOut.Value, &ha)
 	}
 
+	// Tunnel output is present only in tunnel mode. Absence is a
+	// non-error — Traefik-mode deploys simply don't declare it.
+	var tunnel TunnelOutput
+	if tOut, ok := out["tunnel"]; ok {
+		_ = json.Unmarshal(tOut.Value, &tunnel)
+	}
+
 	return &Endpoints{
 		Servers:     servers,
 		APIEndpoint: api,
 		HA:          ha,
+		Tunnel:      tunnel,
 	}, nil
 }
