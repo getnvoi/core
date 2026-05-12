@@ -37,7 +37,7 @@ func ExpandHome(p string) (string, error) {
 	return filepath.Join(home, p[2:]), nil
 }
 
-// applySmartDefaults fills in ConfigPath or DatabasePath when the
+// ApplySmartDefaults fills in ConfigPath or DatabasePath when the
 // operator passed neither flag. Resolution rule:
 //
 //   - both flags empty AND nvoi.yaml exists in cwd      → yaml mode
@@ -51,7 +51,7 @@ func ExpandHome(p string) (string, error) {
 // Returns (cfgPath, dbPath, bothExisted, err). One of cfgPath / dbPath
 // is always set on success — the caller no longer needs to handle
 // "both empty".
-func applySmartDefaults(configPath, databasePath string) (string, string, bool, error) {
+func ApplySmartDefaults(configPath, databasePath string) (string, string, bool, error) {
 	if configPath != "" || databasePath != "" {
 		return configPath, databasePath, false, nil
 	}

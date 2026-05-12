@@ -38,7 +38,7 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	// Smart defaults: pick yaml mode if nvoi.yaml exists, store mode
 	// if ~/.nvoi/db.sqlite exists, yaml mode otherwise. When BOTH
 	// exist, yaml wins and we warn the operator.
-	cfgPath, dbPath, bothExisted, err := applySmartDefaults(flags.ConfigPath, flags.DatabasePath)
+	cfgPath, dbPath, bothExisted, err := ApplySmartDefaults(flags.ConfigPath, flags.DatabasePath)
 	if err != nil {
 		return nil, err
 	}

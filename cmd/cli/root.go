@@ -79,6 +79,8 @@ func newRoot(r *rt) *cobra.Command {
 		withGroup(kubectlCmd(r), groupInspection),
 		withGroup(execCmd(r), groupInspection),
 		withGroup(logsCmd(r), groupInspection),
+		configCmd(r),
+		envCmd(r),
 
 		// Local store (each verb sets its own GroupID in its constructor)
 		setupCmd(r),

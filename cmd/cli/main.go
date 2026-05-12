@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -28,6 +29,12 @@ func main() {
 			r.log.Error(err)
 		} else {
 			fmt.Fprintln(os.Stderr, "error:", err)
+		}
+		// Honor a verb's explicit non-1 exit code when it returned an
+		// *exitCodeError (currently: `nvoi env check` exits 2 on missing).
+		var coded *exitCodeError
+		if errors.As(err, &coded) {
+			os.Exit(coded.ExitCode())
 		}
 		os.Exit(1)
 	}
