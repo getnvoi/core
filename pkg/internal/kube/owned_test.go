@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -226,5 +227,100 @@ func TestListOwned_AcrossKinds(t *testing.T) {
 		if len(got) != 1 || got[0] != tc.want {
 			t.Errorf("ListOwned %s: got %v want [%s]", tc.kind, got, tc.want)
 		}
+	}
+}
+
+// ── New kinds for observability (DaemonSet, Namespace, ServiceAccount,
+//    ClusterRole, ClusterRoleBinding) ──────────────────────────────────
+
+func TestApplyOwned_DaemonSet(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	c := kube.NewForTest(cs)
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "promtail"},
+		Spec:       appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"k": "v"}}},
+	}
+	if err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}, ds); err != nil {
+		t.Fatalf("ApplyOwned DaemonSet: %v", err)
+	}
+	got, err := cs.AppsV1().DaemonSets("obs").Get(context.Background(), "promtail", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels[kube.LabelOwner] != kube.OwnerObservability {
+		t.Errorf("owner label missing: %v", got.Labels)
+	}
+}
+
+func TestApplyOwned_Namespace(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	c := kube.NewForTest(cs)
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "nvoi-observability"}}
+	if err := c.ApplyOwned(context.Background(), kube.Scope{Owner: kube.OwnerObservability}, ns); err != nil {
+		t.Fatalf("ApplyOwned Namespace: %v", err)
+	}
+	got, err := cs.CoreV1().Namespaces().Get(context.Background(), "nvoi-observability", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels[kube.LabelOwner] != kube.OwnerObservability {
+		t.Errorf("owner label missing: %v", got.Labels)
+	}
+}
+
+func TestApplyOwned_ServiceAccount_ClusterRole_Binding(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	c := kube.NewForTest(cs)
+	scope := kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}
+
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
+	if err := c.ApplyOwned(context.Background(), scope, sa); err != nil {
+		t.Fatalf("ApplyOwned ServiceAccount: %v", err)
+	}
+	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
+	if err := c.ApplyOwned(context.Background(), scope, cr); err != nil {
+		t.Fatalf("ApplyOwned ClusterRole: %v", err)
+	}
+	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
+	if err := c.ApplyOwned(context.Background(), scope, crb); err != nil {
+		t.Fatalf("ApplyOwned ClusterRoleBinding: %v", err)
+	}
+
+	// Every new kind should be discoverable via ListOwned.
+	for _, k := range []kube.Kind{kube.KindServiceAccount, kube.KindClusterRole, kube.KindClusterRoleBinding} {
+		got, err := c.ListOwned(context.Background(), scope, k)
+		if err != nil {
+			t.Errorf("ListOwned %s: %v", k, err)
+			continue
+		}
+		if len(got) != 1 || got[0] != "promtail" {
+			t.Errorf("ListOwned %s: got %v want [promtail]", k, got)
+		}
+	}
+}
+
+func TestSweepOwned_DaemonSet_Namespace_RBAC(t *testing.T) {
+	cs := fake.NewSimpleClientset(
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "stale-ds", Namespace: "obs", Labels: labeled(kube.OwnerObservability)}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "stale-ns", Labels: labeled(kube.OwnerObservability)}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "stale-sa", Namespace: "obs", Labels: labeled(kube.OwnerObservability)}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "stale-cr", Labels: labeled(kube.OwnerObservability)}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "stale-crb", Labels: labeled(kube.OwnerObservability)}},
+	)
+	c := kube.NewForTest(cs)
+
+	for _, k := range []kube.Kind{
+		kube.KindDaemonSet, kube.KindNamespace,
+		kube.KindServiceAccount, kube.KindClusterRole, kube.KindClusterRoleBinding,
+	} {
+		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}, k, nil); err != nil {
+			t.Errorf("SweepOwned %s: %v", k, err)
+		}
+	}
+	if _, err := cs.AppsV1().DaemonSets("obs").Get(context.Background(), "stale-ds", metav1.GetOptions{}); err == nil {
+		t.Error("stale DaemonSet should be deleted")
+	}
+	if _, err := cs.CoreV1().Namespaces().Get(context.Background(), "stale-ns", metav1.GetOptions{}); err == nil {
+		t.Error("stale Namespace should be deleted")
 	}
 }
