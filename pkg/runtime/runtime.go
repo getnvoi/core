@@ -26,9 +26,36 @@ import (
 // Flags is the typed view of cobra's persistent flags. Constructed in
 // cmd/cli, copied onto Runtime so internal packages that need a flag
 // access via rt.Flags.X.
+//
+// Two operator shapes are supported and are mutually exclusive per
+// invocation (enforced in internal/cli.PrepareRuntime):
+//
+//   - YAML mode: ConfigPath set (default "nvoi.yaml"), DatabasePath
+//     empty. Existing behaviour — yaml + .env at the operator boundary.
+//
+//   - Store mode: DatabasePath set, ProjectName set, ConfigPath empty.
+//     Config + secrets come from the SQLite store at DatabasePath,
+//     decrypted with the master key resolved via Keyring. The store
+//     is opt-in for stateful operators (workstations with multiple
+//     projects, self-hosted control planes); CI keeps using YAML mode.
 type Flags struct {
 	ConfigPath string
 	JSON       bool
+
+	// DatabasePath is the SQLite file path passed via --database. When
+	// non-empty, internal/cli.PrepareRuntime sources Config + secrets
+	// from the store instead of the YAML+env path.
+	DatabasePath string
+
+	// Keyring is the master-key source spec passed via --keyring.
+	// Accepted forms: "" / "auto" / "os" / "env[:VAR]" / "file:<path>".
+	// Only consulted when DatabasePath is set.
+	Keyring string
+
+	// ProjectName is the operator-chosen project identifier passed via
+	// --project. Required when DatabasePath is set; resolves the row
+	// to load Config + secrets from.
+	ProjectName string
 }
 
 type Paths struct {
