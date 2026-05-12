@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/cloudinit"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/naming"
@@ -97,14 +98,18 @@ type templateData struct {
 
 	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 from
 	// 0.0.0.0/0 — the single-master path where the master IS the public
-	// face. True iff domains is declared AND HA is false.
+	// face. True iff domains is declared AND HA is false AND ingress
+	// mode is traefik. In tunnel mode there is NO public HTTP path
+	// regardless of domains.
 	PublicHTTPIngress bool
 
 	// LBHTTPIngress opens hcloud_firewall.default for 80/443 from the
 	// private subnet only AND emits 80/443 services on the public LB.
-	// True iff domains is declared AND HA. The LB has a public IPv4
-	// (HA + domains is the only path with public ingress beyond SSH);
-	// LB → masters traffic stays on the private network.
+	// True iff domains is declared AND HA AND ingress mode is traefik.
+	// In tunnel mode the LB still emits (for the 6443 k3s API) but
+	// collapses to private-only — its enable_public_interface flips
+	// false via the existing `{{ if not .LBHTTPIngress }}` template
+	// gate.
 	LBHTTPIngress bool
 }
 
@@ -174,6 +179,13 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 
 	ha := len(masters) >= 2
 	hasDomains := len(cfg.Domains) > 0
+	// Tunnel mode (providers.ingress: cloudflare) suppresses ALL
+	// public HTTP/S exposure on Hetzner: firewall drops 80/443,
+	// LB drops its public interface (via the existing
+	// `{{ if not .LBHTTPIngress }}` template gate) and drops its
+	// 80/443 service blocks. The tunnel terminates externally at
+	// Cloudflare's edge — no inbound surface on the nodes.
+	tunnel := cfg.Providers.IngressMode() == config.IngressCloudflare
 	data := templateData{
 		App:               cfg.App,
 		Env:               cfg.Env,
@@ -184,8 +196,8 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		Servers:           servers,
 		HA:                ha,
 		PrimaryMaster:     masters[0], // alphabetically first by sort above
-		PublicHTTPIngress: hasDomains && !ha,
-		LBHTTPIngress:     hasDomains && ha,
+		PublicHTTPIngress: hasDomains && !ha && !tunnel,
+		LBHTTPIngress:     hasDomains && ha && !tunnel,
 	}
 
 	var buf bytes.Buffer

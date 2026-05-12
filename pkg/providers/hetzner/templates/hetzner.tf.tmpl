@@ -26,6 +26,10 @@ resource "hcloud_network_subnet" "default" {
 
 # ── Firewall ───────────────────────────────────────────────────────────
 # Baseline rules: SSH public, k3s control-plane + kubelet + flannel + registry private.
+#
+# In tunnel mode (providers.ingress: cloudflare), PublicHTTPIngress and
+# LBHTTPIngress are both false regardless of domains: — the cluster has
+# no inbound HTTP path; cloudflared egress handles ingress externally.
 
 resource "hcloud_firewall" "default" {
   name = "${local.prefix}-fw"
