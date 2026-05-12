@@ -76,9 +76,10 @@ type DNSEmitter interface {
 	EmitDNS(rt *nvoiRuntime.Runtime) ([]byte, error)
 
 	// Providers returns every terraform provider this emitter's HCL
-	// references. The cloudflare DNS emitter in tunnel mode, for
-	// example, returns [cloudflare, random] because its tunnel
-	// resource depends on a random_id for the tunnel secret.
+	// references. The cloudflare DNS emitter returns [cloudflare] in
+	// both Traefik and tunnel modes — the tunnel secret is operator-
+	// supplied and baked as a literal, so no hashicorp/random is
+	// needed.
 	Providers() []ProviderRequirement
 
 	// CertManagerSolver returns the YAML fragment for cert-manager's

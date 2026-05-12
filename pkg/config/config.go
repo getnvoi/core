@@ -329,3 +329,45 @@ func (c *Config) PrimaryMaster() string {
 	}
 	return lone // single-master implicit
 }
+
+// MasterCount returns the number of servers with role=master. Used by
+// HA decisions in DeployMode and by the hetzner LB emission gate.
+func (c *Config) MasterCount() int {
+	n := 0
+	for _, srv := range c.Servers {
+		if srv.Role == "master" {
+			n++
+		}
+	}
+	return n
+}
+
+// DeployMode is the two orthogonal axes every layer of the pipeline
+// branches on. Computed once via Config.DeployMode(); downstream code
+// never re-derives from IngressMode + MasterCount.
+//
+// Cells (this PR's scope):
+//
+//	tunnel=false, ha=false  → traefik single-master (master public IP, klipper-lb)
+//	tunnel=false, ha=true   → traefik HA (hcloud LB carries 6443 + 80/443)
+//	tunnel=true,  ha=false  → tunnel single-master (no LB, no VIP)
+//	tunnel=true,  ha=true   → tunnel HA + kube-vip (no LB, private VIP carries 6443)
+//
+// kube-vip is purely a function of these two axes; no third boolean.
+type DeployMode struct {
+	Tunnel bool // providers.ingress: cloudflare
+	HA     bool // ≥2 masters
+}
+
+// KubeVIP is true when kube-vip on the private subnet carries the k3s
+// API instead of the hcloud LB. Currently == Tunnel && HA.
+func (m DeployMode) KubeVIP() bool { return m.Tunnel && m.HA }
+
+// DeployMode returns the deploy topology axes for c. Pure function
+// of cfg; callable any time after Load + Validate.
+func (c *Config) DeployMode() DeployMode {
+	return DeployMode{
+		Tunnel: c.Providers.IngressMode() == IngressCloudflare,
+		HA:     c.MasterCount() >= 2,
+	}
+}

@@ -50,4 +50,11 @@ func WorkDir(app, env string) string { return filepath.Join(workDirRoot, app+"-"
 // the bundle: `<provider>.tf`. One file per registered provider.
 func ProviderHCL(providerName string) string { return providerName + ".tf" }
 
+// TraefikInClusterURL is the cluster-internal HTTP URL of the Traefik
+// Service k3s installs under kube-system. cloudflared upstream points
+// here in tunnel mode; Traefik then routes by Host header to each
+// workload's Ingress backend. The address is part of the k3s contract,
+// not nvoi's to vary.
+const TraefikInClusterURL = "http://traefik.kube-system.svc.cluster.local:80"
+
 const workDirRoot = ".tf"

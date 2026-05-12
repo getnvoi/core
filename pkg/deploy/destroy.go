@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 
-	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 )
@@ -43,7 +42,7 @@ func Destroy(ctx context.Context, rt *runtime.Runtime) error {
 		// normal tf-destroy.
 		//
 		// Best-effort: drain failures warn but don't block destroy.
-		if rt.Cfg.Providers.IngressMode() == config.IngressTraefik {
+		if !rt.Cfg.DeployMode().Tunnel {
 			if err := s.drainCertificates(ctx); err != nil {
 				return err
 			}

@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/cloudinit"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/naming"
@@ -106,11 +106,18 @@ type templateData struct {
 	// LBHTTPIngress opens hcloud_firewall.default for 80/443 from the
 	// private subnet only AND emits 80/443 services on the public LB.
 	// True iff domains is declared AND HA AND ingress mode is traefik.
-	// In tunnel mode the LB still emits (for the 6443 k3s API) but
-	// collapses to private-only — its enable_public_interface flips
-	// false via the existing `{{ if not .LBHTTPIngress }}` template
-	// gate.
+	// In tunnel mode there is NO public HTTP path; in KubeVIP mode
+	// (tunnel + HA) the LB is dropped entirely (see EmitLB) so this
+	// flag stays false there too.
 	LBHTTPIngress bool
+
+	// VIP is the private-subnet IP kube-vip ARP-claims. Non-empty iff
+	// kube-vip is active (tunnel + HA). Presence is the toggle:
+	//   .VIP != ""  →  no LB block; api_endpoint.private = VIP literal
+	//   .VIP == "" && .HA   →  LB block; api_endpoint.private = LB IP
+	//   .VIP == "" && !.HA  →  no LB; api_endpoint.private = master priv
+	// Single field; the template branches on (.VIP, .HA) in that order.
+	VIP string
 }
 
 type serverData struct {
@@ -177,7 +184,7 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("no masters in servers (validator should have rejected)")
 	}
 
-	ha := len(masters) >= 2
+	mode := cfg.DeployMode()
 	hasDomains := len(cfg.Domains) > 0
 	// Tunnel mode (providers.ingress: cloudflare) suppresses ALL
 	// public HTTP/S exposure on Hetzner: firewall drops 80/443,
@@ -185,7 +192,15 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 	// `{{ if not .LBHTTPIngress }}` template gate) and drops its
 	// 80/443 service blocks. The tunnel terminates externally at
 	// Cloudflare's edge — no inbound surface on the nodes.
-	tunnel := cfg.Providers.IngressMode() == config.IngressCloudflare
+	//
+	// KubeVIP mode (tunnel + HA) suppresses the hcloud LB entirely —
+	// kube-vip on the private subnet carries 6443 instead. EmitLB
+	// gates the whole hcloud_load_balancer* block; api_endpoint.private
+	// emits the VIP literal instead of the LB private IP.
+	var vip string
+	if mode.KubeVIP() {
+		vip = vipFor(networkSubnet)
+	}
 	data := templateData{
 		App:               cfg.App,
 		Env:               cfg.Env,
@@ -194,10 +209,11 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		NetworkSubnet:     networkSubnet,
 		NetworkZone:       zone,
 		Servers:           servers,
-		HA:                ha,
+		HA:                mode.HA,
 		PrimaryMaster:     masters[0], // alphabetically first by sort above
-		PublicHTTPIngress: hasDomains && !ha && !tunnel,
-		LBHTTPIngress:     hasDomains && ha && !tunnel,
+		PublicHTTPIngress: hasDomains && !mode.HA && !mode.Tunnel,
+		LBHTTPIngress:     hasDomains && mode.HA && !mode.Tunnel,
+		VIP:               vip,
 	}
 
 	var buf bytes.Buffer
@@ -205,4 +221,35 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("render hetzner.tf: %w", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// vipFor picks an unused IP at the top of the private subnet for
+// kube-vip to ARP-claim. Hetzner's gateway sits at .1 and auto-attached
+// servers consume IPs ascending from .2, so the high end is safe for
+// the cluster sizes nvoi targets. For a /24 the value is .250; the
+// formula is `broadcast - 5` so smaller subnets stay safely above
+// Hetzner's auto-allocation range as well.
+//
+// Returns an empty string for malformed CIDRs — caller is responsible
+// for not invoking this on bad config (compile already validates the
+// subnet shape upstream).
+func vipFor(cidr string) string {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return ""
+	}
+	mask := p.Bits()
+	// Subnet must be big enough that broadcast-5 stays inside the
+	// usable range. /29 (8 addresses, 6 usable) is the floor.
+	if mask > 29 {
+		return ""
+	}
+	// Walk the addr to the broadcast and step back 5.
+	addr := p.Masked().Addr()
+	size := uint64(1) << (32 - mask)
+	target := size - 6 // -1 broadcast, -5 offset
+	for i := uint64(0); i < target; i++ {
+		addr = addr.Next()
+	}
+	return addr.String()
 }

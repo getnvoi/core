@@ -150,6 +150,7 @@ func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{
 				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+				TunnelSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 			},
 		},
 	})
@@ -165,17 +166,18 @@ func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
 		`cloudflare_zone_id    = "zone123"`,
 		// Tunnel resources (named after app+env from baseCfg = "hello-dev")
 		`tunnel_name           = "nvoi-hello-dev"`,
-		`resource "random_id" "tunnel_secret"`,
 		`resource "cloudflare_zero_trust_tunnel_cloudflared" "main"`,
-		`tunnel_secret = random_id.tunnel_secret.b64_std`,
+		`secret     = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`,
 		`resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main"`,
 		`tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id`,
 		// Ingress rules — one per (service, domain) pair, alphabetic
-		// by service via utils.SortedKeys.
+		// by service via utils.SortedKeys. ALL rules upstream at the
+		// in-cluster Traefik Service; Traefik does host-based routing
+		// + L7 load balancing. cloudflared preserves Host header by
+		// default.
 		`hostname = "api.nvoi.to"`,
-		`service  = "http://api.default.svc.cluster.local:3000"`,
+		`service  = "http://traefik.kube-system.svc.cluster.local:80"`,
 		`hostname = "app.nvoi.to"`,
-		`service  = "http://app.default.svc.cluster.local:8080"`,
 		`hostname = "www.nvoi.to"`,
 		// Catch-all
 		`service = "http_status:404"`,
@@ -217,15 +219,37 @@ func TestEmitDNS_TunnelMode_MissingAccountID(t *testing.T) {
 	}
 }
 
-func TestEmitDNS_TunnelMode_RoutePortsMatchServices(t *testing.T) {
+func TestEmitDNS_TunnelMode_MissingTunnelSecret(t *testing.T) {
 	cfg := tunnelCfg()
-	// Override port to verify it threads correctly through the upstream.
+	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{
+				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+				// TunnelSecret deliberately blank — boundary normally
+				// catches this, but the emitter's defensive check keeps
+				// the failure local rather than letting an empty literal
+				// land in HCL.
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "tunnel_secret required") {
+		t.Errorf("expected tunnel_secret error, got %v", err)
+	}
+}
+
+func TestEmitDNS_TunnelMode_UpstreamIsTraefik(t *testing.T) {
+	cfg := tunnelCfg()
+	// Per-service ports are irrelevant in tunnel mode now — every
+	// ingress rule points at Traefik. Override one to confirm it
+	// is NOT threaded through.
 	cfg.Services["app"] = config.ServiceSpec{Image: "ghcr.io/me/app:latest", Port: 9999}
 	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
 		Cfg: cfg,
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{
 				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+				TunnelSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 			},
 		},
 	})
@@ -233,12 +257,12 @@ func TestEmitDNS_TunnelMode_RoutePortsMatchServices(t *testing.T) {
 		t.Fatalf("EmitDNS: %v", err)
 	}
 	hcl := string(out)
-	if !strings.Contains(hcl, `service  = "http://app.default.svc.cluster.local:9999"`) {
-		t.Errorf("port 9999 not threaded through to upstream URL\n--- output ---\n%s", hcl)
+	if !strings.Contains(hcl, `service  = "http://traefik.kube-system.svc.cluster.local:80"`) {
+		t.Errorf("tunnel upstream is not Traefik\n--- output ---\n%s", hcl)
 	}
-	// Negative — old port must not leak.
-	if strings.Contains(hcl, `:8080"`) {
-		t.Errorf("stale port 8080 in tunnel HCL\n--- output ---\n%s", hcl)
+	// Negative — per-service ports must NOT leak into tunnel upstreams.
+	if strings.Contains(hcl, `:9999"`) || strings.Contains(hcl, `:8080"`) {
+		t.Errorf("per-service port leaked into tunnel HCL (should always be :80 via Traefik)\n--- output ---\n%s", hcl)
 	}
 }
 

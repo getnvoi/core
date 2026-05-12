@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/install"
+	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/kubevip"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
 )
@@ -53,11 +55,16 @@ func (s *Session) installCluster(ctx context.Context) error {
 	}
 
 	// LB IPs go in every master's --tls-san list so kubectl-via-LB
-	// (HA case) and worker-join-via-LB validate cleanly.
+	// (HA case) and worker-join-via-LB validate cleanly. In KubeVIP
+	// mode (tunnel + HA) the same SAN list covers the VIP literal
+	// instead of the LB private IP — eps.APIEndpoint.Private is the
+	// VIP there, so this code is mode-agnostic.
 	var extraSANs []string
 	if eps.HA {
 		extraSANs = []string{eps.APIEndpoint.Private, eps.APIEndpoint.Public}
 	}
+
+	mode := cfg.DeployMode()
 
 	// 3. Discovery — does a cluster already exist?
 	s.Lg.Step("k3s-discover")
@@ -71,9 +78,30 @@ func (s *Session) installCluster(ctx context.Context) error {
 
 	// 4. Cold start: install primary if no cluster yet.
 	if !found {
+		// kube-vip static-pod manifest must land BEFORE k3s starts —
+		// k3s auto-applies /var/lib/rancher/k3s/server/manifests/*.yaml
+		// during its boot sequence, and we need kube-vip to claim the
+		// VIP via ARP before any worker / secondary master tries to
+		// dial it.
+		if mode.KubeVIP() {
+			s.Lg.Step("kube-vip-manifest")
+			if err := install.WriteKubeVIPManifest(ctx, primaryNode, eps.APIEndpoint.Private); err != nil {
+				return err
+			}
+		}
 		s.Lg.Step("k3s-primary")
 		if err := install.InstallPrimaryMaster(ctx, primaryNode, extraSANs); err != nil {
 			return err
+		}
+		// kube-vip RBAC: applied via kubectl on the primary once the
+		// apiserver is reachable (InstallPrimaryMaster blocks until
+		// the node is Ready). Idempotent — re-apply on subsequent
+		// deploys is a no-op.
+		if mode.KubeVIP() {
+			s.Lg.Step("kube-vip-rbac")
+			if err := kube.ApplyYAML(ctx, primaryNode.Shell, kubevip.RBAC()); err != nil {
+				return fmt.Errorf("apply kube-vip RBAC: %w", err)
+			}
 		}
 		// Re-discover to get the freshly-written token.
 		token, found, err = install.DiscoverToken(ctx, masterShells)
@@ -92,6 +120,14 @@ func (s *Session) installCluster(ctx context.Context) error {
 	for _, name := range eps.Masters() {
 		if name == primaryName {
 			continue
+		}
+		// Same pre-install manifest drop on every secondary — each
+		// master runs its own kube-vip pod, all elect via the same
+		// Lease, one wins the VIP at a time.
+		if mode.KubeVIP() {
+			if err := install.WriteKubeVIPManifest(ctx, nodes[name], eps.APIEndpoint.Private); err != nil {
+				return err
+			}
 		}
 		if err := install.JoinSecondaryMaster(ctx, install.SecondaryJoinSpec{
 			Self:      nodes[name],

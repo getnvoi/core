@@ -116,7 +116,12 @@ resource "hcloud_server" {{ .Key | hcl }} {
   firewall_ids = [hcloud_firewall.default.id]
 
   network {
-    network_id = hcloud_network.default.id
+    # subnet_id implicitly depends on hcloud_network_subnet.default —
+    # using subnet_id (not network_id) here is required by hcloud
+    # provider >=1.63 which rejects both being set; state has the
+    # computed subnet_id filled and a config-level network_id is now
+    # a conflict, not a fallback.
+    subnet_id = hcloud_network_subnet.default.id
   }
 
   labels = {
@@ -124,8 +129,6 @@ resource "hcloud_server" {{ .Key | hcl }} {
     nvoi_env  = local.env
     nvoi_role = {{ .Role | hcl }}
   }
-
-  depends_on = [hcloud_network_subnet.default]
 
   lifecycle {
     # user_data: ForceNew + the hcloud provider's stored hash isn't always
@@ -142,9 +145,12 @@ resource "hcloud_server" {{ .Key | hcl }} {
   }
 }
 {{ end }}
-{{ if .HA }}
+{{ if and .HA (not .VIP) }}
 # ── HA load balancer ───────────────────────────────────────────────────
-# Auto-emitted because Servers has ≥2 masters.
+# Auto-emitted because Servers has ≥2 masters AND kube-vip is not
+# active (i.e. traefik HA path). Tunnel + HA collapses to kube-vip on
+# the private subnet — no cloud LB at all (see api_endpoint.private
+# below which emits the VIP literal in that mode).
 #
 # Two faces:
 #   - 6443 (always): k3s API for cluster-internal joins. Workers and
@@ -255,7 +261,11 @@ output "servers" {
 output "api_endpoint" {
   value = {
     public  = {{ if .LBHTTPIngress }}hcloud_load_balancer.cp.ipv4{{ else }}hcloud_server.{{ .PrimaryMaster }}.ipv4_address{{ end }}
-    private = {{ if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}one([for n in hcloud_server.{{ .PrimaryMaster }}.network : n.ip]){{ end }}
+    # private API endpoint precedence:
+    #   .VIP set  → kube-vip ARP literal (tunnel + HA)
+    #   .HA       → hcloud LB private IP (traefik HA)
+    #   else      → primary master's private IP (single master, both modes)
+    private = {{ if .VIP }}{{ .VIP | hcl }}{{ else if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}one([for n in hcloud_server.{{ .PrimaryMaster }}.network : n.ip]){{ end }}
   }
 }
 

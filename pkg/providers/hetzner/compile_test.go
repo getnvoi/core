@@ -73,30 +73,36 @@ func TestEmitInfra_TunnelMode_SingleMaster_NoPublic80443(t *testing.T) {
 	}
 }
 
-// TunnelMode_HA_PrivateOnlyLB — HA + tunnel keeps the LB (6443 for
-// k3s API joins) but collapses to private-only: no public IPv4, no
-// 80/443 services. The InfraEmitter contract leaves the cluster-
-// internal join surface intact regardless of ingress mode.
-func TestEmitInfra_TunnelMode_HA_PrivateOnlyLB(t *testing.T) {
+// TunnelMode_HA_KubeVIP — HA + tunnel drops the hcloud LB entirely.
+// kube-vip on the private subnet (ARP-claimed VIP literal) carries
+// the k3s API on 6443. Every hcloud_load_balancer* resource must be
+// absent; api_endpoint.private emits the VIP literal so workers and
+// secondary masters dial it directly during install.
+func TestEmitInfra_TunnelMode_HA_NoLB_VIPOnly(t *testing.T) {
 	src := emitFor(t, rtFor(t, config.IngressCloudflare, map[string]config.ServerSpec{
 		"m1": {Type: "cax21", Region: "nbg1", Role: "master", Primary: true},
 		"m2": {Type: "cax21", Region: "nbg1", Role: "master"},
 	}))
 	body := hcltest.ParseValid(t, src, "hetzner.tf")
 
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer", "cp") == nil {
-		t.Fatal("HA + tunnel: hcloud_load_balancer.cp still required for 6443")
-	}
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer_service", "http") != nil {
-		t.Error("HA + tunnel: hcloud_load_balancer_service.http should NOT exist")
-	}
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer_service", "https") != nil {
-		t.Error("HA + tunnel: hcloud_load_balancer_service.https should NOT exist")
+	for _, name := range []string{
+		"hcloud_load_balancer",
+		"hcloud_load_balancer_network",
+		"hcloud_load_balancer_target",
+		"hcloud_load_balancer_service",
+	} {
+		if hcltest.FindBlock(body, "resource", name, "cp") != nil ||
+			hcltest.FindBlock(body, "resource", name, "http") != nil ||
+			hcltest.FindBlock(body, "resource", name, "https") != nil {
+			t.Errorf("HA + tunnel: %s should not be emitted (kube-vip replaces the LB)", name)
+		}
 	}
 
 	hcl := string(src)
-	if !strings.Contains(hcl, "enable_public_interface = false") {
-		t.Errorf("HA + tunnel: LB should have enable_public_interface=false\n--- output ---\n%s", hcl)
+	// VIP literal lands as the private API endpoint. /24 default subnet
+	// → broadcast(.255) - 5 = .250.
+	if !strings.Contains(hcl, `private = "10.0.1.250"`) {
+		t.Errorf("HA + tunnel: api_endpoint.private must be the VIP literal\n--- output ---\n%s", hcl)
 	}
 	for _, port := range []string{`port       = "80"`, `port       = "443"`} {
 		if strings.Contains(hcl, port) {

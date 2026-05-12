@@ -6,7 +6,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/log"
@@ -35,12 +34,13 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
 	ingressScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerIngress}
 
-	// Tunnel mode (providers.ingress: cloudflare): cloudflared routes
-	// hostnames at the tunnel layer (tofu-managed config); per-service
-	// k8s Ingress objects are unused. reconcileRemoval below sweeps
-	// any leftovers under OwnerIngress so a flip Traefik → tunnel
-	// converges in one pass.
-	tunnelMode := r.Cfg.Providers.IngressMode() == config.IngressCloudflare
+	// Ingress is emitted in BOTH modes (after the L7-routing refactor):
+	//   Traefik mode → with TLS section, cert-manager Secret per domain.
+	//   Tunnel mode  → without TLS section. cloudflared upstreams point
+	//                  at the Traefik Service ClusterIP; Traefik routes
+	//                  by Host header → pod (per-request LB).
+	// `tunnelMode` only gates the TLS section now, not Ingress itself.
+	tunnelMode := r.Cfg.DeployMode().Tunnel
 
 	if sec, err := buildRegistrySecret(r); err != nil {
 		return fmt.Errorf("build registry-auth: %w", err)
@@ -81,19 +81,13 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 			return fmt.Errorf("apply service %s: %w", name, err)
 		}
 
-		// Ingress: only emit in Traefik mode when this service has
-		// domains. cert-manager is responsible for the TLS Secret each
-		// Ingress references; we applied the per-domain Certificate
-		// resources upstream of this reconcile.
-		//
-		// Tunnel mode skips Ingress emission entirely — cloudflared
-		// routes hostnames at the tunnel config layer.
-		if !tunnelMode {
-			if domains := r.Cfg.Domains[name]; len(domains) > 0 {
-				lg.Step("ingress-" + name)
-				if err := kc.ApplyOwned(ctx, ingressScope, buildIngress(name, svc, domains)); err != nil {
-					return fmt.Errorf("apply ingress %s: %w", name, err)
-				}
+		// Ingress: emit for every service with domains, in both modes.
+		// withTLS=true (traefik) → cert-manager Secret per domain.
+		// withTLS=false (tunnel) → no TLS block; CF terminates at edge.
+		if domains := r.Cfg.Domains[name]; len(domains) > 0 {
+			lg.Step("ingress-" + name)
+			if err := kc.ApplyOwned(ctx, ingressScope, buildIngress(name, svc, domains, !tunnelMode)); err != nil {
+				return fmt.Errorf("apply ingress %s: %w", name, err)
 			}
 		}
 	}
@@ -117,12 +111,10 @@ func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) 
 // when operator removes registry: or empties secrets:, the orphan
 // Secret is purged.
 func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
-	// In tunnel mode declaredIngress stays nil → SweepOwned reaps
-	// EVERY Ingress under OwnerIngress, including leftovers from a
-	// prior Traefik-mode deploy. In Traefik mode the list mirrors
-	// today's behavior.
-	tunnelMode := r.Cfg.Providers.IngressMode() == config.IngressCloudflare
-
+	// Ingress is emitted for every service with domains in BOTH modes
+	// now (the L7-routing refactor keeps Traefik in the path for tunnel
+	// mode too). declaredIngress mirrors the apply loop in ApplyAll —
+	// SweepOwned reaps anything else under OwnerIngress.
 	declared := make([]string, 0, len(r.Cfg.Services))
 	declaredStateful := make([]string, 0)
 	declaredStateless := make([]string, 0)
@@ -134,7 +126,7 @@ func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 		} else {
 			declaredStateless = append(declaredStateless, name)
 		}
-		if !tunnelMode && len(r.Cfg.Domains[name]) > 0 {
+		if len(r.Cfg.Domains[name]) > 0 {
 			declaredIngress = append(declaredIngress, name)
 		}
 	}

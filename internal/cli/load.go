@@ -43,6 +43,18 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		return nil, err
 	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
+
+	// Tunnel-mode prerequisite: CF_TUNNEL_SECRET is operator-supplied
+	// (32 random bytes, base64). Pinned here at the cmd/cli boundary
+	// so the missing-secret failure surfaces ONCE, before any tofu
+	// invocation — not as a downstream "Missing required argument" at
+	// plan time. Validated for CF tunnel mode only; traefik deploys
+	// don't reference the field.
+	if cfg.DeployMode().Tunnel {
+		if providerInputs.Cloudflare == nil || providerInputs.Cloudflare.TunnelSecret == "" {
+			return nil, fmt.Errorf("providers.ingress: cloudflare requires CF_TUNNEL_SECRET env var (32-byte base64 string; operator-generated and stored — nvoi does not mint it)")
+		}
+	}
 	// cfg-file directory is the base for monitor.dashboards /
 	// monitor.alert_rules globs — operator-written paths in the YAML
 	// are resolved relative to the YAML itself, NOT cwd. Matches the

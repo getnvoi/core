@@ -162,35 +162,36 @@ func TestCompile_BackendBlockEmitsResolvedCreds(t *testing.T) {
 	}
 }
 
-// backend.tf must declare the random provider when the cloudflare
-// DNS emitter is active — its tunnel-mode HCL references random_id
-// for the tunnel secret, and a missing required_providers entry
-// would fail `tofu init`. The emitter unconditionally declares
-// random (the cost of pre-fetching ~1MB in Traefik mode is
-// negligible vs. a runtime branch in the Providers() method).
+// backend.tf must NOT declare the random provider — the tunnel
+// secret is operator-supplied (CF_TUNNEL_SECRET) and baked as a
+// literal in the cloudflare_zero_trust_tunnel_cloudflared resource.
+// No random_id, no hashicorp/random dependency, no nvoi-minted
+// secret material in tofu state.
 //
-// This regression covers a class of bug where a template introduces
-// a new HCL resource without the corresponding Providers() entry.
-func TestCompile_BackendTF_DeclaresRandomWhenCloudflareDNSActive(t *testing.T) {
+// This regression covers the reverse class of bug: a Providers()
+// entry that's no longer needed because the underlying HCL stopped
+// referencing the provider. An unused entry costs a ~1MB provider
+// download per deploy + clouds the trust surface.
+func TestCompile_BackendTF_DoesNotDeclareRandom(t *testing.T) {
 	r := rt(t, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}, nil)
 	r.Cfg.Providers.DNS = "cloudflare"
+	r.Cfg.Providers.Ingress = config.IngressCloudflare
 	r.Cfg.Services = map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}}
 	r.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
 	r.Providers = runtime.ProviderInputs{Cloudflare: &runtime.CloudflareInputs{
 		ZoneID: "z", Zone: "nvoi.to", AccountID: "a",
+		TunnelSecret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
 	}}
 
 	src := bundleFile(t, r, "backend.tf")
 	hcl := string(src)
-	for _, want := range []string{
-		`random = `,
+	for _, banned := range []string{
 		`"hashicorp/random"`,
-		`"~> 3"`,
 	} {
-		if !strings.Contains(hcl, want) {
-			t.Errorf("backend.tf missing %q (tunnel HCL uses random_id without the required_providers entry)\n--- output ---\n%s", want, hcl)
+		if strings.Contains(hcl, banned) {
+			t.Errorf("backend.tf declares %q (operator-supplied tunnel secret means we no longer need hashicorp/random)\n--- output ---\n%s", banned, hcl)
 		}
 	}
 }

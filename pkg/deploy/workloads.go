@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/observability"
@@ -90,8 +89,8 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		return fmt.Errorf("kube-state-metrics: %w", err)
 	}
 
-	mode := rt.Cfg.Providers.IngressMode()
-	tunnelMode := mode == config.IngressCloudflare
+	mode := rt.Cfg.DeployMode()
+	tunnelMode := mode.Tunnel
 
 	// Ingress prerequisites:
 	//   Traefik mode + domains → cert-manager + ClusterIssuer +

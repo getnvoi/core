@@ -53,6 +53,15 @@ type CloudflareInputs struct {
 	AccountID string
 	ZoneID    string
 	Zone      string
+
+	// TunnelSecret is the operator-supplied 32-byte base64 string that
+	// seeds the cloudflare_zero_trust_tunnel_cloudflared resource.
+	// Required when providers.ingress=cloudflare (validated at cmd/cli
+	// boundary). Operator-owned: nvoi does NOT generate this — keeps
+	// the trust surface explicit and the random_id resource out of
+	// tofu state. Source: CF_TUNNEL_SECRET env var (typically piped
+	// from a secret manager into .env).
+	TunnelSecret string
 }
 
 type HetznerInputs struct {
