@@ -24,9 +24,8 @@ type Project struct {
 	CreatedAt   time.Time `gorm:"not null"`
 	UpdatedAt   time.Time `gorm:"not null"`
 
-	Secrets  []Secret  `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
-	Runs     []Run     `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
-	Sessions []Session `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
+	Secrets []Secret `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
+	Runs    []Run    `gorm:"foreignKey:ProjectID;constraint:OnDelete:CASCADE"`
 }
 
 // Secret is one encrypted credential bound to a Project. Nonce +
@@ -60,37 +59,9 @@ type Run struct {
 	EndedAt    *time.Time
 }
 
-// Session is one agent chat session bound to a Project + provider.
-// Messages dangle off it via foreign key.
-type Session struct {
-	ID        string    `gorm:"primaryKey;size:64"`
-	ProjectID string    `gorm:"not null;index:idx_sessions_project_last,priority:1;size:64"`
-	Provider  string    `gorm:"not null;size:32"`
-	Model     string    `gorm:"size:128"`
-	Title     string    `gorm:"size:256"`
-	CreatedAt time.Time `gorm:"not null"`
-	LastAt    time.Time `gorm:"not null;index:idx_sessions_project_last,priority:2,sort:desc"`
-
-	Messages []Message `gorm:"foreignKey:SessionID;constraint:OnDelete:CASCADE"`
-}
-
-// Message is one event emitted by an agent provider's tool-use loop.
-// Mirrors agent.Message but persisted: Seq is the monotonic per-
-// session position (assigned atomically in sessions.go AppendMessage),
-// MetadataJSON is the gob of provider-specific extras.
-type Message struct {
-	ID           int64     `gorm:"primaryKey;autoIncrement"`
-	SessionID    string    `gorm:"not null;uniqueIndex:idx_messages_session_seq,priority:1;size:64"`
-	Seq          int64     `gorm:"not null;uniqueIndex:idx_messages_session_seq,priority:2"`
-	Kind         string    `gorm:"not null;size:32"`
-	Content      string    `gorm:"type:text;not null"`
-	MetadataJSON string    `gorm:"type:text"`
-	CreatedAt    time.Time `gorm:"not null"`
-}
-
 // allModels is the canonical list passed to gorm.AutoMigrate at
 // Init/Open. Adding a new model = adding it here. Order matters only
-// in that Postgres creates the parent table before the child for FK
+// in that the parent table must exist before the child for FK
 // resolution; gorm handles dependency ordering, but listing parents
 // first matches the schema's mental model.
 func allModels() []any {
@@ -99,7 +70,5 @@ func allModels() []any {
 		&Project{},
 		&Secret{},
 		&Run{},
-		&Session{},
-		&Message{},
 	}
 }
