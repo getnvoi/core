@@ -150,6 +150,52 @@ func (e *Emitter) Emit(m Message) error {
 	return e.enc.Encode(m)
 }
 
+// ── semantic helpers — the unified render surface every provider ─────
+//
+// Providers' Loop functions call these methods rather than constructing
+// Messages and calling Emit themselves. This keeps the rendering
+// vocabulary identical across claude / codex / gemini and means a
+// future change to a Message's metadata shape (e.g. adding a field)
+// lives in one place. Same emit on the wire; same NDJSON contract.
+
+// EmitSystem writes a Kind=System event (typically the session-start
+// banner).
+func (e *Emitter) EmitSystem(content string, md map[string]any) error {
+	return e.Emit(System(content, md))
+}
+
+// EmitText writes a Kind=Text event — model-emitted assistant text.
+func (e *Emitter) EmitText(s string) error { return e.Emit(Text(s)) }
+
+// EmitThinking writes a Kind=Thinking event — model's reasoning
+// block when the provider exposes it (claude extended thinking;
+// gemini thought summaries). Consumers may collapse by default.
+func (e *Emitter) EmitThinking(s string) error { return e.Emit(Thinking(s)) }
+
+// EmitToolUse writes a Kind=ToolUse event — model invoked a tool.
+// id is the provider's tool-use id (echoed in the matching ToolResult).
+func (e *Emitter) EmitToolUse(name, id string, input json.RawMessage) error {
+	return e.Emit(ToolUse(name, id, input))
+}
+
+// EmitToolResult writes a Kind=ToolResult event — what came back
+// from executing the model's tool call. isErr=true marks an error
+// surface that the model can react to.
+func (e *Emitter) EmitToolResult(id, name, body string, isErr bool) error {
+	return e.Emit(ToolResult(id, name, body, isErr))
+}
+
+// EmitResult writes the terminal Kind=Result event when stop_reason=
+// end_turn. Metadata typically carries session_id, duration_ms,
+// num_turns, tool_calls, and usage tokens.
+func (e *Emitter) EmitResult(text string, md map[string]any) error {
+	return e.Emit(Result(text, md))
+}
+
+// EmitError writes a Kind=Error event. After EmitError the provider's
+// Loop returns; the process exits non-zero from main().
+func (e *Emitter) EmitError(err error) error { return e.Emit(Error(err)) }
+
 // ── History loading ──────────────────────────────────────────────────
 
 // LoadHistory parses a JSONL stream of Messages, in order. Lines that
