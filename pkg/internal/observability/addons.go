@@ -33,15 +33,45 @@ import (
 // before doing so.
 const MetricsServerVersion = "v0.7.2"
 
+// KubeStateMetricsVersion pins the kube-state-metrics release.
+// kube-state-metrics exposes Kubernetes object state as Prometheus
+// metrics (kube_deployment_status_replicas_ready, kube_pod_...,
+// etc.) — required by the dashboards + alert rules nvoi generates
+// from cfg.Services. Without it, panels render empty and alerts
+// silently never fire.
+const KubeStateMetricsVersion = "v2.13.0"
+
 // MetricsServerURL is the upstream single-file release manifest. The
 // master kubectl-applies this URL directly — requires master internet
 // (same dependency as the k3s install download and the cert-manager
 // manifest).
 const MetricsServerURL = "https://github.com/kubernetes-sigs/metrics-server/releases/download/" + MetricsServerVersion + "/components.yaml"
 
+// KubeStateMetricsURL is the upstream kustomize-rendered single-file
+// manifest for the "standard" install (kube-state-metrics 2.x ships
+// pre-rendered manifests in the release tarball; we pull the GitHub
+// raw blob that's stable across point releases).
+const KubeStateMetricsURL = "https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/cluster-role-binding.yaml"
+
+// Additional kube-state-metrics manifests applied in order. The
+// upstream "standard" install is split across multiple YAML files
+// (cluster-role, cluster-role-binding, deployment, service-account,
+// service). We apply each; kubectl handles them as a single
+// reconciliation unit.
+var kubeStateMetricsURLs = []string{
+	"https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/cluster-role.yaml",
+	"https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/cluster-role-binding.yaml",
+	"https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/service-account.yaml",
+	"https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/deployment.yaml",
+	"https://raw.githubusercontent.com/kubernetes/kube-state-metrics/" + KubeStateMetricsVersion + "/examples/standard/service.yaml",
+}
+
 // metricsServerNamespace is where the upstream manifest places the
 // Deployment + Service + ServiceAccount. Standard upstream convention.
 const metricsServerNamespace = "kube-system"
+
+// kubeStateMetricsNamespace matches the upstream manifest default.
+const kubeStateMetricsNamespace = "kube-system"
 
 // ownedObjects is the closed list of objects in the upstream manifest
 // we want SweepOwned to be able to manage. metrics-server installs
@@ -60,6 +90,17 @@ var metricsServerOwned = []ownedObject{
 	{resource: "service", scope: "-n " + metricsServerNamespace, name: "metrics-server"},
 	{resource: "serviceaccount", scope: "-n " + metricsServerNamespace, name: "metrics-server"},
 	{resource: "apiservice", scope: "", name: "v1beta1.metrics.k8s.io"},
+}
+
+// kubeStateMetricsOwned lists the operator-visible objects the
+// upstream manifest creates. Deployment label is mandatory (ListOwned
+// filters by it); the rest are best-effort.
+var kubeStateMetricsOwned = []ownedObject{
+	{resource: "deployment", scope: "-n " + kubeStateMetricsNamespace, name: "kube-state-metrics"},
+	{resource: "service", scope: "-n " + kubeStateMetricsNamespace, name: "kube-state-metrics"},
+	{resource: "serviceaccount", scope: "-n " + kubeStateMetricsNamespace, name: "kube-state-metrics"},
+	{resource: "clusterrole", scope: "", name: "kube-state-metrics"},
+	{resource: "clusterrolebinding", scope: "", name: "kube-state-metrics"},
 }
 
 // ApplyMetricsServer installs metrics-server onto the cluster, waits
@@ -103,10 +144,50 @@ func ApplyMetricsServer(ctx context.Context, sh ssh.Shell, lg log.Log) error {
 	return nil
 }
 
+// ApplyKubeStateMetrics installs kube-state-metrics onto the cluster,
+// waits for its Deployment to be Available, and stamps
+// `nvoi/owner=addons` on the operator-visible objects. Idempotent.
+//
+// Required by the monitor: stack — dashboards and alerts reference
+// kube_* metrics this exporter produces. Installed unconditionally
+// (cheap; ~30Mi resident) so single-deploy flips into `monitor:` work
+// without an additional manual install step.
+//
+// Same shell-out pattern as ApplyCertManager / ApplyMetricsServer —
+// apply each upstream manifest in order, wait Available, label.
+func ApplyKubeStateMetrics(ctx context.Context, sh ssh.Shell, lg log.Log) error {
+	lg.Step("kube-state-metrics-install")
+	for _, url := range kubeStateMetricsURLs {
+		out, err := install.Kubectl(ctx, sh, "apply", "-f", url)
+		if err != nil {
+			return fmt.Errorf("apply kube-state-metrics %s: %w (out: %s)", url, err, out)
+		}
+	}
+	lg.Info(fmt.Sprintf("kube-state-metrics %s applied", KubeStateMetricsVersion))
+
+	lg.Step("kube-state-metrics-ready")
+	out, err := install.Kubectl(ctx, sh,
+		"-n", kubeStateMetricsNamespace,
+		"wait", "--for=condition=Available",
+		"--timeout=180s",
+		"deployment/kube-state-metrics",
+	)
+	if err != nil {
+		return fmt.Errorf("wait kube-state-metrics: %w (out: %s)", err, out)
+	}
+
+	lg.Step("kube-state-metrics-label")
+	if err := labelOwned(ctx, sh, lg, kubeStateMetricsOwned, kube.OwnerAddons); err != nil {
+		return err
+	}
+	lg.Info("kube-state-metrics ready")
+	return nil
+}
+
 // labelOwned patches `nvoi/owner=<owner>` onto each object in `objs`.
-// First failure is treated as fatal IF it's the Deployment (mandatory
-// for ListOwned visibility); subsequent failures on auxiliary kinds
-// are logged as Warn and the function returns nil.
+// Deployment failures are fatal (ListOwned filters by them);
+// auxiliary kinds (service / SA / clusterrole / apiservice) are
+// best-effort and warn on failure.
 //
 // Closed-list iteration: the caller picks WHICH addon objects to
 // stamp; this function just runs the patches. Easy to extend for

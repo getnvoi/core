@@ -139,6 +139,53 @@ func TestApplyMetricsServer_DeploymentLabelFailure_IsFatal(t *testing.T) {
 	}
 }
 
+func TestApplyKubeStateMetrics_HappyPath(t *testing.T) {
+	sh := &sshfake.Shell{}
+	lg, _ := newTestLogger(t)
+
+	if err := observability.ApplyKubeStateMetrics(context.Background(), sh, lg); err != nil {
+		t.Fatalf("ApplyKubeStateMetrics: %v", err)
+	}
+
+	// 5 apply calls (one per URL in kubeStateMetricsURLs) + 1 wait
+	// + 5 label patches (deployment + service + sa + cr + crb) = 11.
+	if len(sh.Calls) != 11 {
+		t.Fatalf("expected 11 ssh calls, got %d: %v", len(sh.Calls), sh.Calls)
+	}
+	// The wait call (call 5) must target the kube-state-metrics
+	// Deployment, not metrics-server.
+	wait := sh.Calls[5]
+	if !strings.Contains(wait, "wait --for=condition=Available") ||
+		!strings.Contains(wait, "deployment/kube-state-metrics") {
+		t.Errorf("call[5] not the kube-state-metrics wait: %q", wait)
+	}
+	// Deployment label is the mandatory one.
+	depLabel := sh.Calls[6]
+	if !strings.Contains(depLabel, "label deployment kube-state-metrics") ||
+		!strings.Contains(depLabel, kube.LabelOwner+"="+kube.OwnerAddons) {
+		t.Errorf("call[6] not the deployment label patch: %q", depLabel)
+	}
+}
+
+func TestApplyKubeStateMetrics_ApplyFails(t *testing.T) {
+	sh := &sshfake.Shell{
+		Matchers: []sshfake.Match{
+			{Contains: "apply -f", Resp: sshfake.Response{
+				Stdout: []byte("unable to fetch"),
+				Err:    errors.New("exit status 1"),
+			}},
+		},
+	}
+	lg, _ := newTestLogger(t)
+	err := observability.ApplyKubeStateMetrics(context.Background(), sh, lg)
+	if err == nil {
+		t.Fatal("expected error on apply failure")
+	}
+	if !strings.Contains(err.Error(), "apply kube-state-metrics") {
+		t.Errorf("error not wrapped: %v", err)
+	}
+}
+
 func TestApplyMetricsServer_AuxiliaryLabelFailure_IsWarn(t *testing.T) {
 	// Service / SA / apiservice labels are best-effort. Failure on one
 	// must not abort the install — Deployment label is what matters.

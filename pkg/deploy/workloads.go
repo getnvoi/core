@@ -61,13 +61,21 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
 	}
 
-	// Cluster-level addons (metrics-server today). Independent of the
-	// observability stack — every deploy gets them so `kubectl top`
-	// and any HPA wiring work cluster-wide regardless of whether the
-	// operator activates the full monitor: stack. Owner=addons; sweep
-	// scope independent of services / ingress / app-secrets / registry.
+	// Cluster-level addons. Independent of the observability stack —
+	// every deploy gets them so `kubectl top` and any HPA wiring work
+	// cluster-wide. Owner=addons; sweep scope independent of services
+	// / ingress / app-secrets / registry.
+	//
+	// metrics-server: powers `kubectl top` + HPA.
+	// kube-state-metrics: exposes kube_* metrics that the monitor:
+	//   stack's dashboards + alert rules reference. Installed
+	//   unconditionally (cheap, ~30Mi) so flipping into `monitor:`
+	//   works without an extra manual step.
 	if err := observability.ApplyMetricsServer(ctx, primaryShell, s.Lg); err != nil {
 		return fmt.Errorf("metrics-server: %w", err)
+	}
+	if err := observability.ApplyKubeStateMetrics(ctx, primaryShell, s.Lg); err != nil {
+		return fmt.Errorf("kube-state-metrics: %w", err)
 	}
 
 	// Ingress prerequisites: install cert-manager, apply ClusterIssuer
