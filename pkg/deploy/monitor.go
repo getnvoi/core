@@ -50,7 +50,10 @@ func Monitor(ctx context.Context, rt *runtime.Runtime, localPort int) error {
 			s.Lg.Info(fmt.Sprintf("open http://localhost:%d in your browser", localPort))
 			s.Lg.Info("press ctrl-c to disconnect")
 
-			return kc.PortForward(ctx, observability.Namespace, "grafana", localPort, 3000)
+			// Raw TCP forward via SSH (not SPDY-via-apiserver). kc
+			// resolves the pod IP through the kube tunnel; sh shuttles
+			// each browser connection through its own SSH channel.
+			return kc.PortForward(ctx, sh, observability.Namespace, "grafana", localPort, 3000)
 		})
 	})
 }

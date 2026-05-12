@@ -25,6 +25,12 @@ const DatasourceConfigMapName = "grafana-datasources"
 //
 // Default datasource = Prometheus. Operators querying without a
 // selector land on metrics first.
+// Loki datasource intentionally sets jsonData.manageAlerts=false.
+// Grafana's Alerting UI otherwise probes every datasource's ruler
+// endpoint; Loki's single-binary mode doesn't run a ruler we expose,
+// so the probe fails and surfaces as "Errors loading rules" in the
+// Alerting tab. All alerts in nvoi come from Prometheus via
+// provisioning — Loki is read-only for log queries.
 const datasourcesYAML = `apiVersion: 1
 datasources:
   - name: Prometheus
@@ -40,6 +46,8 @@ datasources:
     uid: loki
     access: proxy
     url: http://loki.nvoi-observability.svc.cluster.local:3100
+    jsonData:
+      manageAlerts: false
 `
 
 // BuildDatasourceConfigMap returns the typed ConfigMap. Caller

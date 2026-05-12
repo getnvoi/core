@@ -26,33 +26,34 @@ import (
 // To keep firstReadyPodFor testable without exporting it, this test
 // covers PortForward through its first-failure path (no Ready pod →
 // returns error mentioning the service).
-func TestPortForward_ResolutionFails_NoReadyPod(t *testing.T) {
+func TestPortForward_ResolutionFails_NoService(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	c := kube.NewForTest(cs)
+	// nil ssh is fine — error surfaces from kube resolution before
+	// the SSH dial is reached.
+	err := c.PortForward(context.Background(), nil, "obs", "grafana", 3000, 3000)
+	if err == nil {
+		t.Fatal("expected error (no Service exists)")
+	}
+}
+
+func TestPortForward_ResolutionFails_NoReadyPodWithIP(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		&corev1.Service{
 			ObjectMeta: metav1.ObjectMeta{Name: "grafana", Namespace: "obs"},
 			Spec:       corev1.ServiceSpec{Selector: map[string]string{"app": "grafana"}},
 		},
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "grafana-x", Namespace: "obs", Labels: map[string]string{"app": "grafana"}},
-			Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}},
+			ObjectMeta: metav1.ObjectMeta{Name: "grafana-not-ready", Namespace: "obs", Labels: map[string]string{"app": "grafana"}},
+			Status: corev1.PodStatus{
+				PodIP:      "10.42.0.7",
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}},
+			},
 		},
 	)
 	c := kube.NewForTest(cs)
-
-	// NewForTest gives no cfg → PortForward errors at the cfg check
-	// before reaching pod resolution. That's the more interesting
-	// guard: TestForTest paths fail fast with a clear message.
-	err := c.PortForward(context.Background(), "obs", "grafana", 3000, 3000)
+	err := c.PortForward(context.Background(), nil, "obs", "grafana", 3000, 3000)
 	if err == nil {
-		t.Fatal("expected error (NewForTest has no rest.Config)")
-	}
-}
-
-func TestPortForward_ResolutionFails_NoService(t *testing.T) {
-	cs := fake.NewSimpleClientset()
-	c := kube.NewForTest(cs)
-	err := c.PortForward(context.Background(), "obs", "grafana", 3000, 3000)
-	if err == nil {
-		t.Fatal("expected error (no Service exists)")
+		t.Fatal("expected error (pod not Ready)")
 	}
 }
