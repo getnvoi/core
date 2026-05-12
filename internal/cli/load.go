@@ -43,6 +43,10 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		return nil, err
 	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
+	monitor, err := ResolveMonitor(cfg, os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 
 	var backend *state.Backend
 	if cfg.Providers.Storage != "" {
@@ -77,5 +81,6 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		Secrets:       secrets,
 		RegistryCreds: registryCreds,
 		Providers:     providerInputs,
+		Monitor:       monitor,
 	})
 }
