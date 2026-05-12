@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
@@ -24,11 +25,19 @@ import (
 // Order matters:
 //  1. Node labels MUST land before workloads — pods scheduled with a
 //     nodeSelector on a not-yet-labeled node hang Pending.
-//  2. cert-manager + ClusterIssuer + Certificates MUST land before
-//     workload Ingresses — Ingresses reference TLS Secret names that
-//     cert-manager creates in response to the Certificate resources.
-//     (Ingress applies even before cert lands; Traefik just refuses
-//     TLS until the Secret exists. Cert is async; warn-and-continue.)
+//  2. Traefik mode only: cert-manager + ClusterIssuer + Certificates
+//     MUST land before workload Ingresses — Ingresses reference TLS
+//     Secret names that cert-manager creates in response to the
+//     Certificate resources. (Ingress applies even before cert lands;
+//     Traefik just refuses TLS until the Secret exists. Cert is
+//     async; warn-and-continue.)
+//  3. Tunnel mode only: cloudflared Deployment lands AFTER workload
+//     Services exist — its first reconnect immediately finds the
+//     upstream Service DNS resolvable.
+//
+// Mode flip reconcile: deploying with the OPPOSITE ingress mode of
+// the prior deploy sweeps the abandoned side's owned objects so the
+// cluster converges in one pass.
 //
 // Stamps s.kc on the session so verbs that need a kube client after
 // deploy can reuse it.
@@ -60,21 +69,47 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
 	}
 
-	// Ingress prerequisites: install cert-manager, apply ClusterIssuer
-	// + per-domain Certificates BEFORE workload.ApplyAll runs (which
-	// applies Ingress resources referencing the cert Secrets).
-	if len(rt.Cfg.Domains) > 0 {
+	mode := rt.Cfg.Providers.IngressMode()
+	tunnelMode := mode == config.IngressCloudflare
+
+	// Ingress prerequisites:
+	//   Traefik mode + domains → cert-manager + ClusterIssuer +
+	//     per-domain Certificate resources, before workload.ApplyAll
+	//     emits the matching Ingresses.
+	//   Tunnel mode → skipped. CF terminates TLS at the edge; no
+	//     cluster-side cert lifecycle.
+	if !tunnelMode && len(rt.Cfg.Domains) > 0 {
 		if err := s.applyCertInfrastructure(ctx, primaryShell); err != nil {
 			return err
 		}
 	}
-	_ = eps // reserved for future per-endpoint logic
-	_ = primaryShell
 
 	s.Lg.Step("workloads")
 	if err := workload.ApplyAll(ctx, rt, kc, s.Lg); err != nil {
 		return err
 	}
+
+	// Tunnel branch: in tunnel mode, stand up cloudflared AFTER
+	// workloads so its first reconnect finds upstream Services
+	// already present. In Traefik mode, sweep any cloudflared
+	// leftover from a prior tunnel-mode deploy (no-op when nothing
+	// matches).
+	if tunnelMode {
+		if eps == nil || !eps.HasTunnel() {
+			return fmt.Errorf("ingress: cloudflare but tofu tunnel output is empty (run plan + apply first)")
+		}
+		if err := kc.ApplyTunnel(ctx, s.Lg, kube.TunnelSpec{
+			Token:    eps.Tunnel.Token,
+			Replicas: 2,
+		}); err != nil {
+			return fmt.Errorf("apply tunnel: %w", err)
+		}
+	} else {
+		if err := kc.SweepTunnel(ctx, s.Lg); err != nil {
+			return fmt.Errorf("sweep abandoned tunnel: %w", err)
+		}
+	}
+
 	return nil
 }
 

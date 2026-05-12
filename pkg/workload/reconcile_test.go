@@ -289,3 +289,97 @@ func TestApplyAll_Idempotent(t *testing.T) {
 		t.Errorf("expected 1 Deployment after 3 applies, got %d", len(deps.Items))
 	}
 }
+
+// ── ingress-mode branching ───────────────────────────────────────────
+
+// TestApplyAll_TraefikMode_WithDomains_EmitsIngress is the baseline:
+// services with domains under Traefik mode produce a per-service
+// Ingress object owned by OwnerIngress.
+func TestApplyAll_TraefikMode_WithDomains_EmitsIngress(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"web": {Image: "nginx", Port: 80},
+	}, nil)
+	rt.Cfg.Providers.DNS = "cloudflare" // domains require providers.dns
+	rt.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+	ing, err := cs.NetworkingV1().Ingresses("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list ingresses: %v", err)
+	}
+	if len(ing.Items) != 1 || ing.Items[0].Name != "web" {
+		t.Errorf("Traefik mode + domains: expected 1 ingress 'web', got %v", ing.Items)
+	}
+}
+
+// TestApplyAll_TunnelMode_WithDomains_SkipsIngress: tunnel mode must
+// NOT emit any per-service Ingress, even when domains are declared.
+// Routing is owned by the cloudflared tunnel config (tofu-side, PR 3).
+func TestApplyAll_TunnelMode_WithDomains_SkipsIngress(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"web": {Image: "nginx", Port: 80},
+	}, nil)
+	rt.Cfg.Providers.DNS = "cloudflare"
+	rt.Cfg.Providers.Ingress = config.IngressCloudflare
+	rt.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
+
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll: %v", err)
+	}
+	ing, err := cs.NetworkingV1().Ingresses("default").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list ingresses: %v", err)
+	}
+	if len(ing.Items) != 0 {
+		t.Errorf("tunnel mode: expected NO ingress objects, got %v", ing.Items)
+	}
+	// Deployment + Service still emit — only Ingress is skipped.
+	if _, err := cs.AppsV1().Deployments("default").Get(context.Background(), "web", metav1.GetOptions{}); err != nil {
+		t.Errorf("Deployment web should exist in tunnel mode: %v", err)
+	}
+	if _, err := cs.CoreV1().Services("default").Get(context.Background(), "web", metav1.GetOptions{}); err != nil {
+		t.Errorf("Service web should exist in tunnel mode: %v", err)
+	}
+}
+
+// TestApplyAll_FlipTraefikToTunnel_SweepsLeftoverIngress: flipping a
+// cluster's ingress mode from Traefik to tunnel reaps the abandoned
+// Ingress objects in one deploy pass.
+func TestApplyAll_FlipTraefikToTunnel_SweepsLeftoverIngress(t *testing.T) {
+	// Seed cluster with an Ingress from a previous Traefik-mode deploy.
+	cs := fake.NewSimpleClientset()
+	kc := kube.NewForTest(cs)
+
+	rt := makeRuntime(map[string]config.ServiceSpec{
+		"web": {Image: "nginx", Port: 80},
+	}, nil)
+	rt.Cfg.Providers.DNS = "cloudflare"
+	rt.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
+
+	// First deploy under Traefik mode → Ingress created.
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll (traefik): %v", err)
+	}
+	if got, _ := cs.NetworkingV1().Ingresses("default").List(context.Background(), metav1.ListOptions{}); len(got.Items) != 1 {
+		t.Fatalf("setup: expected 1 ingress after Traefik-mode apply, got %d", len(got.Items))
+	}
+
+	// Flip to tunnel mode and re-apply. SweepOwned must reap the
+	// abandoned Ingress.
+	rt.Cfg.Providers.Ingress = config.IngressCloudflare
+	if err := workload.ApplyAll(context.Background(), rt, kc, silentLog()); err != nil {
+		t.Fatalf("ApplyAll (tunnel): %v", err)
+	}
+	got, _ := cs.NetworkingV1().Ingresses("default").List(context.Background(), metav1.ListOptions{})
+	if len(got.Items) != 0 {
+		t.Errorf("flip Traefik → tunnel: expected ingress sweep, got %v", got.Items)
+	}
+}

@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 
+	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 )
@@ -29,17 +30,23 @@ func Destroy(ctx context.Context, rt *runtime.Runtime) error {
 			return nil
 		}
 
-		// Pre-destroy: drain cert-manager. Deleting Certificate
-		// resources triggers cert-manager's Challenge finalizers,
-		// which call the DNS-01 solver's Cleanup() and remove the
-		// scratch `_acme-challenge.<domain>` TXT records via the
-		// provider's API. Without this, those records orphan in
-		// the operator's zone — tofu can't clean them up because
-		// they were never in tfstate.
+		// Pre-destroy: drain cert-manager — Traefik mode only.
+		// Deleting Certificate resources triggers cert-manager's
+		// Challenge finalizers, which call the DNS-01 solver's
+		// Cleanup() and remove the scratch `_acme-challenge.<domain>`
+		// TXT records via the provider's API. Without this, those
+		// records orphan in the operator's zone — tofu can't clean
+		// them up because they were never in tfstate.
+		//
+		// Tunnel mode has no cert-manager / Certificates in-cluster;
+		// the tunnel + CNAMEs are tofu-managed and reaped by the
+		// normal tf-destroy.
 		//
 		// Best-effort: drain failures warn but don't block destroy.
-		if err := s.drainCertificates(ctx); err != nil {
-			return err
+		if rt.Cfg.Providers.IngressMode() == config.IngressTraefik {
+			if err := s.drainCertificates(ctx); err != nil {
+				return err
+			}
 		}
 
 		s.Lg.Step("tf-destroy")
