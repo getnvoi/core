@@ -128,9 +128,16 @@ allow_embedding = false
 // optional: true on every projected source lets the Deployment stay
 // static — Grafana boots fine when alerts ConfigMaps don't exist (no
 // monitor.alerts configured).
-func buildGrafanaDeployment() *appsv1.Deployment {
+//
+// SMTP env wiring: when rt.Monitor.Alerts.Email is configured, the
+// container gets GF_SMTP_* env vars sourced from the per-provider
+// creds Secret. Grafana's "email" contact-point handler requires
+// SMTP configured at the server level — without these env vars, the
+// contact-point exists but no mail ever sends.
+func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 	replicas := int32(1)
 	optional := true
+	env := buildGrafanaEnv(rt)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      grafanaComponent,
@@ -147,18 +154,7 @@ func buildGrafanaDeployment() *appsv1.Deployment {
 						{
 							Name:  "grafana",
 							Image: GrafanaImage,
-							Env: []corev1.EnvVar{
-								{
-									Name: "GF_SECURITY_ADMIN_PASSWORD",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: grafanaAdminSecretName},
-											Key:                  "admin-password",
-										},
-									},
-								},
-								{Name: "GF_PATHS_PROVISIONING", Value: "/etc/grafana/provisioning"},
-							},
+							Env:   env,
 							Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 3000}},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "config", MountPath: "/etc/grafana/grafana.ini", SubPath: "grafana.ini"},
@@ -245,6 +241,66 @@ const (
 	grafanaContactPointsName = "grafana-contact-points"
 	grafanaPolicyName        = "grafana-notification-policy"
 )
+
+// buildGrafanaEnv composes the Grafana container's env-var list.
+// Admin password is always present (sourced from grafana-admin Secret).
+// SMTP env vars conditional on monitor.alerts.email being a Postmark
+// receiver — they wire Grafana's [smtp] section to Postmark's SMTP
+// endpoint using the per-provider Secret materialized in 6a.
+//
+// Future email providers (sendgrid, ses, generic SMTP) extend the
+// switch here. Hardcoded vendor mapping is fine for v1 — when the
+// second provider lands, lift this into a per-EmailProvider method
+// returning []corev1.EnvVar.
+func buildGrafanaEnv(rt *runtime.Runtime) []corev1.EnvVar {
+	env := []corev1.EnvVar{
+		{
+			Name: "GF_SECURITY_ADMIN_PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: grafanaAdminSecretName},
+					Key:                  "admin-password",
+				},
+			},
+		},
+		{Name: "GF_PATHS_PROVISIONING", Value: "/etc/grafana/provisioning"},
+	}
+
+	if rt == nil || rt.Monitor == nil || rt.Monitor.Alerts == nil || rt.Monitor.Alerts.Email == nil {
+		return env
+	}
+	email := rt.Monitor.Alerts.Email
+	switch email.Provider {
+	case "postmark":
+		from, _ := email.Fields["from"].(string)
+		env = append(env,
+			corev1.EnvVar{Name: "GF_SMTP_ENABLED", Value: "true"},
+			corev1.EnvVar{Name: "GF_SMTP_HOST", Value: "smtp.postmarkapp.com:587"},
+			corev1.EnvVar{
+				Name: "GF_SMTP_USER",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "postmark-creds"},
+						Key:                  "token",
+					},
+				},
+			},
+			corev1.EnvVar{
+				Name: "GF_SMTP_PASSWORD",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "postmark-creds"},
+						Key:                  "token",
+					},
+				},
+			},
+			corev1.EnvVar{Name: "GF_SMTP_FROM_ADDRESS", Value: from},
+			corev1.EnvVar{Name: "GF_SMTP_FROM_NAME", Value: "nvoi"},
+			corev1.EnvVar{Name: "GF_SMTP_SKIP_VERIFY", Value: "false"},
+		)
+	}
+	return env
+}
 
 // buildGrafanaService returns the ClusterIP Service exposing :3000
 // (Grafana's HTTP port). `nvoi monitor` port-forwards through this

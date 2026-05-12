@@ -101,7 +101,7 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	promtailDS := buildPromtailDaemonSet()
 	thanosQuerier, thanosQuerierSvc := buildThanosQuerier()
 	thanosStore, thanosStoreSvc := buildThanosStore()
-	grafanaDep := buildGrafanaDeployment()
+	grafanaDep := buildGrafanaDeployment(rt)
 	objects = append(objects, promSS, lokiSS, promtailDS, thanosQuerier, thanosStore, grafanaDep)
 	manifest.StatefulSets = []string{promSS.Name, lokiSS.Name}
 	manifest.DaemonSets = []string{promtailDS.Name}

@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/getnvoi/core/pkg/config"
+	"github.com/getnvoi/core/pkg/providers"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -64,7 +65,7 @@ func TestBuildGrafanaConfigMap_DisabledAnonymousInPublicMode(t *testing.T) {
 }
 
 func TestBuildGrafanaDeployment_ContainersAndMounts(t *testing.T) {
-	dep := buildGrafanaDeployment()
+	dep := buildGrafanaDeployment(fixtureRuntime(nil))
 	if len(dep.Spec.Template.Spec.Containers) != 2 {
 		t.Fatalf("want 2 containers (grafana + sidecar), got %d", len(dep.Spec.Template.Spec.Containers))
 	}
@@ -103,6 +104,54 @@ func TestBuildGrafanaDeployment_ContainersAndMounts(t *testing.T) {
 	}
 	if !hasMount(sidecar.VolumeMounts, "dashboards", "/etc/grafana/provisioning/dashboards") {
 		t.Errorf("sidecar missing dashboards mount: %v", sidecar.VolumeMounts)
+	}
+}
+
+func TestBuildGrafanaEnv_NoEmail_NoSMTP(t *testing.T) {
+	env := buildGrafanaEnv(fixtureRuntime(nil))
+	for _, e := range env {
+		if strings.HasPrefix(e.Name, "GF_SMTP_") {
+			t.Errorf("no email configured → no GF_SMTP_* vars; got %q", e.Name)
+		}
+	}
+}
+
+func TestBuildGrafanaEnv_PostmarkEnablesSMTP(t *testing.T) {
+	rt := fixtureRuntime(&runtime.ResolvedMonitor{
+		Alerts: &runtime.ResolvedAlerts{
+			Email: &providers.AlertSpec{
+				Provider: "postmark",
+				Fields:   map[string]interface{}{"from": "alerts@nvoi.to"},
+			},
+		},
+	})
+	env := buildGrafanaEnv(rt)
+	got := map[string]corev1.EnvVar{}
+	for _, e := range env {
+		got[e.Name] = e
+	}
+	if got["GF_SMTP_ENABLED"].Value != "true" {
+		t.Errorf("SMTP not enabled: %+v", got["GF_SMTP_ENABLED"])
+	}
+	if got["GF_SMTP_HOST"].Value != "smtp.postmarkapp.com:587" {
+		t.Errorf("SMTP host wrong: %q", got["GF_SMTP_HOST"].Value)
+	}
+	if got["GF_SMTP_FROM_ADDRESS"].Value != "alerts@nvoi.to" {
+		t.Errorf("FROM address wrong: %q", got["GF_SMTP_FROM_ADDRESS"].Value)
+	}
+	// Both USER and PASSWORD source from postmark-creds.token.
+	for _, name := range []string{"GF_SMTP_USER", "GF_SMTP_PASSWORD"} {
+		e := got[name]
+		if e.ValueFrom == nil || e.ValueFrom.SecretKeyRef == nil {
+			t.Errorf("%s should be SecretKeyRef, got Value=%q", name, e.Value)
+			continue
+		}
+		if e.ValueFrom.SecretKeyRef.Name != "postmark-creds" {
+			t.Errorf("%s wrong Secret: %q", name, e.ValueFrom.SecretKeyRef.Name)
+		}
+		if e.ValueFrom.SecretKeyRef.Key != "token" {
+			t.Errorf("%s wrong key: %q", name, e.ValueFrom.SecretKeyRef.Key)
+		}
 	}
 }
 
