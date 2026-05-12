@@ -47,6 +47,11 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	if err != nil {
 		return nil, err
 	}
+	// Advisory warnings — non-fatal but operator-visible. Emit via
+	// the boundary's log sink; internal packages must not warn.
+	for _, w := range cfg.Warnings() {
+		lg.Warn(w)
+	}
 
 	var backend *state.Backend
 	if cfg.Providers.Storage != "" {
