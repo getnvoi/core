@@ -75,12 +75,13 @@ func (c *Client) ApplyTunnel(ctx context.Context, lg log.Log, spec TunnelSpec) e
 		spec.Replicas = 2
 	}
 
+	scope := Scope{Namespace: TunnelNamespace, Owner: OwnerTunnel}
+
 	lg.Step("tunnel-namespace")
-	if err := c.ensureNamespace(ctx, TunnelNamespace); err != nil {
+	nsObj := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TunnelNamespace}}
+	if err := c.ApplyOwned(ctx, Scope{Owner: OwnerTunnel}, nsObj); err != nil {
 		return fmt.Errorf("ensure namespace %s: %w", TunnelNamespace, err)
 	}
-
-	scope := Scope{Namespace: TunnelNamespace, Owner: OwnerTunnel}
 
 	lg.Step("tunnel-secret")
 	if err := c.ApplyOwned(ctx, scope, buildTunnelSecret(spec.Token)); err != nil {

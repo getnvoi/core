@@ -121,14 +121,26 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 			return err
 		}
 
-		// ── workloads + ingress: kube tunnel via primary's shell ──
-		// Skipped only when there's nothing for the in-cluster
-		// pipeline to do — no services, no secrets to publish, no
-		// registry to set up, no domains to front.
-		if !s.workloadsHaveContent() {
+		// ── workloads phase: ALWAYS runs when cluster phase has any
+		// reason to engage (services, registry, secrets, domains, OR
+		// monitor). The phase installs cluster-level addons
+		// (metrics-server, kube-state-metrics) + node labels
+		// regardless of whether there are app workloads — observability
+		// needs those addons even on a service-less cluster.
+		//
+		// Short-circuit ONLY when there's literally nothing to do.
+		needCluster := s.workloadsHaveContent() || s.Rt.Cfg.Monitor != nil
+		if !needCluster {
 			return nil
 		}
-		return s.deployWorkloads(ctx)
+		if err := s.deployWorkloads(ctx); err != nil {
+			return err
+		}
+
+		// ── observability: monitor: stack (gated). Runs unconditionally
+		// when monitor: was previously set, so flipping it to nil sweeps
+		// the prior stack on the next deploy.
+		return s.deployObservability(ctx)
 	})
 }
 

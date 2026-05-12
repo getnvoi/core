@@ -112,6 +112,63 @@ func (c *Config) Validate() error {
 	if err := validateDomains(c); err != nil {
 		return err
 	}
+	if err := validateMonitor(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateMonitor enforces the monitor: block invariants. Pure — no
+// env, no disk. Provider registration checks rely on the same
+// blank-import discipline as validateDomains (every notify provider
+// linked into the binary registers itself in init()).
+//
+// Rules:
+//   - monitor: requires providers.storage (Thanos blocks + Loki
+//     chunks both need object storage; no PVC fallback in this design).
+//   - monitor.domain requires providers.dns (the Ingress reuses
+//     cert-manager + the existing DNS provider for issuance, same
+//     rule as the top-level `domains:`).
+//   - monitor.domain requires monitor.admin_password (public exposure
+//     must have real auth — tunnel-only mode uses anonymous viewer).
+//   - monitor.alerts.email.provider must be a registered EmailProvider.
+//   - monitor.alerts.sms.provider must be a registered SMSProvider.
+func validateMonitor(c *Config) error {
+	if c.Monitor == nil {
+		return nil
+	}
+	if c.Providers.Storage == "" {
+		return fmt.Errorf("monitor: requires providers.storage (Thanos + Loki are bucket-backed)")
+	}
+	if c.Monitor.Domain != "" {
+		if c.Providers.DNS == "" {
+			return fmt.Errorf("monitor.domain: requires providers.dns")
+		}
+		if !isValidHostname(c.Monitor.Domain) {
+			return fmt.Errorf("monitor.domain: %q is not a valid DNS hostname", c.Monitor.Domain)
+		}
+		if c.Monitor.AdminPassword == "" {
+			return fmt.Errorf("monitor.admin_password: required when monitor.domain is set (public Grafana must have real auth)")
+		}
+	}
+	if c.Monitor.Alerts != nil {
+		if e := c.Monitor.Alerts.Email; e != nil {
+			if e.Provider == "" {
+				return fmt.Errorf("monitor.alerts.email.provider: required")
+			}
+			if !providers.IsRegisteredEmail(e.Provider) {
+				return fmt.Errorf("monitor.alerts.email.provider: unknown provider %q", e.Provider)
+			}
+		}
+		if s := c.Monitor.Alerts.SMS; s != nil {
+			if s.Provider == "" {
+				return fmt.Errorf("monitor.alerts.sms.provider: required")
+			}
+			if !providers.IsRegisteredSMS(s.Provider) {
+				return fmt.Errorf("monitor.alerts.sms.provider: unknown provider %q", s.Provider)
+			}
+		}
+	}
 	return nil
 }
 

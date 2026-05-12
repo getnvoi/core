@@ -40,6 +40,7 @@ const (
 	KindInfra   Kind = "infra"
 	KindBuild   Kind = "build"
 	KindCluster Kind = "cluster"
+	KindMonitor Kind = "monitor" // observability phase: buckets, stack, dashboards, alerts, provisioning
 )
 
 // level is the event's severity / marker — closed enum shared by

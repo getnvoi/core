@@ -7,6 +7,7 @@ import (
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/observability"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/ssh"
@@ -49,16 +50,19 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		return fmt.Errorf("primary master %s has no open shell", primaryName)
 	}
 
-	s.Lg.Step("kube-tunnel")
-	kc, err := kube.New(ctx, primaryShell)
-	if err != nil {
-		return fmt.Errorf("build kube client: %w", err)
+	// kube client opens ONCE per Run and stays alive across
+	// deployWorkloads + deployObservability (caller closes via the
+	// deferred kube cleanup in Run). Idempotent open — if a previous
+	// phase already built kc, reuse it.
+	if s.kc == nil {
+		s.Lg.Step("kube-tunnel")
+		kc, err := kube.New(ctx, primaryShell)
+		if err != nil {
+			return fmt.Errorf("build kube client: %w", err)
+		}
+		s.kc = kc
 	}
-	s.kc = kc
-	defer func() {
-		_ = kc.Close()
-		s.kc = nil
-	}()
+	kc := s.kc
 
 	s.Lg.Step("node-labels")
 	for _, key := range utils.SortedKeys(rt.Cfg.Servers) {
@@ -67,6 +71,23 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 			return fmt.Errorf("label node %s: %w", key, err)
 		}
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
+	}
+
+	// Cluster-level addons. Independent of the observability stack —
+	// every deploy gets them so `kubectl top` and any HPA wiring work
+	// cluster-wide. Owner=addons; sweep scope independent of services
+	// / ingress / app-secrets / registry.
+	//
+	// metrics-server: powers `kubectl top` + HPA.
+	// kube-state-metrics: exposes kube_* metrics that the monitor:
+	//   stack's dashboards + alert rules reference. Installed
+	//   unconditionally (cheap, ~30Mi) so flipping into `monitor:`
+	//   works without an extra manual step.
+	if err := observability.ApplyMetricsServer(ctx, primaryShell, s.Lg); err != nil {
+		return fmt.Errorf("metrics-server: %w", err)
+	}
+	if err := observability.ApplyKubeStateMetrics(ctx, primaryShell, s.Lg); err != nil {
+		return fmt.Errorf("kube-state-metrics: %w", err)
 	}
 
 	mode := rt.Cfg.Providers.IngressMode()

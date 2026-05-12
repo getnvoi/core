@@ -20,6 +20,7 @@ import (
 
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/log"
+	"github.com/getnvoi/core/pkg/providers"
 	"github.com/getnvoi/core/pkg/state"
 )
 
@@ -94,6 +95,13 @@ type Inputs struct {
 	// Providers carries any provider-specific values that would
 	// otherwise come from ambient process state.
 	Providers ProviderInputs
+
+	// Monitor holds the env-resolved monitor block, or nil when YAML
+	// didn't set `monitor:`. $VAR references in AdminPassword, Slack
+	// URL, and per-AlertSpec Fields are resolved against os.Getenv at
+	// the cmd/cli boundary BEFORE landing here. Internal packages
+	// consume the resolved view; they never see $VAR strings.
+	Monitor *ResolvedMonitor
 }
 
 // Runtime is the bag every internal package accepts when it needs more
@@ -111,6 +119,53 @@ type Runtime struct {
 	SecretValues  map[string]string
 	RegistryCreds map[string]config.RegistryDef
 	Providers     ProviderInputs
+
+	// Monitor is the env-resolved observability config, mirroring
+	// cfg.Monitor with $VAR refs substituted. nil when YAML did not
+	// set `monitor:`. Consumers in pkg/internal/observability and
+	// pkg/deploy read this; nobody mutates it.
+	Monitor *ResolvedMonitor
+}
+
+// ResolvedMonitor mirrors config.MonitorSpec with $VAR refs in
+// AdminPassword + Alerts.Slack + Alerts.Email.Fields + Alerts.SMS.Fields
+// substituted to concrete values. Domain is copied as-is (never a
+// $VAR reference — hostnames are literal).
+type ResolvedMonitor struct {
+	Domain        string
+	AdminPassword string
+	Alerts        *ResolvedAlerts
+
+	// Dashboards holds the operator's resolved Grafana dashboard
+	// files — one entry per file expanded from cfg.Monitor.Dashboards
+	// globs at the cmd/cli boundary. Content is the raw JSON; Name
+	// is the filename basename (used as the ConfigMap data key,
+	// e.g. "nvoi.json").
+	Dashboards []NamedFile
+
+	// AlertRules holds the operator's resolved Grafana alert-rule
+	// provisioning YAML files. Same shape as Dashboards.
+	AlertRules []NamedFile
+}
+
+// NamedFile pairs a basename with its content. Used for operator-
+// supplied dashboard JSON + alert YAML files threaded from the
+// cmd/cli boundary through to the observability stack.
+type NamedFile struct {
+	Name    string
+	Content []byte
+}
+
+// ResolvedAlerts mirrors config.AlertsSpec with all $VAR refs
+// resolved. Slack is the resolved webhook URL. Email/SMS reuse the
+// providers.AlertSpec shape (provider name + Fields map) — the
+// "resolved" property is a runtime invariant: Fields values have
+// been walked and substituted before reaching here. Providers'
+// BuildReceiver assume resolved values; never see $VAR strings.
+type ResolvedAlerts struct {
+	Slack string
+	Email *providers.AlertSpec
+	SMS   *providers.AlertSpec
 }
 
 // Build is pure assembly. ctx is accepted for future callers
@@ -131,5 +186,6 @@ func Build(ctx context.Context, in Inputs) (*Runtime, error) {
 		SecretValues:  in.Secrets,
 		RegistryCreds: in.RegistryCreds,
 		Providers:     in.Providers,
+		Monitor:       in.Monitor,
 	}, nil
 }
