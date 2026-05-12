@@ -47,6 +47,7 @@ func newRoot(r *rt) *cobra.Command {
 		kubectlCmd(r),
 		execCmd(r),
 		logsCmd(r),
+		monitorCmd(r),
 	)
 	return root
 }
