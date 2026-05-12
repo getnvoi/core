@@ -173,6 +173,25 @@ func (c *Client) applyIngress(ctx context.Context, ns string, ing *networkingv1.
 	})
 }
 
+// ensureNamespace creates ns if absent; no-op if present. Used by
+// system-workload appliers — cert-manager applies its own namespace
+// via the upstream manifest, but in-Go appliers (cloudflared, future
+// observability stack) materialize their namespace explicitly.
+func (c *Client) ensureNamespace(ctx context.Context, ns string) error {
+	if _, err := c.CS.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{}); err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+	_, err := c.CS.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: ns},
+	}, metav1.CreateOptions{FieldManager: FieldManager})
+	if apierrors.IsAlreadyExists(err) {
+		return nil
+	}
+	return err
+}
+
 // WaitDeploymentReady polls until ReadyReplicas == Spec.Replicas or
 // ctx expires. 5-minute timeout suits image pulls on slow networks;
 // tighter masks real failures, looser makes feedback slow.
