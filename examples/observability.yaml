@@ -11,6 +11,14 @@ servers:
   master: { type: cax21, region: nbg1, role: master }
   worker: { type: cax21, region: nbg1, role: worker }
 
+# A token app workload so the per-service dashboards (overview /
+# services / deploys) have something real to graph. Replace with
+# your own services in copies of this example.
+services:
+  whoami:
+    image: traefik/whoami
+    port: 80
+
 # Observability stack — Prometheus + Thanos + Loki + Grafana, all
 # bucket-backed via providers.storage. Presence of `monitor:` is the
 # toggle (same convention as `domains:` / `build:` / `storage:`).
