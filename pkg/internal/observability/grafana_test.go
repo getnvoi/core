@@ -24,7 +24,7 @@ func fixtureRuntime(mon *runtime.ResolvedMonitor) *runtime.Runtime {
 func TestBuildGrafanaAdminSecret_TunnelMode(t *testing.T) {
 	rt := fixtureRuntime(nil) // no monitor block — tunnel-only sentinel
 	s := buildGrafanaAdminSecret(rt)
-	if s.StringData["admin-password"] != grafanaAnonPassword {
+	if s.StringData["admin-password"] != tunnelAdminPassword {
 		t.Errorf("tunnel-mode admin should fall back to sentinel, got %q", s.StringData["admin-password"])
 	}
 }
@@ -40,19 +40,23 @@ func TestBuildGrafanaAdminSecret_PublicMode(t *testing.T) {
 	}
 }
 
-func TestBuildGrafanaConfigMap_AnonymousInTunnelMode(t *testing.T) {
+func TestBuildGrafanaConfigMap_AnonymousAlwaysDisabled(t *testing.T) {
+	// Tunnel mode (no domain) — anonymous still disabled because
+	// anonymous Viewer can't write user preferences (favorites /
+	// stars), surfacing as "Unauthorized" the moment the operator
+	// tries to star anything. Force sign-in.
 	rt := fixtureRuntime(nil)
 	cm := buildGrafanaConfigMap(rt)
 	ini := cm.Data["grafana.ini"]
-	if !strings.Contains(ini, "[auth.anonymous]") || !strings.Contains(ini, "enabled = true") {
-		t.Errorf("tunnel mode should enable anonymous viewer:\n%s", ini)
+	if !strings.Contains(ini, "[auth.anonymous]") || !strings.Contains(ini, "enabled = false") {
+		t.Errorf("tunnel mode should disable anonymous (force sign-in):\n%s", ini)
 	}
-	if !strings.Contains(ini, "org_role = Viewer") {
-		t.Errorf("tunnel mode anonymous should be Viewer role:\n%s", ini)
+	if !strings.Contains(ini, "root_url = http://localhost:3000/") {
+		t.Errorf("tunnel mode should set root_url to localhost:\n%s", ini)
 	}
 }
 
-func TestBuildGrafanaConfigMap_DisabledAnonymousInPublicMode(t *testing.T) {
+func TestBuildGrafanaConfigMap_PublicMode(t *testing.T) {
 	rt := fixtureRuntime(&runtime.ResolvedMonitor{Domain: "grafana.nvoi.to"})
 	cm := buildGrafanaConfigMap(rt)
 	ini := cm.Data["grafana.ini"]

@@ -48,6 +48,7 @@ func Monitor(ctx context.Context, rt *runtime.Runtime, localPort int) error {
 			s.Lg.Info(fmt.Sprintf("forwarding http://localhost:%d → grafana.%s.svc:3000",
 				localPort, observability.Namespace))
 			s.Lg.Info(fmt.Sprintf("open http://localhost:%d in your browser", localPort))
+			s.Lg.Info(fmt.Sprintf("sign in as: admin / %s", observability.AdminPassword(rt)))
 			s.Lg.Info("press ctrl-c to disconnect")
 
 			// Raw TCP forward via SSH (not SPDY-via-apiserver). kc
@@ -57,3 +58,4 @@ func Monitor(ctx context.Context, rt *runtime.Runtime, localPort int) error {
 		})
 	})
 }
+

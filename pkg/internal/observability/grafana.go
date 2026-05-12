@@ -35,12 +35,28 @@ const (
 	grafanaIngressClass    = "traefik" // matches workload.ingressClassName
 )
 
-// grafanaAnonPassword is the throwaway admin password used in
+// tunnelAdminPassword is the throwaway admin password used in
 // tunnel-only mode (when no operator-supplied admin_password). The
-// SSH tunnel itself is the access control; admin login is disabled
-// for the tunnel-mode operator. A non-empty value still satisfies
-// Grafana's startup contract.
-const grafanaAnonPassword = "nvoi-tunnel-only" //nolint:gosec // not a real secret in this mode
+// SSH tunnel itself is the access control; the password is shown to
+// the operator on `nvoi monitor` start so they can sign in for
+// personal features (favorites, stars). Not a real secret —
+// reachable only via SSH-tunneled localhost.
+const tunnelAdminPassword = "nvoi-tunnel-only" //nolint:gosec // not a real secret in this mode
+
+// AdminPassword returns the Grafana admin password for this runtime.
+// Operator-supplied (monitor.admin_password) wins; tunnel-mode
+// falls back to the sentinel.
+//
+// Single source of truth: buildGrafanaAdminSecret and
+// pkg/deploy.Monitor both call this. Without it the literal
+// "nvoi-tunnel-only" was duplicated across packages — change the
+// sentinel, change two call sites silently. Now: one.
+func AdminPassword(rt *runtime.Runtime) string {
+	if rt != nil && rt.Monitor != nil && rt.Monitor.AdminPassword != "" {
+		return rt.Monitor.AdminPassword
+	}
+	return tunnelAdminPassword
+}
 
 // buildGrafanaAdminSecret renders the admin-password Secret. In
 // tunnel-only mode (rt.Monitor.AdminPassword == "") we still emit
@@ -48,10 +64,6 @@ const grafanaAnonPassword = "nvoi-tunnel-only" //nolint:gosec // not a real secr
 // reference always resolves — no conditional env wiring on the
 // Deployment side.
 func buildGrafanaAdminSecret(rt *runtime.Runtime) *corev1.Secret {
-	pwd := grafanaAnonPassword
-	if rt.Monitor != nil && rt.Monitor.AdminPassword != "" {
-		pwd = rt.Monitor.AdminPassword
-	}
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      grafanaAdminSecretName,
@@ -59,26 +71,40 @@ func buildGrafanaAdminSecret(rt *runtime.Runtime) *corev1.Secret {
 			Labels:    objectLabels(grafanaComponent),
 		},
 		Type:       corev1.SecretTypeOpaque,
-		StringData: map[string]string{"admin-password": pwd},
+		StringData: map[string]string{"admin-password": AdminPassword(rt)},
 	}
 }
 
-// buildGrafanaConfigMap renders grafana.ini. Differs by access mode:
-//   - tunnel-only (domain == ""): anonymous viewer enabled.
-//   - public (domain set):        anonymous disabled; admin login
-//                                  required; server.root_url set so
-//                                  Grafana emits correct callback
-//                                  URLs.
+// buildGrafanaConfigMap renders grafana.ini. Anonymous is ALWAYS
+// disabled — Grafana's anonymous mode is read-only at the user
+// level (favorites / stars / preferences are user-bound and refuse
+// to write with no user identity, surfacing as "Unauthorized" the
+// instant the operator tries to star anything). Better UX: force
+// admin sign-in with the per-deploy password, log it on
+// `nvoi monitor` start.
+//
+// Two access modes:
+//   - tunnel-only (domain == ""): root_url=localhost; reached via
+//     `nvoi monitor`. SSH tunnel is the access control.
+//   - public (domain set):       root_url=https://<domain>/; reached
+//     directly via Ingress + cert-manager TLS.
+//
+// Admin password comes from the Grafana admin Secret regardless of
+// mode (sentinel in tunnel-only; operator-supplied via $VAR when
+// domain is set).
 func buildGrafanaConfigMap(rt *runtime.Runtime) *corev1.ConfigMap {
 	domain := ""
 	if rt.Monitor != nil {
 		domain = rt.Monitor.Domain
 	}
 
-	var ini string
+	rootURL := "http://localhost:3000/"
 	if domain != "" {
-		ini = `[server]
-root_url = https://` + domain + `/
+		rootURL = "https://" + domain + "/"
+	}
+
+	ini := `[server]
+root_url = ` + rootURL + `
 serve_from_sub_path = false
 
 [auth.anonymous]
@@ -87,18 +113,6 @@ enabled = false
 [security]
 allow_embedding = false
 `
-	} else {
-		ini = `[server]
-root_url = http://localhost:3000/
-
-[auth.anonymous]
-enabled = true
-org_role = Viewer
-
-[security]
-allow_embedding = false
-`
-	}
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      grafanaConfigName,
