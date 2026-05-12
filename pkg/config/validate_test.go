@@ -356,6 +356,57 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "not a valid DNS hostname",
 		},
+		// ingress mode
+		{
+			name: "ingress unset defaults to traefik",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to"}}
+			},
+		},
+		{
+			name: "ingress traefik explicit",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Providers.Ingress = IngressTraefik
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to"}}
+			},
+		},
+		{
+			name: "ingress cloudflare happy path",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Providers.Ingress = IngressCloudflare
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to"}}
+			},
+		},
+		{
+			name:    "ingress unknown mode rejected",
+			mutate:  func(c *Config) { c.Providers.Ingress = "ngrok" },
+			wantErr: "unknown mode",
+		},
+		{
+			name: "ingress cloudflare requires non-empty domains",
+			mutate: func(c *Config) {
+				c.Providers.DNS = "cloudflare"
+				c.Providers.Ingress = IngressCloudflare
+			},
+			wantErr: "requires non-empty domains:",
+		},
+		{
+			name: "ingress cloudflare requires cloudflare DNS",
+			mutate: func(c *Config) {
+				c.Providers.DNS = ""
+				c.Providers.Ingress = IngressCloudflare
+				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
+				c.Domains = Domains{"web": {"www.nvoi.to"}}
+			},
+			wantErr: "requires providers.dns: cloudflare",
+		},
+
 		// aliases
 		{
 			name: "valid alias",
@@ -418,6 +469,26 @@ func TestValidate(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestIngressMode(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "empty defaults to traefik", in: "", want: IngressTraefik},
+		{name: "traefik passthrough", in: IngressTraefik, want: IngressTraefik},
+		{name: "cloudflare passthrough", in: IngressCloudflare, want: IngressCloudflare},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (Providers{Ingress: tc.in}).IngressMode()
+			if got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})
 	}

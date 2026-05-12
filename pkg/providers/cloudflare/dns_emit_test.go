@@ -127,6 +127,121 @@ func TestEmitDNS_NoDomains_StillRendersProviderBlock(t *testing.T) {
 	}
 }
 
+// ── tunnel mode (providers.ingress: cloudflare) ──────────────────────
+
+func tunnelCfg() *config.Config {
+	c := baseCfg()
+	c.Providers.Ingress = config.IngressCloudflare
+	c.Services = map[string]config.ServiceSpec{
+		"app": {Image: "ghcr.io/me/app:latest", Port: 8080},
+		"api": {Image: "ghcr.io/me/api:latest", Port: 3000},
+	}
+	c.Domains = map[string][]string{
+		"app": {"app.nvoi.to", "www.nvoi.to"},
+		"api": {"api.nvoi.to"},
+	}
+	return c
+}
+
+func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
+	cfg := tunnelCfg()
+	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{
+				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmitDNS: %v", err)
+	}
+	hcl := string(out)
+
+	for _, want := range []string{
+		// Provider + locals
+		`provider "cloudflare" {}`,
+		`cloudflare_account_id = "acc456"`,
+		`cloudflare_zone_id    = "zone123"`,
+		// Tunnel resources (named after app+env from baseCfg = "hello-dev")
+		`tunnel_name           = "nvoi-hello-dev"`,
+		`resource "random_id" "tunnel_secret"`,
+		`resource "cloudflare_zero_trust_tunnel_cloudflared" "main"`,
+		`tunnel_secret = random_id.tunnel_secret.b64_std`,
+		`resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main"`,
+		`tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id`,
+		// Ingress rules — one per (service, domain) pair, alphabetic
+		// by service via utils.SortedKeys.
+		`hostname = "api.nvoi.to"`,
+		`service  = "http://api.default.svc.cluster.local:3000"`,
+		`hostname = "app.nvoi.to"`,
+		`service  = "http://app.default.svc.cluster.local:8080"`,
+		`hostname = "www.nvoi.to"`,
+		// Catch-all
+		`service = "http_status:404"`,
+		// CNAME records pointing at tunnel cname
+		`type    = "CNAME"`,
+		`content = "${cloudflare_zero_trust_tunnel_cloudflared.main.cname}"`,
+		`proxied = true`,
+		// Sensitive tunnel output
+		`output "tunnel"`,
+		`sensitive = true`,
+	} {
+		if !strings.Contains(hcl, want) {
+			t.Errorf("tunnel HCL missing %q\n--- output ---\n%s", want, hcl)
+		}
+	}
+
+	// Traefik-only artifacts must NOT appear in tunnel HCL.
+	for _, banned := range []string{
+		`type    = "A"`,
+		`hcloud_server.master.ipv4_address`,
+		`proxied = false`,
+	} {
+		if strings.Contains(hcl, banned) {
+			t.Errorf("tunnel HCL contains Traefik-only token %q:\n%s", banned, hcl)
+		}
+	}
+}
+
+func TestEmitDNS_TunnelMode_MissingAccountID(t *testing.T) {
+	cfg := tunnelCfg()
+	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{ZoneID: "zone123", Zone: "nvoi.to"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "account_id required") {
+		t.Errorf("expected account_id error, got %v", err)
+	}
+}
+
+func TestEmitDNS_TunnelMode_RoutePortsMatchServices(t *testing.T) {
+	cfg := tunnelCfg()
+	// Override port to verify it threads correctly through the upstream.
+	cfg.Services["app"] = config.ServiceSpec{Image: "ghcr.io/me/app:latest", Port: 9999}
+	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{
+				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("EmitDNS: %v", err)
+	}
+	hcl := string(out)
+	if !strings.Contains(hcl, `service  = "http://app.default.svc.cluster.local:9999"`) {
+		t.Errorf("port 9999 not threaded through to upstream URL\n--- output ---\n%s", hcl)
+	}
+	// Negative — old port must not leak.
+	if strings.Contains(hcl, `:8080"`) {
+		t.Errorf("stale port 8080 in tunnel HCL\n--- output ---\n%s", hcl)
+	}
+}
+
 func TestRecordNameFor(t *testing.T) {
 	cases := []struct {
 		domain, zone, want string

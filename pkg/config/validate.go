@@ -184,6 +184,26 @@ func validateMonitor(c *Config) error {
 // tests pure; unknown providers fail at compile time with a clear
 // "unknown infra provider %q" / "unknown dns provider %q".
 func validateDomains(c *Config) error {
+	// Ingress mode is part of the same constraint surface as
+	// domains: (cloudflare mode requires domains; both modes consume
+	// domains for routing). Closed-enum check runs unconditionally;
+	// the mode-specific prerequisites run only when set to cloudflare.
+	switch c.Providers.Ingress {
+	case "", IngressTraefik, IngressCloudflare:
+		// ok
+	default:
+		return fmt.Errorf("providers.ingress: unknown mode %q (want %q or %q)",
+			c.Providers.Ingress, IngressTraefik, IngressCloudflare)
+	}
+	if c.Providers.Ingress == IngressCloudflare {
+		if len(c.Domains) == 0 {
+			return fmt.Errorf("providers.ingress: cloudflare requires non-empty domains:")
+		}
+		if c.Providers.DNS != "cloudflare" {
+			return fmt.Errorf("providers.ingress: cloudflare requires providers.dns: cloudflare (got %q)", c.Providers.DNS)
+		}
+	}
+
 	if len(c.Domains) == 0 {
 		return nil
 	}

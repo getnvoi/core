@@ -188,6 +188,41 @@ type Providers struct {
 	// detection, deletion) — there are no runtime API calls from
 	// nvoi to the DNS provider.
 	DNS string `yaml:"dns,omitempty"`
+
+	// Ingress is OPTIONAL. Selects the public ingress transport for
+	// services with declared domains.
+	//
+	//   - "" / "traefik" (default): cloud LB (HA) or master:80,443
+	//     (single-master) → klipper-lb hostPort → Traefik → Service.
+	//     cert-manager issues per-domain TLS via DNS-01.
+	//   - "cloudflare": outbound tunnel terminating at Cloudflare's
+	//     edge. No public 80/443. cloudflared system Deployment
+	//     routes per-domain ingress directly to the workload's
+	//     ClusterIP Service. CF terminates TLS at the edge;
+	//     cert-manager is skipped. Requires providers.dns:
+	//     cloudflare and a non-empty domains:.
+	//
+	// Modes are mutually exclusive; the cluster runs exactly one
+	// ingress transport at a time. Flipping the field is a workload
+	// + firewall diff — no k3s reinstall.
+	Ingress string `yaml:"ingress,omitempty"`
+}
+
+// Ingress mode names. Closed enum — Validate rejects anything else.
+// Downstream packages branch on Providers.IngressMode(), which folds
+// "" → IngressTraefik so they never have to handle three cases.
+const (
+	IngressTraefik    = "traefik"
+	IngressCloudflare = "cloudflare"
+)
+
+// IngressMode returns the effective ingress transport. Empty
+// Providers.Ingress is folded to IngressTraefik.
+func (p Providers) IngressMode() string {
+	if p.Ingress == "" {
+		return IngressTraefik
+	}
+	return p.Ingress
 }
 
 // Domains maps service names to public hostnames. Each service must

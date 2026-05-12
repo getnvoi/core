@@ -31,6 +31,7 @@ const (
 	OwnerRegistry      = "registry"      // dockerconfigjson Secret for imagePullSecrets
 	OwnerAppSecrets    = "app-secrets"   // Opaque Secret holding cfg.Secrets values
 	OwnerIngress       = "ingress"       // per-service Ingress resources (Traefik consumes them)
+	OwnerTunnel        = "tunnel"        // cloudflared Deployment + token Secret (ingress=cloudflare)
 	OwnerAddons        = "addons"        // cluster-level prerequisites (metrics-server, future addons)
 	OwnerObservability = "observability" // Prom + Thanos + Loki + Grafana stack
 )

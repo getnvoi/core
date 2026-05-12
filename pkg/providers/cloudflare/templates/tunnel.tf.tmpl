@@ -1,0 +1,87 @@
+# Tunnel-mode emission for providers.ingress: cloudflare.
+#
+# This file REPLACES dns.tf.tmpl when the cloudflare DNS emitter runs
+# under tunnel mode — both shapes write to the same cloudflare-dns.tf
+# bundle entry. The provider-config block lives here too (compile
+# writes exactly one file per DNS emitter); required_providers + the
+# version pin still live in the consolidated backend.tf rendered by
+# internal/compile.
+provider "cloudflare" {}
+
+locals {
+  cloudflare_account_id = {{ .AccountID | hcl }}
+  cloudflare_zone_id    = {{ .ZoneID | hcl }}
+  tunnel_name           = {{ .TunnelName | hcl }}
+}
+
+# ── Tunnel secret (32 random bytes, base64) ────────────────────────────
+# Stored in tofu state; rotates only on explicit taint. cloudflared
+# authenticates against CF edge using this secret (wrapped into the
+# token output below).
+resource "random_id" "tunnel_secret" {
+  byte_length = 32
+}
+
+# ── The tunnel itself ──────────────────────────────────────────────────
+# Named after app+env so re-running `nvoi deploy` is idempotent — the
+# same name on a second deploy adopts the existing tunnel (CF tunnel
+# names are unique per account).
+resource "cloudflare_zero_trust_tunnel_cloudflared" "main" {
+  account_id    = local.cloudflare_account_id
+  name          = local.tunnel_name
+  tunnel_secret = random_id.tunnel_secret.b64_std
+}
+
+# ── Tunnel ingress configuration ───────────────────────────────────────
+# One rule per (service, domain). Order matters — cloudflared matches
+# the first rule whose hostname matches; the final catch-all 404 is
+# required by the cloudflared schema.
+resource "cloudflare_zero_trust_tunnel_cloudflared_config" "main" {
+  account_id = local.cloudflare_account_id
+  tunnel_id  = cloudflare_zero_trust_tunnel_cloudflared.main.id
+
+  config {
+{{ range .Routes }}
+    ingress_rule {
+      hostname = {{ .Hostname | hcl }}
+      service  = {{ .Service | hcl }}
+    }
+{{ end }}
+    ingress_rule {
+      service = "http_status:404"
+    }
+  }
+}
+
+# ── CNAME records per domain ───────────────────────────────────────────
+# Point each domain at the tunnel's per-account CNAME target. CF's
+# edge routes <uuid>.cfargotunnel.com to the matching tunnel ID
+# automatically. proxied=true enables CF edge TLS termination — the
+# whole point of tunnel mode is delegating TLS to CF, so the orange
+# cloud is mandatory here (in contrast to Traefik-mode A records where
+# Traefik holds the cert in-cluster and we set proxied=false).
+{{ range .Records }}
+resource "cloudflare_record" {{ .ResourceName | hcl }} {
+  zone_id = local.cloudflare_zone_id
+  name    = {{ .Name | hcl }}
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.main.cname}"
+  proxied = true
+  ttl     = 1
+}
+{{ end }}
+
+# ── Outputs ────────────────────────────────────────────────────────────
+# Token is the base64-encoded JSON blob cloudflared consumes via
+# `--token`. nvoi reads this post-apply and lands it in a k8s Secret
+# under owner=tunnel. Sensitive so it never lands in plain `tofu
+# output` dumps (operators can `tofu output -raw tunnel.token` when
+# debugging).
+output "tunnel" {
+  sensitive = true
+  value = {
+    id    = cloudflare_zero_trust_tunnel_cloudflared.main.id
+    cname = cloudflare_zero_trust_tunnel_cloudflared.main.cname
+    token = cloudflare_zero_trust_tunnel_cloudflared.main.tunnel_token
+  }
+}

@@ -30,14 +30,14 @@ func emitBackend(rt *nvoiRuntime.Runtime) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	reqs := []ProviderRequirement{infra.Provider()}
+	reqs := append([]ProviderRequirement(nil), infra.Providers()...)
 
 	if rt.Cfg.Providers.DNS != "" {
 		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
 		if err != nil {
 			return nil, err
 		}
-		reqs = append(reqs, dns.Provider())
+		reqs = append(reqs, dns.Providers()...)
 	}
 
 	// Dedupe by alias — emitters may declare the same provider
