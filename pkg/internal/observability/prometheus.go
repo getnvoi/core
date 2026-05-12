@@ -24,6 +24,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -81,12 +82,71 @@ config:
 	}
 }
 
+// buildPrometheusRBAC returns the ServiceAccount + ClusterRole +
+// ClusterRoleBinding Prometheus needs for its kubernetes_sd_configs
+// scrape jobs (kubernetes-pods, kubelet, nodes). Cluster-scoped —
+// Prometheus discovers targets across every namespace + reads node
+// metadata.
+//
+// Read-only verbs only; no mutating access. Symmetric with
+// buildPromtailRBAC's shape.
+func buildPrometheusRBAC() (*corev1.ServiceAccount, *rbacv1.ClusterRole, *rbacv1.ClusterRoleBinding) {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      prometheusComponent,
+			Namespace: Namespace,
+			Labels:    objectLabels(prometheusComponent),
+		},
+	}
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "nvoi-" + prometheusComponent,
+			Labels: objectLabels(prometheusComponent),
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"nodes", "nodes/proxy", "nodes/metrics", "services", "endpoints", "pods"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+			{
+				APIGroups:     []string{""},
+				Resources:     []string{"configmaps"},
+				Verbs:         []string{"get"},
+			},
+			{
+				NonResourceURLs: []string{"/metrics"},
+				Verbs:           []string{"get"},
+			},
+		},
+	}
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "nvoi-" + prometheusComponent,
+			Labels: objectLabels(prometheusComponent),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "nvoi-" + prometheusComponent,
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      prometheusComponent,
+			Namespace: Namespace,
+		}},
+	}
+	return sa, cr, crb
+}
+
 // buildPrometheusConfigMap renders the prometheus.yml the Prometheus
-// container loads at start. Minimal scrape list for v1:
-//   - prometheus self-scrape
+// container loads at start. Scrape list for v1:
+//   - prometheus self-scrape (static)
+//   - kube-state-metrics (static — kube-system service, no annotations
+//     on upstream manifest so SD wouldn't pick it up)
+//   - node-exporter (DaemonSet endpoint discovery)
 //   - kubernetes-pods (any pod with prometheus.io/scrape=true annotation)
 //   - kubelet (node metrics — cAdvisor lives here too)
-//   - traefik (k3s ships it; default metrics endpoint :9100)
 //
 // Block boundaries pinned to 2h via the Prometheus container args
 // (not the config) — that's where the Thanos sidecar contract lives.
@@ -101,6 +161,22 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ['localhost:9090']
+
+  - job_name: kube-state-metrics
+    static_configs:
+      - targets: ['kube-state-metrics.kube-system.svc:8080']
+
+  - job_name: node-exporter
+    kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names: [nvoi-observability]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: node-exporter
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: instance
 
   - job_name: kubernetes-pods
     kubernetes_sd_configs:
@@ -142,6 +218,24 @@ scrape_configs:
         regex: (.+)
         target_label: __metrics_path__
         replacement: /api/v1/nodes/$1/proxy/metrics
+
+  - job_name: cadvisor
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+      - target_label: __address__
+        replacement: kubernetes.default.svc:443
+      - source_labels: [__meta_kubernetes_node_name]
+        regex: (.+)
+        target_label: __metrics_path__
+        replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
 `
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -176,7 +270,7 @@ func buildPrometheusStatefulSet() *appsv1.StatefulSet {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(prometheusComponent)},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: "default",
+					ServiceAccountName: prometheusComponent,
 					Containers: []corev1.Container{
 						{
 							Name:  "prometheus",

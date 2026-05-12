@@ -96,6 +96,13 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	manifest.ClusterRoles = []string{cr.Name}
 	manifest.ClusterRoleBindings = []string{crb.Name}
 
+	// ── RBAC for Prometheus (cluster-scoped pod/node discovery) ─────
+	psa, pcr, pcrb := buildPrometheusRBAC()
+	objects = append(objects, psa, pcr, pcrb)
+	manifest.ServiceAccounts = append(manifest.ServiceAccounts, psa.Name)
+	manifest.ClusterRoles = append(manifest.ClusterRoles, pcr.Name)
+	manifest.ClusterRoleBindings = append(manifest.ClusterRoleBindings, pcrb.Name)
+
 	// ── RBAC for Grafana sidecar (namespace-scoped configmap-watch) ─
 	gsa, grole, grb := buildGrafanaRBAC()
 	objects = append(objects, gsa, grole, grb)
@@ -107,24 +114,26 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	promSS := buildPrometheusStatefulSet()
 	lokiSS, lokiSvc := buildLoki()
 	promtailDS := buildPromtailDaemonSet()
+	nodeExpDS := buildNodeExporterDaemonSet()
 	thanosQuerier, thanosQuerierSvc := buildThanosQuerier()
 	thanosStore, thanosStoreSvc := buildThanosStore()
 	grafanaDep := buildGrafanaDeployment(rt)
-	objects = append(objects, promSS, lokiSS, promtailDS, thanosQuerier, thanosStore, grafanaDep)
+	objects = append(objects, promSS, lokiSS, promtailDS, nodeExpDS, thanosQuerier, thanosStore, grafanaDep)
 	manifest.StatefulSets = []string{promSS.Name, lokiSS.Name}
-	manifest.DaemonSets = []string{promtailDS.Name}
+	manifest.DaemonSets = []string{promtailDS.Name, nodeExpDS.Name}
 	manifest.Deployments = []string{thanosQuerier.Name, thanosStore.Name, grafanaDep.Name}
 
 	// ── Services ────────────────────────────────────────────────────
 	promSvcs := buildPrometheusServices()
 	grafanaSvc := buildGrafanaService()
+	nodeExpSvc := buildNodeExporterService()
 	for _, s := range promSvcs {
 		objects = append(objects, s)
 	}
-	objects = append(objects, lokiSvc, thanosQuerierSvc, thanosStoreSvc, grafanaSvc)
+	objects = append(objects, lokiSvc, thanosQuerierSvc, thanosStoreSvc, grafanaSvc, nodeExpSvc)
 	manifest.Services = []string{
 		promSvcs[0].Name, promSvcs[1].Name,
-		lokiSvc.Name, thanosQuerierSvc.Name, thanosStoreSvc.Name, grafanaSvc.Name,
+		lokiSvc.Name, thanosQuerierSvc.Name, thanosStoreSvc.Name, grafanaSvc.Name, nodeExpSvc.Name,
 	}
 
 	// ── Ingress (optional) ──────────────────────────────────────────

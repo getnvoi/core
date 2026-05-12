@@ -6,7 +6,6 @@ import (
 
 	"github.com/getnvoi/core/pkg/internal/build"
 	"github.com/getnvoi/core/pkg/internal/compile"
-	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/runtime"
 )
@@ -122,52 +121,27 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 			return err
 		}
 
-		// ── workloads + ingress: kube tunnel via primary's shell ──
-		// Skipped only when there's nothing for the in-cluster
-		// pipeline to do — no services, no secrets to publish, no
-		// registry to set up, no domains to front.
-		if s.workloadsHaveContent() {
-			if err := s.deployWorkloads(ctx); err != nil {
-				return err
-			}
-		} else if s.Rt.Cfg.Monitor == nil {
-			// Nothing for the cluster phase to do at all.
+		// ── workloads phase: ALWAYS runs when cluster phase has any
+		// reason to engage (services, registry, secrets, domains, OR
+		// monitor). The phase installs cluster-level addons
+		// (metrics-server, kube-state-metrics) + node labels
+		// regardless of whether there are app workloads — observability
+		// needs those addons even on a service-less cluster.
+		//
+		// Short-circuit ONLY when there's literally nothing to do.
+		needCluster := s.workloadsHaveContent() || s.Rt.Cfg.Monitor != nil
+		if !needCluster {
 			return nil
+		}
+		if err := s.deployWorkloads(ctx); err != nil {
+			return err
 		}
 
 		// ── observability: monitor: stack (gated). Runs unconditionally
 		// when monitor: was previously set, so flipping it to nil sweeps
-		// the prior stack on the next deploy. Requires the kube client
-		// — open one fresh when deployWorkloads was skipped.
-		if s.kc == nil {
-			if err := s.openMonitorKube(ctx); err != nil {
-				return err
-			}
-			defer func() {
-				_ = s.kc.Close()
-				s.kc = nil
-			}()
-		}
+		// the prior stack on the next deploy.
 		return s.deployObservability(ctx)
 	})
-}
-
-// openMonitorKube opens a kube tunnel through the primary master.
-// Only used when deployWorkloads was skipped (no app workloads) but
-// observability still needs to run — typical for the first deploy of
-// a config that defines monitor: {} + no services.
-func (s *Session) openMonitorKube(ctx context.Context) error {
-	primaryName := s.Rt.Cfg.PrimaryMaster()
-	primaryShell, ok := s.shells[primaryName]
-	if !ok {
-		return fmt.Errorf("openMonitorKube: primary master %s has no open shell", primaryName)
-	}
-	kc, err := kube.New(ctx, primaryShell)
-	if err != nil {
-		return fmt.Errorf("openMonitorKube: %w", err)
-	}
-	s.kc = kc
-	return nil
 }
 
 // preDetachWorkloadReconcile runs deployWorkloads against the existing

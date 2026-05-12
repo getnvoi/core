@@ -41,16 +41,19 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		return fmt.Errorf("primary master %s has no open shell", primaryName)
 	}
 
-	s.Lg.Step("kube-tunnel")
-	kc, err := kube.New(ctx, primaryShell)
-	if err != nil {
-		return fmt.Errorf("build kube client: %w", err)
+	// kube client opens ONCE per Run and stays alive across
+	// deployWorkloads + deployObservability (caller closes via the
+	// deferred kube cleanup in Run). Idempotent open — if a previous
+	// phase already built kc, reuse it.
+	if s.kc == nil {
+		s.Lg.Step("kube-tunnel")
+		kc, err := kube.New(ctx, primaryShell)
+		if err != nil {
+			return fmt.Errorf("build kube client: %w", err)
+		}
+		s.kc = kc
 	}
-	s.kc = kc
-	defer func() {
-		_ = kc.Close()
-		s.kc = nil
-	}()
+	kc := s.kc
 
 	s.Lg.Step("node-labels")
 	for _, key := range utils.SortedKeys(rt.Cfg.Servers) {
