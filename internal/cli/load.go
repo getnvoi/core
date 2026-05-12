@@ -43,7 +43,12 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		return nil, err
 	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
-	monitor, err := ResolveMonitor(cfg, os.Getenv)
+	// cfg-file directory is the base for monitor.dashboards /
+	// monitor.alert_rules globs — operator-written paths in the YAML
+	// are resolved relative to the YAML itself, NOT cwd. Matches the
+	// way every other config-relative path in nvoi resolves.
+	configDir := filepath.Dir(flags.ConfigPath)
+	monitor, err := ResolveMonitor(cfg, os.Getenv, configDir)
 	if err != nil {
 		return nil, err
 	}

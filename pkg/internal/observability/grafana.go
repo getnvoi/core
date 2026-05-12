@@ -381,24 +381,36 @@ func buildGrafanaRBAC() (*corev1.ServiceAccount, *rbacv1.Role, *rbacv1.RoleBindi
 }
 
 // grafanaConfigHash returns a stable hash of every input that
-// affects Grafana's boot config — grafana.ini content + admin
-// password + every SMTP env value. Any change rolls the pod.
-// SHA-256 truncated to 16 hex chars; collisions are astronomical
-// in practice + the annotation just needs to differ when inputs
-// differ.
+// affects Grafana's boot-time provisioning — grafana.ini, admin
+// password, SMTP env values, every alert-rule YAML file, every
+// dashboard JSON file. Any change rolls the pod.
+//
+// Dashboards are technically sidecar-provisioned (Grafana hot-reloads
+// them) so they don't strictly need to trigger a restart. We include
+// them anyway: if an operator changes a dashboard AND an alert in
+// one commit, we want a single rolling update that picks up both —
+// no half-state where the dashboard is new but the alerts are still
+// old.
+//
+// SHA-256 truncated to 16 hex chars.
 func grafanaConfigHash(rt *runtime.Runtime) string {
 	h := sha256.New()
-	// grafana.ini content
-	h.Write([]byte(buildGrafanaConfigMap(rt).Data["grafana.ini"])) //nolint:errcheck // sha256.Write never errors
-	// admin password
+	h.Write([]byte(buildGrafanaConfigMap(rt).Data["grafana.ini"]))
 	h.Write([]byte(AdminPassword(rt)))
-	// SMTP env values (provider name + From address — the Secret
-	// is hashed via the secret materialization elsewhere; here we
-	// hash the deterministic env wiring).
 	if rt != nil && rt.Monitor != nil && rt.Monitor.Alerts != nil && rt.Monitor.Alerts.Email != nil {
 		h.Write([]byte(rt.Monitor.Alerts.Email.Provider))
 		if from, ok := rt.Monitor.Alerts.Email.Fields["from"].(string); ok {
 			h.Write([]byte(from))
+		}
+	}
+	if rt != nil && rt.Monitor != nil {
+		for _, f := range rt.Monitor.AlertRules {
+			h.Write([]byte(f.Name))
+			h.Write(f.Content)
+		}
+		for _, f := range rt.Monitor.Dashboards {
+			h.Write([]byte(f.Name))
+			h.Write(f.Content)
 		}
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]

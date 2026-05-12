@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/providers"
@@ -21,7 +23,7 @@ import (
 // Walks AlertSpec.Fields recursively — strings beginning with `$`
 // resolve via utils.ResolveVar; nested lists keep their shape, with
 // each string element resolved in place.
-func ResolveMonitor(cfg *config.Config, getenv func(string) string) (*runtime.ResolvedMonitor, error) {
+func ResolveMonitor(cfg *config.Config, getenv func(string) string, cwd string) (*runtime.ResolvedMonitor, error) {
 	if cfg == nil || cfg.Monitor == nil {
 		return nil, nil
 	}
@@ -62,6 +64,60 @@ func ResolveMonitor(cfg *config.Config, getenv func(string) string) (*runtime.Re
 			ra.SMS = rs
 		}
 		out.Alerts = ra
+	}
+
+	// Operator-supplied dashboard + alert-rule files. Globs expand
+	// relative to `cwd`. Each file is read at the boundary (disk I/O
+	// stays out of internal packages); content travels as []byte via
+	// runtime.NamedFile.
+	dashes, err := readNamedFiles("monitor.dashboards", m.Dashboards, cwd)
+	if err != nil {
+		return nil, err
+	}
+	out.Dashboards = dashes
+	rules, err := readNamedFiles("monitor.alert_rules", m.AlertRules, cwd)
+	if err != nil {
+		return nil, err
+	}
+	out.AlertRules = rules
+
+	return out, nil
+}
+
+// readNamedFiles expands glob patterns (relative to cwd) and reads
+// each match into a NamedFile. Duplicate basenames error explicitly
+// — Grafana would silently overwrite one provisioning file with
+// another that has the same name.
+func readNamedFiles(path string, patterns []string, cwd string) ([]runtime.NamedFile, error) {
+	if len(patterns) == 0 {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	var out []runtime.NamedFile
+	for i, p := range patterns {
+		full := p
+		if !filepath.IsAbs(p) {
+			full = filepath.Join(cwd, p)
+		}
+		matches, err := filepath.Glob(full)
+		if err != nil {
+			return nil, fmt.Errorf("%s[%d] %q: %w", path, i, p, err)
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("%s[%d] %q: no files match", path, i, p)
+		}
+		for _, m := range matches {
+			content, err := os.ReadFile(m)
+			if err != nil {
+				return nil, fmt.Errorf("%s: read %s: %w", path, m, err)
+			}
+			name := filepath.Base(m)
+			if seen[name] {
+				return nil, fmt.Errorf("%s: duplicate basename %q across patterns", path, name)
+			}
+			seen[name] = true
+			out = append(out, runtime.NamedFile{Name: name, Content: content})
+		}
 	}
 	return out, nil
 }

@@ -89,6 +89,23 @@ type MonitorSpec struct {
 	Domain        string      `yaml:"domain,omitempty"`
 	AdminPassword string      `yaml:"admin_password,omitempty"`
 	Alerts        *AlertsSpec `yaml:"alerts,omitempty"`
+
+	// Dashboards lists glob paths (relative to the config file) to
+	// Grafana dashboard JSON files. Each match becomes one ConfigMap
+	// the Grafana sidecar provisions. Empty → no dashboards (operator
+	// can still explore raw metrics via Grafana's Explore tab).
+	//
+	// nvoi ships reference dashboards under examples/dashboards/ —
+	// operators copy + customize, OR pull from grafana.com.
+	Dashboards []string `yaml:"dashboards,omitempty"`
+
+	// AlertRules lists glob paths to Grafana alert-rule provisioning
+	// YAML files. Each match becomes a file in Grafana's
+	// /etc/grafana/provisioning/alerting/ directory. Empty → no alert
+	// rules (only datasources + contact points come from nvoi).
+	//
+	// nvoi ships reference alert rules under examples/alerts/.
+	AlertRules []string `yaml:"alert_rules,omitempty"`
 }
 
 // AlertsSpec configures notification channels. Each non-nil field is

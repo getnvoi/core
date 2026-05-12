@@ -135,6 +135,25 @@ type ResolvedMonitor struct {
 	Domain        string
 	AdminPassword string
 	Alerts        *ResolvedAlerts
+
+	// Dashboards holds the operator's resolved Grafana dashboard
+	// files — one entry per file expanded from cfg.Monitor.Dashboards
+	// globs at the cmd/cli boundary. Content is the raw JSON; Name
+	// is the filename basename (used as the ConfigMap data key,
+	// e.g. "nvoi.json").
+	Dashboards []NamedFile
+
+	// AlertRules holds the operator's resolved Grafana alert-rule
+	// provisioning YAML files. Same shape as Dashboards.
+	AlertRules []NamedFile
+}
+
+// NamedFile pairs a basename with its content. Used for operator-
+// supplied dashboard JSON + alert YAML files threaded from the
+// cmd/cli boundary through to the observability stack.
+type NamedFile struct {
+	Name    string
+	Content []byte
 }
 
 // ResolvedAlerts mirrors config.AlertsSpec with all $VAR refs

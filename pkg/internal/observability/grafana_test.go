@@ -237,7 +237,6 @@ func TestBuildGrafanaIngress_WithDomain(t *testing.T) {
 
 func TestBuildStack_AllKindsPresent(t *testing.T) {
 	rt := fixtureRuntime(&runtime.ResolvedMonitor{Domain: "grafana.nvoi.to", AdminPassword: "p"})
-	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
 	objects, names, err := BuildStack(rt, fixtureCreds())
 	if err != nil {
 		t.Fatalf("BuildStack: %v", err)
@@ -273,7 +272,6 @@ func TestBuildStack_AllKindsPresent(t *testing.T) {
 
 func TestBuildStack_NoIngressInTunnelMode(t *testing.T) {
 	rt := fixtureRuntime(nil)
-	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
 	_, names, err := BuildStack(rt, fixtureCreds())
 	if err != nil {
 		t.Fatalf("BuildStack: %v", err)
@@ -288,7 +286,6 @@ func TestBuildStack_NamespacedConsistency(t *testing.T) {
 	// observability namespace. Cluster-scoped objects (ClusterRole,
 	// ClusterRoleBinding) skip the check.
 	rt := fixtureRuntime(nil)
-	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
 	objects, _, err := BuildStack(rt, fixtureCreds())
 	if err != nil {
 		t.Fatalf("BuildStack: %v", err)

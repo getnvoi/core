@@ -23,11 +23,14 @@ services:
 # bucket-backed via providers.storage. Presence of `monitor:` is the
 # toggle (same convention as `domains:` / `build:` / `storage:`).
 #
-# Minimum form below — tunnel-only access via `nvoi monitor`, no
-# alert routing (alerts surface on the Grafana home page only).
-# Works against a base .env containing just HCLOUD_TOKEN +
-# CF_API_KEY + CF_ACCOUNT_ID + CF_ZONE_ID + CF_ZONE.
-monitor: {}
+# Dashboards + alert rules are operator-supplied files — nvoi ships
+# reference content under examples/{dashboards,alerts}/ that you can
+# copy + customize, or pull dashboards from grafana.com.
+monitor:
+  dashboards:
+    - dashboards/*.json # reference dashboard under examples/dashboards/
+  alert_rules:
+    - alerts/*.yaml # reference rules under examples/alerts/
 #
 # ── To enable public Ingress + real alerts, uncomment + set env vars ──
 #

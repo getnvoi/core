@@ -71,19 +71,14 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 		}
 	}
 
-	// ── Alert rules ConfigMap (mounted by Grafana via projected vol) ─
-	alertCM, alertName, err := BuildAlertRules(rt)
-	if err != nil {
-		return nil, manifest, fmt.Errorf("build alert rules: %w", err)
+	// ── Alert rules ConfigMap (operator-supplied YAML files, optional) ─
+	if alertCM := BuildAlertRules(rt); alertCM != nil {
+		objects = append(objects, alertCM)
+		manifest.ConfigMaps = append(manifest.ConfigMaps, alertCM.Name)
 	}
-	objects = append(objects, alertCM)
-	manifest.ConfigMaps = append(manifest.ConfigMaps, alertName)
 
-	// ── Dashboard ConfigMaps (watched by kiwigrid sidecar) ──────────
-	dashCMs, dashNames, err := BuildDashboards(rt)
-	if err != nil {
-		return nil, manifest, fmt.Errorf("build dashboards: %w", err)
-	}
+	// ── Dashboard ConfigMaps (operator-supplied JSON files, optional) ─
+	dashCMs, dashNames := BuildDashboards(rt)
 	for _, cm := range dashCMs {
 		objects = append(objects, cm)
 	}
