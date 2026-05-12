@@ -17,7 +17,7 @@ func TestBuildLokiConfigMap_S3Wiring(t *testing.T) {
 		"s3://AKIAFAKE:SECRETFAKE@acct.r2.cloudflarestorage.com/nvoi-hello-dev-logs",
 		"region: auto",
 		"s3forcepathstyle: true",
-		"store: boltdb-shipper",
+		"store: tsdb",
 	} {
 		if !strings.Contains(yml, want) {
 			t.Errorf("loki config.yaml missing %q\n%s", want, yml)

@@ -207,9 +207,16 @@ func buildPrometheusStatefulSet() *appsv1.StatefulSet {
 								"--grpc-address=0.0.0.0:10901",
 								"--http-address=0.0.0.0:10902",
 							},
+							// Port name "http" would collide with the
+							// prometheus container's :9090 in the same
+							// pod (k8s requires unique port names
+							// per-pod). The sidecar's HTTP port isn't
+							// targeted by any Service or probe by name,
+							// so we drop the name field — k8s allows
+							// nameless ContainerPort entries.
 							Ports: []corev1.ContainerPort{
 								{Name: "grpc", ContainerPort: 10901},
-								{Name: "http", ContainerPort: 10902},
+								{ContainerPort: 10902},
 							},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "tsdb", MountPath: "/prometheus"},

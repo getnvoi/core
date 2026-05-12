@@ -52,7 +52,7 @@ common:
 schema_config:
   configs:
     - from: 2024-01-01
-      store: boltdb-shipper
+      store: tsdb
       object_store: s3
       schema: v13
       index:
@@ -60,9 +60,9 @@ schema_config:
         period: 24h
 
 storage_config:
-  boltdb_shipper:
-    active_index_directory: /loki/index
-    cache_location: /loki/index_cache
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
   aws:
     s3: s3://%s:%s@%s/%s
     region: %s
@@ -81,6 +81,7 @@ ingester:
 limits_config:
   reject_old_samples: true
   reject_old_samples_max_age: 168h
+  allow_structured_metadata: true
 `, creds.AccessKey, creds.SecretKey, host, creds.LogsBucket, creds.Region)
 
 	return &corev1.ConfigMap{
@@ -250,9 +251,16 @@ func buildPromtailRBAC() (*corev1.ServiceAccount, *rbacv1.ClusterRole, *rbacv1.C
 }
 
 // buildPromtailDaemonSet renders the per-node Promtail pod. Mounts
-// host /var/log + /var/lib/docker/containers (the canonical paths
-// k8s + container runtimes use). DaemonSet so every node ships its
-// own pod logs — no cross-node log transport.
+// host /var/log (where k3s/containerd writes pod logs at
+// /var/log/pods/<uid>/<container>/<n>.log). NO /var/lib/docker mount —
+// k3s uses containerd, not docker, so that path doesn't exist on
+// k3s nodes (kubelet fails the mount with "not a directory").
+// containerd's pod logs live directly under /var/log/pods as real
+// files (not symlinks), so the cri pipeline_stage handles parsing.
+//
+// DaemonSet so every node ships its own pod logs — no cross-node
+// transport. Operator=Exists toleration so promtail schedules on the
+// tainted master too (master-pinned services need their logs shipped).
 func buildPromtailDaemonSet() *appsv1.DaemonSet {
 	hostPathDir := corev1.HostPathDirectory
 	return &appsv1.DaemonSet{
@@ -267,10 +275,6 @@ func buildPromtailDaemonSet() *appsv1.DaemonSet {
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(promtailComponent)},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: promtailComponent,
-					// Promtail needs to schedule on every node including
-					// the master (so master-pinned services have their
-					// logs shipped). Tolerate the standard control-plane
-					// taint.
 					Tolerations: []corev1.Toleration{
 						{Operator: corev1.TolerationOpExists},
 					},
@@ -282,7 +286,6 @@ func buildPromtailDaemonSet() *appsv1.DaemonSet {
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "config", MountPath: "/etc/promtail"},
 							{Name: "varlog", MountPath: "/var/log", ReadOnly: true},
-							{Name: "varlibdockercontainers", MountPath: "/var/lib/docker/containers", ReadOnly: true},
 							{Name: "run", MountPath: "/run/promtail"},
 						},
 						Resources: stdRequests("100m", "64Mi"),
@@ -293,9 +296,6 @@ func buildPromtailDaemonSet() *appsv1.DaemonSet {
 						}},
 						{Name: "varlog", VolumeSource: corev1.VolumeSource{
 							HostPath: &corev1.HostPathVolumeSource{Path: "/var/log", Type: &hostPathDir},
-						}},
-						{Name: "varlibdockercontainers", VolumeSource: corev1.VolumeSource{
-							HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/docker/containers", Type: &hostPathDir},
 						}},
 						{Name: "run", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					},
