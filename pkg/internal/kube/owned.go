@@ -30,6 +30,7 @@ const (
 	OwnerRegistry   = "registry"    // dockerconfigjson Secret for imagePullSecrets
 	OwnerAppSecrets = "app-secrets" // Opaque Secret holding cfg.Secrets values
 	OwnerIngress    = "ingress"     // per-service Ingress resources (Traefik consumes them)
+	OwnerAddons     = "addons"      // cluster-level prerequisites (metrics-server, future addons)
 )
 
 // Kind names a typed resource kind ApplyOwned / SweepOwned / ListOwned

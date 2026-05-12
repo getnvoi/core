@@ -6,6 +6,7 @@ import (
 
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/observability"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/ssh"
@@ -58,6 +59,15 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 			return fmt.Errorf("label node %s: %w", key, err)
 		}
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
+	}
+
+	// Cluster-level addons (metrics-server today). Independent of the
+	// observability stack — every deploy gets them so `kubectl top`
+	// and any HPA wiring work cluster-wide regardless of whether the
+	// operator activates the full monitor: stack. Owner=addons; sweep
+	// scope independent of services / ingress / app-secrets / registry.
+	if err := observability.ApplyMetricsServer(ctx, primaryShell, s.Lg); err != nil {
+		return fmt.Errorf("metrics-server: %w", err)
 	}
 
 	// Ingress prerequisites: install cert-manager, apply ClusterIssuer
