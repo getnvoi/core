@@ -1,57 +1,42 @@
 app: hello
-env: ops
+env: obs
 providers:
   infra: hetzner
   storage: cloudflare # required when monitor: is set — Loki + Thanos buckets land here
-  dns: cloudflare # required when monitor.domain is set
+  dns: cloudflare
 acme_email: ops@nvoi.to
 ssh_key: ~/.ssh/id_rsa.pub
 
 servers:
-  master-1: { type: cax21, region: nbg1, role: master, primary: true }
-  master-2: { type: cax21, region: nbg1, role: master }
-  master-3: { type: cax21, region: nbg1, role: master }
-  worker-1: { type: cax21, region: nbg1, role: worker }
-  worker-2: { type: cax21, region: nbg1, role: worker }
-
-services:
-  whoami:
-    image: traefik/whoami
-    port: 80
-
-domains:
-  whoami: [ops.nvoi.to]
+  master: { type: cax21, region: nbg1, role: master }
+  worker: { type: cax21, region: nbg1, role: worker }
 
 # Observability stack — Prometheus + Thanos + Loki + Grafana, all
 # bucket-backed via providers.storage. Presence of `monitor:` is the
 # toggle (same convention as `domains:` / `build:` / `storage:`).
 #
-# Tunnel-only access: `nvoi monitor` opens an SSH-tunneled port-forward
-# to Grafana on localhost:3000. No public exposure required.
+# Minimum form below — tunnel-only access via `nvoi monitor`, no
+# alert routing (alerts surface on the Grafana home page only).
+# Works against a base .env containing just HCLOUD_TOKEN +
+# CF_API_KEY + CF_ACCOUNT_ID + CF_ZONE_ID + CF_ZONE.
+monitor: {}
 #
-# Public access: set `domain:` (auto-emits Ingress + cert-manager TLS)
-# AND `admin_password:` (real auth required for public exposure;
-# tunnel-only mode uses anonymous Viewer).
+# ── To enable public Ingress + real alerts, uncomment + set env vars ──
 #
-# Alerts: when `alerts:` is set, every firing alert routes through
-# every configured channel. When unset, alerts surface on the Grafana
-# dashboard only.
-monitor:
-  domain: grafana.nvoi.to
-  admin_password: $GRAFANA_ADMIN_PWD
-
-  alerts:
-    slack: $SLACK_WEBHOOK_URL
-
-    email:
-      provider: postmark
-      token: $POSTMARK_SERVER_TOKEN
-      from: alerts@nvoi.to
-      to: [ops@nvoi.to]
-
-    sms:
-      provider: twilio
-      account: $TWILIO_ACCOUNT_SID
-      token: $TWILIO_AUTH_TOKEN
-      from: $TWILIO_FROM_NUMBER
-      to: ["+33611223344"]
+# monitor:
+#   domain: grafana.nvoi.to              # public Ingress with cert-manager TLS
+#   admin_password: $GRAFANA_ADMIN_PWD   # required when domain: is set
+#
+#   alerts:
+#     slack: $SLACK_WEBHOOK_URL
+#     email:
+#       provider: postmark
+#       token: $POSTMARK_SERVER_TOKEN
+#       from: alerts@nvoi.to
+#       to: [ops@nvoi.to]
+#     sms:
+#       provider: twilio
+#       account: $TWILIO_ACCOUNT_SID
+#       token: $TWILIO_AUTH_TOKEN
+#       from: $TWILIO_FROM_NUMBER
+#       to: ["+33611223344"]
