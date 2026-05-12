@@ -90,12 +90,19 @@ func TestBuildGrafanaDeployment_ContainersAndMounts(t *testing.T) {
 	if !found {
 		t.Error("missing GF_SECURITY_ADMIN_PASSWORD env var")
 	}
-	// Shared provisioning emptyDir between containers.
-	if !hasMount(grafana.VolumeMounts, "provisioning", "/etc/grafana/provisioning") {
-		t.Errorf("grafana missing provisioning mount: %v", grafana.VolumeMounts)
+	// Three provisioning surfaces. Grafana mounts all three; sidecar
+	// mounts only dashboards (where it writes).
+	if !hasMount(grafana.VolumeMounts, "datasources", "/etc/grafana/provisioning/datasources") {
+		t.Errorf("grafana missing datasources mount: %v", grafana.VolumeMounts)
 	}
-	if !hasMount(sidecar.VolumeMounts, "provisioning", "/etc/grafana/provisioning") {
-		t.Errorf("sidecar missing provisioning mount: %v", sidecar.VolumeMounts)
+	if !hasMount(grafana.VolumeMounts, "alerting", "/etc/grafana/provisioning/alerting") {
+		t.Errorf("grafana missing alerting mount: %v", grafana.VolumeMounts)
+	}
+	if !hasMount(grafana.VolumeMounts, "dashboards", "/etc/grafana/provisioning/dashboards") {
+		t.Errorf("grafana missing dashboards mount: %v", grafana.VolumeMounts)
+	}
+	if !hasMount(sidecar.VolumeMounts, "dashboards", "/etc/grafana/provisioning/dashboards") {
+		t.Errorf("sidecar missing dashboards mount: %v", sidecar.VolumeMounts)
 	}
 }
 
@@ -139,7 +146,11 @@ func TestBuildGrafanaIngress_WithDomain(t *testing.T) {
 
 func TestBuildStack_AllKindsPresent(t *testing.T) {
 	rt := fixtureRuntime(&runtime.ResolvedMonitor{Domain: "grafana.nvoi.to", AdminPassword: "p"})
-	objects, names := BuildStack(rt, fixtureCreds())
+	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
+	objects, names, err := BuildStack(rt, fixtureCreds())
+	if err != nil {
+		t.Fatalf("BuildStack: %v", err)
+	}
 
 	if len(objects) == 0 {
 		t.Fatal("empty stack")
@@ -171,7 +182,11 @@ func TestBuildStack_AllKindsPresent(t *testing.T) {
 
 func TestBuildStack_NoIngressInTunnelMode(t *testing.T) {
 	rt := fixtureRuntime(nil)
-	_, names := BuildStack(rt, fixtureCreds())
+	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
+	_, names, err := BuildStack(rt, fixtureCreds())
+	if err != nil {
+		t.Fatalf("BuildStack: %v", err)
+	}
 	if len(names.Ingresses) != 0 {
 		t.Errorf("expected 0 Ingresses in tunnel mode, got %d", len(names.Ingresses))
 	}
@@ -182,7 +197,11 @@ func TestBuildStack_NamespacedConsistency(t *testing.T) {
 	// observability namespace. Cluster-scoped objects (ClusterRole,
 	// ClusterRoleBinding) skip the check.
 	rt := fixtureRuntime(nil)
-	objects, _ := BuildStack(rt, fixtureCreds())
+	rt.Cfg = fixtureConfig() // BuildStack needs Cfg for dashboards + alerts
+	objects, _, err := BuildStack(rt, fixtureCreds())
+	if err != nil {
+		t.Fatalf("BuildStack: %v", err)
+	}
 	for _, obj := range objects {
 		acc, ok := obj.(interface{ GetNamespace() string })
 		if !ok {

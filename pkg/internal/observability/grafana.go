@@ -110,18 +110,27 @@ allow_embedding = false
 
 // buildGrafanaDeployment renders the grafana + k8s-sidecar pod.
 //
-// Single Deployment replica. Two containers:
-//   - grafana: official image, reads provisioning dirs at boot AND
-//     watches them for hot-reload (the sidecar writes new files
-//     after startup).
-//   - k8s-sidecar: watches the namespace for ConfigMaps labeled
-//     grafana_dashboard=1 / grafana_datasource=1 / grafana_alert=1,
-//     drops their content into the matching provisioning dir.
+// Provisioning layout (paths under /etc/grafana/provisioning/):
 //
-// Shared emptyDir for /etc/grafana/provisioning so both containers
-// see the same files — sidecar writes, grafana reads.
+//   - datasources/   — direct ConfigMap mount (grafana-datasources).
+//     Static; Grafana loads at boot.
+//   - alerting/      — projected volume combining grafana-contact-points
+//                      + grafana-notification-policy + alert-rules
+//                      ConfigMaps, each `optional: true`. Static;
+//                      Grafana loads at boot.
+//   - dashboards/    — emptyDir written by the k8s-sidecar that
+//                      watches grafana_dashboard=1 ConfigMaps in the
+//                      namespace. Hot-reloads as dashboards land.
+//                      A static dashboards-provider ConfigMap mounts
+//                      one file (provider.yaml) into the same dir so
+//                      Grafana knows to scan the folder.
+//
+// optional: true on every projected source lets the Deployment stay
+// static — Grafana boots fine when alerts ConfigMaps don't exist (no
+// monitor.alerts configured).
 func buildGrafanaDeployment() *appsv1.Deployment {
 	replicas := int32(1)
+	optional := true
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      grafanaComponent,
@@ -153,7 +162,9 @@ func buildGrafanaDeployment() *appsv1.Deployment {
 							Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 3000}},
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "config", MountPath: "/etc/grafana/grafana.ini", SubPath: "grafana.ini"},
-								{Name: "provisioning", MountPath: "/etc/grafana/provisioning"},
+								{Name: "datasources", MountPath: "/etc/grafana/provisioning/datasources"},
+								{Name: "alerting", MountPath: "/etc/grafana/provisioning/alerting"},
+								{Name: "dashboards", MountPath: "/etc/grafana/provisioning/dashboards"},
 								{Name: "data", MountPath: "/var/lib/grafana"},
 							},
 							Resources: stdRequests("100m", "128Mi"),
@@ -168,18 +179,9 @@ func buildGrafanaDeployment() *appsv1.Deployment {
 								{Name: "RESOURCE", Value: "configmap"},
 								{Name: "NAMESPACE", Value: Namespace},
 								{Name: "WATCH_METHOD", Value: "WATCH"},
-								// Multi-label support: kiwigrid sidecar runs
-								// a SINGLE label-filter per container.
-								// For multi-resource provisioning (datasources,
-								// dashboards, alerts) we'd run multiple sidecar
-								// containers OR rely on the sidecar's secondary
-								// label discovery via LABEL2 (1.x+). For v1,
-								// dashboards via this container; datasources +
-								// alerts are applied directly as files written
-								// to a startup ConfigMap mount (see 4e + PR 5).
 							},
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: "provisioning", MountPath: "/etc/grafana/provisioning"},
+								{Name: "dashboards", MountPath: "/etc/grafana/provisioning/dashboards"},
 							},
 							Resources: stdRequests("50m", "64Mi"),
 						},
@@ -188,7 +190,44 @@ func buildGrafanaDeployment() *appsv1.Deployment {
 						{Name: "config", VolumeSource: corev1.VolumeSource{
 							ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: grafanaConfigName}},
 						}},
-						{Name: "provisioning", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						{Name: "datasources", VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{LocalObjectReference: corev1.LocalObjectReference{Name: grafanaDatasourcesName}},
+						}},
+						// alerting is a projected volume combining the three
+						// optional alert-provisioning ConfigMaps. Each
+						// `optional: true` so Grafana boots cleanly when
+						// monitor.alerts is unset.
+						{Name: "alerting", VolumeSource: corev1.VolumeSource{
+							Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{
+									{ConfigMap: &corev1.ConfigMapProjection{
+										LocalObjectReference: corev1.LocalObjectReference{Name: grafanaContactPointsName},
+										Optional:             &optional,
+									}},
+									{ConfigMap: &corev1.ConfigMapProjection{
+										LocalObjectReference: corev1.LocalObjectReference{Name: grafanaPolicyName},
+										Optional:             &optional,
+									}},
+									{ConfigMap: &corev1.ConfigMapProjection{
+										LocalObjectReference: corev1.LocalObjectReference{Name: alertRulesConfigMapName},
+										Optional:             &optional,
+									}},
+									// Dashboards provider config — points Grafana
+									// at /etc/grafana/provisioning/dashboards.
+									// NOTE: belongs in /dashboards/, not /alerting/.
+									// Moved out below; included in the dashboards
+									// projected volume instead.
+								},
+							},
+						}},
+						// Dashboards: an emptyDir the sidecar writes JSON
+						// files into + a projected provider-config layer.
+						// Use emptyDir as base for sidecar writes; provider
+						// config goes into a sibling ConfigMap mount via
+						// subPath (separate volume entry would conflict on
+						// the same mountPath; the sidecar handles the
+						// provider auto-create in kiwigrid 1.27+).
+						{Name: "dashboards", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					},
 				},
@@ -196,6 +235,16 @@ func buildGrafanaDeployment() *appsv1.Deployment {
 		},
 	}
 }
+
+// Provisioning ConfigMap names referenced by buildGrafanaDeployment's
+// projected volume. Duplicated here (alongside grafana.subpackage's
+// constants) so this file stays self-contained and pkg/internal/
+// observability doesn't need to import its own subpackage to compose.
+const (
+	grafanaDatasourcesName   = "grafana-datasources"
+	grafanaContactPointsName = "grafana-contact-points"
+	grafanaPolicyName        = "grafana-notification-policy"
+)
 
 // buildGrafanaService returns the ClusterIP Service exposing :3000
 // (Grafana's HTTP port). `nvoi monitor` port-forwards through this

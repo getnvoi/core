@@ -20,8 +20,11 @@ package observability
 // required, but the deterministic sequence keeps log diffs readable.
 
 import (
+	"fmt"
+
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/getnvoi/core/pkg/internal/observability/grafana"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -34,7 +37,7 @@ import (
 // All builders are pure — no I/O, no env access. Failure modes are
 // limited to "credentials invalid" surfaced by the caller's earlier
 // EnsureBuckets call.
-func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Object, manifest DeclaredNames) {
+func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Object, manifest DeclaredNames, err error) {
 	objects = []apiruntime.Object{}
 
 	// ── Secrets ─────────────────────────────────────────────────────
@@ -43,13 +46,47 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	objects = append(objects, objstoreSecret, adminSecret)
 	manifest.Secrets = []string{objstoreSecret.Name, adminSecret.Name}
 
-	// ── ConfigMaps ──────────────────────────────────────────────────
+	// ── ConfigMaps (stack components) ───────────────────────────────
 	promCM := buildPrometheusConfigMap()
 	lokiCM := buildLokiConfigMap(creds)
 	promtailCM := buildPromtailConfigMap()
 	grafanaCM := buildGrafanaConfigMap(rt)
 	objects = append(objects, promCM, lokiCM, promtailCM, grafanaCM)
 	manifest.ConfigMaps = []string{promCM.Name, lokiCM.Name, promtailCM.Name, grafanaCM.Name}
+
+	// ── Grafana provisioning bundle (datasources + optional alerts) ─
+	prov, err := grafana.BuildProvisioning(rt)
+	if err != nil {
+		return nil, manifest, fmt.Errorf("build grafana provisioning: %w", err)
+	}
+	for _, o := range prov.Objects {
+		if o.Secret != nil {
+			objects = append(objects, o.Secret)
+			manifest.Secrets = append(manifest.Secrets, o.Secret.Name)
+		}
+		if o.ConfigMap != nil {
+			objects = append(objects, o.ConfigMap)
+			manifest.ConfigMaps = append(manifest.ConfigMaps, o.ConfigMap.Name)
+		}
+	}
+
+	// ── Alert rules ConfigMap (mounted by Grafana via projected vol) ─
+	alertCM, alertName, err := BuildAlertRules(rt)
+	if err != nil {
+		return nil, manifest, fmt.Errorf("build alert rules: %w", err)
+	}
+	objects = append(objects, alertCM)
+	manifest.ConfigMaps = append(manifest.ConfigMaps, alertName)
+
+	// ── Dashboard ConfigMaps (watched by kiwigrid sidecar) ──────────
+	dashCMs, dashNames, err := BuildDashboards(rt)
+	if err != nil {
+		return nil, manifest, fmt.Errorf("build dashboards: %w", err)
+	}
+	for _, cm := range dashCMs {
+		objects = append(objects, cm)
+	}
+	manifest.ConfigMaps = append(manifest.ConfigMaps, dashNames...)
 
 	// ── RBAC for Promtail (cluster-scoped) ──────────────────────────
 	sa, cr, crb := buildPromtailRBAC()
@@ -88,7 +125,7 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 		manifest.Ingresses = []string{ing.Name}
 	}
 
-	return objects, manifest
+	return objects, manifest, nil
 }
 
 // DeclaredNames is what the caller hands to SweepOwned for each
