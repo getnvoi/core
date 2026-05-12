@@ -150,6 +150,20 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(grafanaComponent)},
 				Spec: corev1.PodSpec{
+					// initContainer copies the dashboards provider config
+					// into the dashboards emptyDir so Grafana knows to
+					// scan the path for JSON files. The sidecar writes
+					// dashboards into the same dir at runtime.
+					InitContainers: []corev1.Container{{
+						Name:    "dashboards-provider-init",
+						Image:   "busybox:1.36",
+						Command: []string{"sh", "-c", "cp /provider/dashboards.yaml /dashboards/dashboards.yaml"},
+						VolumeMounts: []corev1.VolumeMount{
+							{Name: "dashboards-provider", MountPath: "/provider"},
+							{Name: "dashboards", MountPath: "/dashboards"},
+						},
+						Resources: stdRequests("10m", "16Mi"),
+					}},
 					Containers: []corev1.Container{
 						{
 							Name:  "grafana",
@@ -216,14 +230,16 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 								},
 							},
 						}},
-						// Dashboards: an emptyDir the sidecar writes JSON
-						// files into + a projected provider-config layer.
-						// Use emptyDir as base for sidecar writes; provider
-						// config goes into a sibling ConfigMap mount via
-						// subPath (separate volume entry would conflict on
-						// the same mountPath; the sidecar handles the
-						// provider auto-create in kiwigrid 1.27+).
+						// Dashboards: emptyDir the sidecar writes dashboard
+						// JSON files into. The initContainer pre-populates
+						// dashboards.yaml (provider config) into the same
+						// dir so Grafana auto-loads the JSON files.
 						{Name: "dashboards", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						{Name: "dashboards-provider", VolumeSource: corev1.VolumeSource{
+							ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{Name: grafanaDashboardsProviderName},
+							},
+						}},
 						{Name: "data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 					},
 				},
@@ -237,10 +253,46 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 // constants) so this file stays self-contained and pkg/internal/
 // observability doesn't need to import its own subpackage to compose.
 const (
-	grafanaDatasourcesName   = "grafana-datasources"
-	grafanaContactPointsName = "grafana-contact-points"
-	grafanaPolicyName        = "grafana-notification-policy"
+	grafanaDatasourcesName        = "grafana-datasources"
+	grafanaContactPointsName      = "grafana-contact-points"
+	grafanaPolicyName             = "grafana-notification-policy"
+	grafanaDashboardsProviderName = "grafana-dashboards-provider"
 )
+
+// buildDashboardsProviderConfigMap renders the dashboards provisioning
+// provider config Grafana needs at /etc/grafana/provisioning/dashboards/
+// to know it should scan that path for JSON files. Without this,
+// dashboard ConfigMaps land in the dir (via the kiwigrid sidecar) but
+// Grafana never loads them — Grafana only loads dashboards when a
+// provider config tells it where to look.
+//
+// Static content; one ConfigMap, one key (dashboards.yaml). Copied
+// into the dashboards emptyDir at pod start by an initContainer
+// (see buildGrafanaDeployment). Can't mount via subPath alongside
+// the emptyDir — k8s doesn't allow it.
+func buildDashboardsProviderConfigMap() *corev1.ConfigMap {
+	const cfg = `apiVersion: 1
+providers:
+  - name: nvoi
+    orgId: 1
+    folder: nvoi
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
+`
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      grafanaDashboardsProviderName,
+			Namespace: Namespace,
+			Labels:    objectLabels(grafanaComponent),
+		},
+		Data: map[string]string{"dashboards.yaml": cfg},
+	}
+}
 
 // buildGrafanaEnv composes the Grafana container's env-var list.
 // Admin password is always present (sourced from grafana-admin Secret).

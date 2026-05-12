@@ -155,6 +155,44 @@ func TestBuildGrafanaEnv_PostmarkEnablesSMTP(t *testing.T) {
 	}
 }
 
+func TestBuildDashboardsProviderConfigMap(t *testing.T) {
+	cm := buildDashboardsProviderConfigMap()
+	if cm.Namespace != Namespace {
+		t.Errorf("namespace: %q", cm.Namespace)
+	}
+	if cm.Name != grafanaDashboardsProviderName {
+		t.Errorf("name: %q", cm.Name)
+	}
+	yml := cm.Data["dashboards.yaml"]
+	for _, want := range []string{
+		"apiVersion: 1",
+		"providers:",
+		"type: file",
+		"path: /etc/grafana/provisioning/dashboards",
+	} {
+		if !strings.Contains(yml, want) {
+			t.Errorf("dashboards.yaml missing %q\n%s", want, yml)
+		}
+	}
+}
+
+func TestBuildGrafanaDeployment_InitContainerPopulatesDashboardsProvider(t *testing.T) {
+	dep := buildGrafanaDeployment(fixtureRuntime(nil))
+	if len(dep.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("want 1 init container, got %d", len(dep.Spec.Template.Spec.InitContainers))
+	}
+	init := dep.Spec.Template.Spec.InitContainers[0]
+	if init.Name != "dashboards-provider-init" {
+		t.Errorf("init container name: %q", init.Name)
+	}
+	if !hasMount(init.VolumeMounts, "dashboards-provider", "/provider") {
+		t.Errorf("init missing provider mount: %v", init.VolumeMounts)
+	}
+	if !hasMount(init.VolumeMounts, "dashboards", "/dashboards") {
+		t.Errorf("init missing dashboards mount: %v", init.VolumeMounts)
+	}
+}
+
 func TestBuildGrafanaIngress_NilWhenNoDomain(t *testing.T) {
 	rt := fixtureRuntime(nil)
 	if ing := buildGrafanaIngress(rt); ing != nil {

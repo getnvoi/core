@@ -51,8 +51,9 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	lokiCM := buildLokiConfigMap(creds)
 	promtailCM := buildPromtailConfigMap()
 	grafanaCM := buildGrafanaConfigMap(rt)
-	objects = append(objects, promCM, lokiCM, promtailCM, grafanaCM)
-	manifest.ConfigMaps = []string{promCM.Name, lokiCM.Name, promtailCM.Name, grafanaCM.Name}
+	dashProviderCM := buildDashboardsProviderConfigMap()
+	objects = append(objects, promCM, lokiCM, promtailCM, grafanaCM, dashProviderCM)
+	manifest.ConfigMaps = []string{promCM.Name, lokiCM.Name, promtailCM.Name, grafanaCM.Name, dashProviderCM.Name}
 
 	// ── Grafana provisioning bundle (datasources + optional alerts) ─
 	prov, err := grafana.BuildProvisioning(rt)
