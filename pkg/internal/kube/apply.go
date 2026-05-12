@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -169,6 +170,149 @@ func (c *Client) applyIngress(ctx context.Context, ns string, ing *networkingv1.
 		ing.ResourceVersion = existing.ResourceVersion
 		ing.Status = existing.Status
 		_, err = api.Update(ctx, ing, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyDaemonSet is a Get → Create-or-Update for DaemonSets. Promtail
+// is the v1 user. Preserves Status (controller writes scheduled /
+// desired counts there async).
+func (c *Client) applyDaemonSet(ctx context.Context, ns string, ds *appsv1.DaemonSet) error {
+	api := c.CS.AppsV1().DaemonSets(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, ds.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, ds, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		ds.ResourceVersion = existing.ResourceVersion
+		ds.Status = existing.Status
+		_, err = api.Update(ctx, ds, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyNamespace is a cluster-scoped Get → Create-or-Update. The
+// namespace's spec is essentially immutable post-create (no finalizers
+// to push around), so we preserve ResourceVersion + Status and update
+// labels/annotations only.
+func (c *Client) applyNamespace(ctx context.Context, ns *corev1.Namespace) error {
+	api := c.CS.CoreV1().Namespaces()
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, ns.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, ns, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		ns.ResourceVersion = existing.ResourceVersion
+		ns.Status = existing.Status
+		_, err = api.Update(ctx, ns, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyServiceAccount is a Get → Create-or-Update. ServiceAccounts
+// rarely change post-create; preserve ResourceVersion + the
+// auto-generated Secrets reference.
+func (c *Client) applyServiceAccount(ctx context.Context, ns string, sa *corev1.ServiceAccount) error {
+	api := c.CS.CoreV1().ServiceAccounts(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, sa.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, sa, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		sa.ResourceVersion = existing.ResourceVersion
+		// Preserve auto-managed token Secrets the apiserver attaches.
+		sa.Secrets = existing.Secrets
+		sa.ImagePullSecrets = existing.ImagePullSecrets
+		_, err = api.Update(ctx, sa, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyRole is a namespace-scoped Get → Create-or-Update for the
+// RBAC Role that grants the Grafana sidecar configmap-watch on its
+// own namespace.
+func (c *Client) applyRole(ctx context.Context, ns string, r *rbacv1.Role) error {
+	api := c.CS.RbacV1().Roles(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, r.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, r, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		r.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, r, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyRoleBinding is the namespace-scoped sibling of
+// applyClusterRoleBinding — same shape, scoped to a single namespace.
+func (c *Client) applyRoleBinding(ctx context.Context, ns string, rb *rbacv1.RoleBinding) error {
+	api := c.CS.RbacV1().RoleBindings(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, rb.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, rb, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		rb.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, rb, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyClusterRole is a cluster-scoped Get → Create-or-Update for the
+// RBAC ClusterRole that grants Promtail node-discovery permissions.
+func (c *Client) applyClusterRole(ctx context.Context, cr *rbacv1.ClusterRole) error {
+	api := c.CS.RbacV1().ClusterRoles()
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, cr.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, cr, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		cr.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, cr, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyClusterRoleBinding is a cluster-scoped Get → Create-or-Update.
+// Binds Promtail's ServiceAccount to the ClusterRole.
+func (c *Client) applyClusterRoleBinding(ctx context.Context, crb *rbacv1.ClusterRoleBinding) error {
+	api := c.CS.RbacV1().ClusterRoleBindings()
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, crb.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, crb, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		crb.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, crb, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
 	})
 }

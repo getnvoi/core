@@ -30,6 +30,17 @@ func Server(app, env, name string) string { return Prefix(app, env) + "-" + name
 // re-promote remote state.
 func StateBucket(app, env string) string { return Prefix(app, env) + "-tfstate" }
 
+// ObservabilityLogsBucket returns the object-storage bucket Loki ships
+// chunks to. One per (app, env) — mirrors the StateBucket pattern.
+// Lifecycle: created on first `nvoi deploy` with monitor: set; deleted
+// only on `nvoi destroy`.
+func ObservabilityLogsBucket(app, env string) string { return Prefix(app, env) + "-logs" }
+
+// ObservabilityMetricsBucket returns the object-storage bucket Thanos
+// ships Prometheus blocks to. One per (app, env). Same lifecycle as
+// the logs bucket.
+func ObservabilityMetricsBucket(app, env string) string { return Prefix(app, env) + "-metrics" }
+
 // WorkDir returns the per-(app, env) tofu working directory under
 // the operator's cwd: `.tf/{app}-{env}/`. Bundle files + `terraform.tfstate`
 // (filename retained by OpenTofu for state-format compat) land here.

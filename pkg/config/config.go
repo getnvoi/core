@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/getnvoi/core/pkg/providers"
 )
 
 // Config is the parsed YAML. One struct, one shape, mirrors the
@@ -61,6 +63,65 @@ type Config struct {
 	// `acme@<first-domain>`. Real operators want a real address so
 	// LE rate-limit and expiration warnings reach a human.
 	ACMEEmail string `yaml:"acme_email,omitempty"`
+
+	// Monitor activates the observability stack (Prometheus + Thanos +
+	// Loki + Grafana + dashboards + alert rules + contact points)
+	// when non-nil. Presence is the toggle — same convention as
+	// `build:` / `storage:` / `domains:` everywhere else. Empty
+	// `monitor: {}` is the minimum valid form (stack on, tunnel-only
+	// access via `nvoi monitor`, no alert routing).
+	Monitor *MonitorSpec `yaml:"monitor,omitempty"`
+}
+
+// MonitorSpec configures the observability stack. Tunnel-only access
+// is the default — operators reach Grafana via `nvoi monitor` (SSH
+// port-forward). Set Domain to also expose Grafana over a public
+// Ingress with cert-manager-issued TLS.
+//
+// AdminPassword is required when Domain is set (public exposure must
+// have real auth). Tunnel-only mode runs Grafana with anonymous
+// viewer access — no admin password needed because the SSH tunnel is
+// the access control.
+//
+// Both Domain and AdminPassword accept literal values or `$VAR`
+// references resolved at the cmd/cli boundary.
+type MonitorSpec struct {
+	Domain        string      `yaml:"domain,omitempty"`
+	AdminPassword string      `yaml:"admin_password,omitempty"`
+	Alerts        *AlertsSpec `yaml:"alerts,omitempty"`
+
+	// Dashboards lists glob paths (relative to the config file) to
+	// Grafana dashboard JSON files. Each match becomes one ConfigMap
+	// the Grafana sidecar provisions. Empty → no dashboards (operator
+	// can still explore raw metrics via Grafana's Explore tab).
+	//
+	// nvoi ships reference dashboards under examples/dashboards/ —
+	// operators copy + customize, OR pull from grafana.com.
+	Dashboards []string `yaml:"dashboards,omitempty"`
+
+	// AlertRules lists glob paths to Grafana alert-rule provisioning
+	// YAML files. Each match becomes a file in Grafana's
+	// /etc/grafana/provisioning/alerting/ directory. Empty → no alert
+	// rules (only datasources + contact points come from nvoi).
+	//
+	// nvoi ships reference alert rules under examples/alerts/.
+	AlertRules []string `yaml:"alert_rules,omitempty"`
+}
+
+// AlertsSpec configures notification channels. Each non-nil field is
+// provisioned as a Grafana contact point + folded into the default
+// notification policy (every firing alert routes through every
+// configured channel for v1). When AlertsSpec is nil, alerts fire to
+// the Grafana dashboard only — operators see them on the home page,
+// no external notification.
+//
+// Slack is a plain webhook URL (single-vendor field, no provider
+// abstraction). Email and SMS dispatch through registered providers
+// (postmark, twilio, …) — same registry pattern as BucketProvider.
+type AlertsSpec struct {
+	Slack string               `yaml:"slack,omitempty"`
+	Email *providers.AlertSpec `yaml:"email,omitempty"`
+	SMS   *providers.AlertSpec `yaml:"sms,omitempty"`
 }
 
 // RegistryDef holds pull credentials for a single private container
