@@ -117,7 +117,8 @@ func (s *Session) sweepObservability(ctx context.Context, lg log.Log, scope kube
 		kube.KindDeployment, kube.KindStatefulSet, kube.KindDaemonSet,
 		kube.KindConfigMap, kube.KindSecret, kube.KindService,
 		kube.KindIngress,
-		kube.KindServiceAccount, kube.KindClusterRole, kube.KindClusterRoleBinding,
+		kube.KindServiceAccount, kube.KindRole, kube.KindRoleBinding,
+		kube.KindClusterRole, kube.KindClusterRoleBinding,
 	} {
 		if err := s.kc.SweepOwned(ctx, scope, k, nil); err != nil {
 			return fmt.Errorf("sweep %s: %w", k, err)
@@ -146,6 +147,8 @@ func (s *Session) reconcileObservabilityRemoval(
 		{kube.KindConfigMap, declared.ConfigMaps},
 		{kube.KindSecret, declared.Secrets},
 		{kube.KindServiceAccount, declared.ServiceAccounts},
+		{kube.KindRole, declared.Roles},
+		{kube.KindRoleBinding, declared.RoleBindings},
 		{kube.KindClusterRole, declared.ClusterRoles},
 		{kube.KindClusterRoleBinding, declared.ClusterRoleBindings},
 		{kube.KindIngress, declared.Ingresses},

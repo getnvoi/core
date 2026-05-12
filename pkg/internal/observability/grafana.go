@@ -22,6 +22,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -150,6 +151,11 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(grafanaComponent)},
 				Spec: corev1.PodSpec{
+					// Grafana's sidecar watches ConfigMaps in the
+					// namespace; default SA can't, so we bind a
+					// minimal Role to a dedicated SA. Without this the
+					// dashboards never load (403 on configmap watch).
+					ServiceAccountName: grafanaComponent,
 					// initContainer copies the dashboards provider config
 					// into the dashboards emptyDir so Grafana knows to
 					// scan the path for JSON files. The sidecar writes
@@ -292,6 +298,54 @@ providers:
 		},
 		Data: map[string]string{"dashboards.yaml": cfg},
 	}
+}
+
+// buildGrafanaRBAC returns the ServiceAccount + Role + RoleBinding
+// the Grafana sidecar needs to watch ConfigMaps in the observability
+// namespace. Namespace-scoped (not cluster-scoped): the sidecar only
+// reads ConfigMaps in its own namespace, so minimal-privilege RBAC.
+//
+// Returns three objects in apply order: SA, Role, RoleBinding.
+func buildGrafanaRBAC() (*corev1.ServiceAccount, *rbacv1.Role, *rbacv1.RoleBinding) {
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      grafanaComponent,
+			Namespace: Namespace,
+			Labels:    objectLabels(grafanaComponent),
+		},
+	}
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      grafanaComponent + "-sidecar",
+			Namespace: Namespace,
+			Labels:    objectLabels(grafanaComponent),
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{""},
+				Resources: []string{"configmaps", "secrets"},
+				Verbs:     []string{"get", "list", "watch"},
+			},
+		},
+	}
+	rb := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      grafanaComponent + "-sidecar",
+			Namespace: Namespace,
+			Labels:    objectLabels(grafanaComponent),
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "Role",
+			Name:     grafanaComponent + "-sidecar",
+		},
+		Subjects: []rbacv1.Subject{{
+			Kind:      "ServiceAccount",
+			Name:      grafanaComponent,
+			Namespace: Namespace,
+		}},
+	}
+	return sa, role, rb
 }
 
 // buildGrafanaEnv composes the Grafana container's env-var list.

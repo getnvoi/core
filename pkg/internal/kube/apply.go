@@ -240,6 +240,45 @@ func (c *Client) applyServiceAccount(ctx context.Context, ns string, sa *corev1.
 	})
 }
 
+// applyRole is a namespace-scoped Get → Create-or-Update for the
+// RBAC Role that grants the Grafana sidecar configmap-watch on its
+// own namespace.
+func (c *Client) applyRole(ctx context.Context, ns string, r *rbacv1.Role) error {
+	api := c.CS.RbacV1().Roles(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, r.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, r, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		r.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, r, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyRoleBinding is the namespace-scoped sibling of
+// applyClusterRoleBinding — same shape, scoped to a single namespace.
+func (c *Client) applyRoleBinding(ctx context.Context, ns string, rb *rbacv1.RoleBinding) error {
+	api := c.CS.RbacV1().RoleBindings(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, rb.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, rb, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		rb.ResourceVersion = existing.ResourceVersion
+		_, err = api.Update(ctx, rb, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
 // applyClusterRole is a cluster-scoped Get → Create-or-Update for the
 // RBAC ClusterRole that grants Promtail node-discovery permissions.
 func (c *Client) applyClusterRole(ctx context.Context, cr *rbacv1.ClusterRole) error {

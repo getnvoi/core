@@ -96,6 +96,13 @@ func BuildStack(rt *runtime.Runtime, creds BucketCreds) (objects []apiruntime.Ob
 	manifest.ClusterRoles = []string{cr.Name}
 	manifest.ClusterRoleBindings = []string{crb.Name}
 
+	// ── RBAC for Grafana sidecar (namespace-scoped configmap-watch) ─
+	gsa, grole, grb := buildGrafanaRBAC()
+	objects = append(objects, gsa, grole, grb)
+	manifest.ServiceAccounts = append(manifest.ServiceAccounts, gsa.Name)
+	manifest.Roles = []string{grole.Name}
+	manifest.RoleBindings = []string{grb.Name}
+
 	// ── Workloads ───────────────────────────────────────────────────
 	promSS := buildPrometheusStatefulSet()
 	lokiSS, lokiSvc := buildLoki()
@@ -140,6 +147,8 @@ type DeclaredNames struct {
 	Secrets             []string
 	ConfigMaps          []string
 	ServiceAccounts     []string
+	Roles               []string
+	RoleBindings        []string
 	ClusterRoles        []string
 	ClusterRoleBindings []string
 	StatefulSets        []string

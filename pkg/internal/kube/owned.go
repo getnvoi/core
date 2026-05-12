@@ -51,6 +51,8 @@ const (
 	KindDaemonSet          Kind = "DaemonSet"          // Promtail pod-log shipper
 	KindNamespace          Kind = "Namespace"          // nvoi-observability + future per-app namespaces
 	KindServiceAccount     Kind = "ServiceAccount"     // Promtail node-discovery identity
+	KindRole               Kind = "Role"               // namespaced: Grafana sidecar configmap-watch
+	KindRoleBinding        Kind = "RoleBinding"        // namespaced: Grafana SA → Role binding
 	KindClusterRole        Kind = "ClusterRole"        // Promtail pod-list permission
 	KindClusterRoleBinding Kind = "ClusterRoleBinding" // Promtail SA → ClusterRole binding
 )
@@ -107,6 +109,10 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applyServiceAccount(ctx, ns, o)
 	case *networkingv1.Ingress:
 		return c.applyIngress(ctx, ns, o)
+	case *rbacv1.Role:
+		return c.applyRole(ctx, ns, o)
+	case *rbacv1.RoleBinding:
+		return c.applyRoleBinding(ctx, ns, o)
 	case *rbacv1.ClusterRole:
 		return c.applyClusterRole(ctx, o)
 	case *rbacv1.ClusterRoleBinding:
@@ -202,6 +208,10 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.CoreV1().Namespaces().List(ctx, opts)
 	case KindServiceAccount:
 		return c.CS.CoreV1().ServiceAccounts(ns).List(ctx, opts)
+	case KindRole:
+		return c.CS.RbacV1().Roles(ns).List(ctx, opts)
+	case KindRoleBinding:
+		return c.CS.RbacV1().RoleBindings(ns).List(ctx, opts)
 	case KindClusterRole:
 		return c.CS.RbacV1().ClusterRoles().List(ctx, opts)
 	case KindClusterRoleBinding:
@@ -237,6 +247,10 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		return ignoreNotFound(c.CS.CoreV1().Namespaces().Delete(ctx, name, opts))
 	case KindServiceAccount:
 		return ignoreNotFound(c.CS.CoreV1().ServiceAccounts(ns).Delete(ctx, name, opts))
+	case KindRole:
+		return ignoreNotFound(c.CS.RbacV1().Roles(ns).Delete(ctx, name, opts))
+	case KindRoleBinding:
+		return ignoreNotFound(c.CS.RbacV1().RoleBindings(ns).Delete(ctx, name, opts))
 	case KindClusterRole:
 		return ignoreNotFound(c.CS.RbacV1().ClusterRoles().Delete(ctx, name, opts))
 	case KindClusterRoleBinding:
