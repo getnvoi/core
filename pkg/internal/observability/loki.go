@@ -13,6 +13,8 @@ package observability
 // and pushes batches to Loki. One DaemonSet pod per node.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -180,6 +182,13 @@ scrape_configs:
     kubernetes_sd_configs:
       - role: pod
     relabel_configs:
+      # __host__ = pod's node. Promtail compares __host__ to its own
+      # $HOSTNAME (set to spec.nodeName via downward API on the
+      # DaemonSet) and drops targets not for this node. Without
+      # this, every Promtail instance discovers every pod cluster-
+      # wide but none claim any → promtail_targets_active_total 0.
+      - source_labels: [__meta_kubernetes_pod_node_name]
+        target_label: __host__
       - source_labels: [__meta_kubernetes_pod_node_name]
         target_label: node
       - source_labels: [__meta_kubernetes_namespace]
@@ -193,7 +202,7 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_uid, __meta_kubernetes_pod_container_name]
         separator: /
         target_label: __path__
-        replacement: /var/log/pods/*$1/$2/*.log
+        replacement: /var/log/pods/*$1/*.log
     pipeline_stages:
       - cri: {}
 `
@@ -263,6 +272,15 @@ func buildPromtailRBAC() (*corev1.ServiceAccount, *rbacv1.ClusterRole, *rbacv1.C
 // tainted master too (master-pinned services need their logs shipped).
 func buildPromtailDaemonSet() *appsv1.DaemonSet {
 	hostPathDir := corev1.HostPathDirectory
+	// Hash promtail's config + Loki's chunk-store URL so any change
+	// to either rolls the DaemonSet pods. Without this, ConfigMap
+	// changes propagate to the pod's mounted file but Promtail's
+	// watchConfig is disabled by default → pods keep running the
+	// stale config. Same pattern as grafanaConfigHash.
+	h := sha256.New()
+	h.Write([]byte(buildPromtailConfigMap().Data["config.yaml"]))
+	configHash := hex.EncodeToString(h.Sum(nil))[:16]
+
 	return &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      promtailComponent,
@@ -272,7 +290,10 @@ func buildPromtailDaemonSet() *appsv1.DaemonSet {
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: selectorFor(promtailComponent)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(promtailComponent)},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      podLabels(promtailComponent),
+					Annotations: map[string]string{"nvoi/config-hash": configHash},
+				},
 				Spec: corev1.PodSpec{
 					ServiceAccountName: promtailComponent,
 					Tolerations: []corev1.Toleration{
@@ -282,6 +303,17 @@ func buildPromtailDaemonSet() *appsv1.DaemonSet {
 						Name:  "promtail",
 						Image: PromtailImage,
 						Args:  []string{"-config.file=/etc/promtail/config.yaml"},
+						// HOSTNAME = node name (via downward API).
+						// Promtail's relabel sets __host__ to the pod's
+						// node; it then keeps targets where __host__ ==
+						// $HOSTNAME. Without this env, Promtail uses the
+						// pod's hostname (random suffix) and never
+						// matches → 0 active targets.
+						Env: []corev1.EnvVar{
+							{Name: "HOSTNAME", ValueFrom: &corev1.EnvVarSource{
+								FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"},
+							}},
+						},
 						Ports: []corev1.ContainerPort{{Name: "http", ContainerPort: 9080}},
 						VolumeMounts: []corev1.VolumeMount{
 							{Name: "config", MountPath: "/etc/promtail"},
