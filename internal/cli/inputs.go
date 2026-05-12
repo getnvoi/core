@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 
@@ -13,7 +15,25 @@ import (
 	"github.com/getnvoi/core/pkg/state"
 )
 
+// StdinConfigPath is the sentinel value of --config / -c that switches
+// loading to stdin. Mirrors the standard Unix convention (cat, curl,
+// jq, kubectl). Useful for hosts (desktop app, orchestrator, CI step)
+// that materialize the config in memory and pipe it in rather than
+// writing a file.
+const StdinConfigPath = "-"
+
+// LoadConfig reads + parses + validates the YAML at path. When path
+// is the sentinel "-", reads from os.Stdin instead — letting callers
+// pipe config without touching disk. Aliases and the alongside-.env
+// loader are both bypassed in stdin mode (caller owns argv + env).
 func LoadConfig(path string) (*config.Config, error) {
+	if path == StdinConfigPath {
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read config from stdin: %w", err)
+		}
+		return config.ParseYAML(raw)
+	}
 	return config.LoadFile(path)
 }
 

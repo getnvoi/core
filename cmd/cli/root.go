@@ -24,7 +24,7 @@ func newRoot(r *rt) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.PersistentFlags().StringVarP(&r.flags.ConfigPath, "config", "c", "nvoi.yaml", "path to YAML config")
+	root.PersistentFlags().StringVarP(&r.flags.ConfigPath, "config", "c", "nvoi.yaml", "path to YAML config; '-' reads from stdin")
 	root.PersistentFlags().BoolVar(&r.flags.JSON, "json", false, "stream machine-readable JSONL output")
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {

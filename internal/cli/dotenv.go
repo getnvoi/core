@@ -49,7 +49,17 @@ func LoadDotEnv(path string) error {
 	return sc.Err()
 }
 
+// ResolveDotEnv finds a .env to load before any verb runs. Search:
+//  1. <cwd>/.env
+//  2. <dir-of-configPath>/.env
+//
+// Returns "" when neither exists OR when configPath is the stdin
+// sentinel "-" (host invocations own their env directly; auto-loading
+// a .env from cwd would be a surprise behaviour).
 func ResolveDotEnv(configPath string) string {
+	if configPath == "-" {
+		return ""
+	}
 	if cwd, err := os.Getwd(); err == nil {
 		p := filepath.Join(cwd, ".env")
 		if _, err := os.Stat(p); err == nil {
