@@ -72,15 +72,15 @@ var hetznerReservedServerNames = map[string]bool{
 	"cp":      true, // hcloud_load_balancer.cp + lb_network/target/service
 }
 
-// Provider declares the terraform provider this emitter relies on.
-// Aggregated by compile into the consolidated backend.tf so the
-// module ends up with exactly one `required_providers` block.
-func (emitter) Provider() compile.ProviderRequirement {
-	return compile.ProviderRequirement{
+// Providers declares the terraform providers this emitter's HCL
+// references. Aggregated by compile into the consolidated backend.tf
+// so the module ends up with exactly one `required_providers` block.
+func (emitter) Providers() []compile.ProviderRequirement {
+	return []compile.ProviderRequirement{{
 		Alias:   "hcloud",
 		Source:  "hetznercloud/hcloud",
 		Version: "~> 1.48",
-	}
+	}}
 }
 
 // templateData is the shape the template consumes. Built from rt.Cfg

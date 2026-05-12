@@ -11,6 +11,7 @@ import (
 	"github.com/getnvoi/core/pkg/runtime"
 	"github.com/getnvoi/core/pkg/state"
 
+	_ "github.com/getnvoi/core/pkg/providers/cloudflare"
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
 )
 
@@ -157,6 +158,39 @@ func TestCompile_BackendBlockEmitsResolvedCreds(t *testing.T) {
 		}
 		if got != v {
 			t.Errorf("backend.%s: got %q want %q", k, got, v)
+		}
+	}
+}
+
+// backend.tf must declare the random provider when the cloudflare
+// DNS emitter is active — its tunnel-mode HCL references random_id
+// for the tunnel secret, and a missing required_providers entry
+// would fail `tofu init`. The emitter unconditionally declares
+// random (the cost of pre-fetching ~1MB in Traefik mode is
+// negligible vs. a runtime branch in the Providers() method).
+//
+// This regression covers a class of bug where a template introduces
+// a new HCL resource without the corresponding Providers() entry.
+func TestCompile_BackendTF_DeclaresRandomWhenCloudflareDNSActive(t *testing.T) {
+	r := rt(t, map[string]config.ServerSpec{
+		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
+	}, nil)
+	r.Cfg.Providers.DNS = "cloudflare"
+	r.Cfg.Services = map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}}
+	r.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
+	r.Providers = runtime.ProviderInputs{Cloudflare: &runtime.CloudflareInputs{
+		ZoneID: "z", Zone: "nvoi.to", AccountID: "a",
+	}}
+
+	src := bundleFile(t, r, "backend.tf")
+	hcl := string(src)
+	for _, want := range []string{
+		`random = `,
+		`"hashicorp/random"`,
+		`"~> 3"`,
+	} {
+		if !strings.Contains(hcl, want) {
+			t.Errorf("backend.tf missing %q (tunnel HCL uses random_id without the required_providers entry)\n--- output ---\n%s", want, hcl)
 		}
 	}
 }

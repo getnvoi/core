@@ -23,8 +23,8 @@ type ProviderRequirement struct {
 //
 // Each emitter writes ONLY its `provider "X" {}` config block and
 // resources — never the `terraform { required_providers / backend }`
-// meta-block. compile aggregates Provider() requirements from every
-// active emitter into a single versions.tf so the module always has
+// meta-block. compile aggregates Providers() requirements from every
+// active emitter into a single backend.tf so the module always has
 // exactly one terraform meta-block.
 type InfraEmitter interface {
 	EmitInfra(rt *nvoiRuntime.Runtime) ([]byte, error)
@@ -35,9 +35,11 @@ type InfraEmitter interface {
 	// are nodes being removed".
 	ServerResourceType() string
 
-	// Provider returns this emitter's terraform provider requirement.
-	// Aggregated by compile into versions.tf.
-	Provider() ProviderRequirement
+	// Providers returns every terraform provider this emitter's HCL
+	// references — primary plus any utility providers (random,
+	// time, etc.) the emitted resources depend on. Aggregated by
+	// compile into backend.tf's required_providers block.
+	Providers() []ProviderRequirement
 }
 
 var infraEmitters = map[string]InfraEmitter{}
@@ -72,7 +74,12 @@ func ServerResourceType(provider string) (string, error) {
 // `<provider>_record` resources as HCL bytes.
 type DNSEmitter interface {
 	EmitDNS(rt *nvoiRuntime.Runtime) ([]byte, error)
-	Provider() ProviderRequirement
+
+	// Providers returns every terraform provider this emitter's HCL
+	// references. The cloudflare DNS emitter in tunnel mode, for
+	// example, returns [cloudflare, random] because its tunnel
+	// resource depends on a random_id for the tunnel secret.
+	Providers() []ProviderRequirement
 
 	// CertManagerSolver returns the YAML fragment for cert-manager's
 	// `solvers` block in a ClusterIssuer, plus the credential Secrets

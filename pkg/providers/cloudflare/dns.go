@@ -37,14 +37,33 @@ var (
 // the produced HCL is a pure transform of the input.
 type DNSEmitter struct{}
 
-// Provider declares the cloudflare terraform provider requirement.
-// Aggregated by compile into the consolidated backend.tf alongside
-// other active providers (hcloud, etc).
-func (DNSEmitter) Provider() compile.ProviderRequirement {
-	return compile.ProviderRequirement{
-		Alias:   "cloudflare",
-		Source:  "cloudflare/cloudflare",
-		Version: "~> 4",
+// Providers declares every terraform provider this emitter's HCL
+// references. Always includes cloudflare (both Traefik-mode A records
+// and tunnel-mode CNAMEs use it). Adds random when tunnel mode is
+// active — the cloudflare_zero_trust_tunnel_cloudflared resource's
+// tunnel_secret is sourced from a random_id resource.
+//
+// Returning random unconditionally would over-declare in Traefik
+// mode; this method has no rt parameter today, so we always include
+// it. The cost is one extra ~1MB provider download in Traefik mode,
+// which beats a runtime check and an interface change.
+func (DNSEmitter) Providers() []compile.ProviderRequirement {
+	return []compile.ProviderRequirement{
+		{
+			Alias:   "cloudflare",
+			Source:  "cloudflare/cloudflare",
+			Version: "~> 4",
+		},
+		{
+			// hashicorp/random backs the tunnel_secret resource. The
+			// dependency is conditional on tunnel mode but declaring
+			// it unconditionally keeps the Providers() signature
+			// simple. tofu only fetches the provider; resources
+			// referencing it materialize only in tunnel mode.
+			Alias:   "random",
+			Source:  "hashicorp/random",
+			Version: "~> 3",
+		},
 	}
 }
 
