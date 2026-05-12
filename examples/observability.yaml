@@ -31,6 +31,20 @@ monitor:
     - dashboards/*.json # reference dashboard under examples/dashboards/
   alert_rules:
     - alerts/*.yaml # reference rules under examples/alerts/
+
+  alerts:
+    slack: $SLACK_WEBHOOK_URL
+    email:
+      provider: postmark
+      token: $POSTMARK_SERVER_TOKEN
+      from: alerts@nvoi.to
+      to: [ops@nvoi.to]
+    sms:
+      provider: twilio
+      account: $TWILIO_ACCOUNT_SID
+      token: $TWILIO_AUTH_TOKEN
+      from: $TWILIO_FROM_NUMBER
+      to: ["+33611223344"]
 #
 # ── To enable public Ingress + real alerts, uncomment + set env vars ──
 #
