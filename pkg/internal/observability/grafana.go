@@ -16,6 +16,9 @@ package observability
 //     Certificate land alongside, with real admin auth.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/runtime"
 
@@ -153,6 +156,18 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 	replicas := int32(1)
 	optional := true
 	env := buildGrafanaEnv(rt)
+
+	// Pod-template annotation: hash of the inputs that drive
+	// grafana.ini + the admin Secret. Kubernetes ConfigMap/Secret
+	// volume mounts propagate file changes to the container, but
+	// Grafana reads grafana.ini at process boot and never watches
+	// for changes. Without this, an operator who flips
+	// monitor.alerts or monitor.admin_password sees the new
+	// ConfigMap in the cluster but Grafana keeps running the old
+	// config. Hashing the inputs into the pod template means a
+	// config change → annotation change → Deployment rolling
+	// update → Grafana boots with the new ini.
+	configHash := grafanaConfigHash(rt)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      grafanaComponent,
@@ -163,7 +178,10 @@ func buildGrafanaDeployment(rt *runtime.Runtime) *appsv1.Deployment {
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: selectorFor(grafanaComponent)},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: podLabels(grafanaComponent)},
+				ObjectMeta: metav1.ObjectMeta{
+					Labels:      podLabels(grafanaComponent),
+					Annotations: map[string]string{"nvoi/config-hash": configHash},
+				},
 				Spec: corev1.PodSpec{
 					// Grafana's sidecar watches ConfigMaps in the
 					// namespace; default SA can't, so we bind a
@@ -360,6 +378,30 @@ func buildGrafanaRBAC() (*corev1.ServiceAccount, *rbacv1.Role, *rbacv1.RoleBindi
 		}},
 	}
 	return sa, role, rb
+}
+
+// grafanaConfigHash returns a stable hash of every input that
+// affects Grafana's boot config — grafana.ini content + admin
+// password + every SMTP env value. Any change rolls the pod.
+// SHA-256 truncated to 16 hex chars; collisions are astronomical
+// in practice + the annotation just needs to differ when inputs
+// differ.
+func grafanaConfigHash(rt *runtime.Runtime) string {
+	h := sha256.New()
+	// grafana.ini content
+	h.Write([]byte(buildGrafanaConfigMap(rt).Data["grafana.ini"])) //nolint:errcheck // sha256.Write never errors
+	// admin password
+	h.Write([]byte(AdminPassword(rt)))
+	// SMTP env values (provider name + From address — the Secret
+	// is hashed via the secret materialization elsewhere; here we
+	// hash the deterministic env wiring).
+	if rt != nil && rt.Monitor != nil && rt.Monitor.Alerts != nil && rt.Monitor.Alerts.Email != nil {
+		h.Write([]byte(rt.Monitor.Alerts.Email.Provider))
+		if from, ok := rt.Monitor.Alerts.Email.Fields["from"].(string); ok {
+			h.Write([]byte(from))
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // buildGrafanaEnv composes the Grafana container's env-var list.
