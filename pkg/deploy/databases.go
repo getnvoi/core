@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
+
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
@@ -200,6 +202,32 @@ func (s *Session) reconcileOneDatabase(ctx context.Context, name string, def con
 	for _, obj := range plan.Workloads {
 		if err := kc.ApplyOwned(ctx, scope, obj); err != nil {
 			return fmt.Errorf("apply %T: %w", obj, err)
+		}
+	}
+
+	// Gate workload.ApplyAll on the database actually serving. Without
+	// this, services that bind `databases: [...]` start before
+	// postgres finishes initdb (first deploy) or before the rolled
+	// pod is past startup (subsequent deploys); they CrashLoop on
+	// connection-refused, k8s exponential-backoff delays recovery for
+	// minutes, and `nvoi deploy` returns success while the cluster is
+	// visibly broken via Traefik's "no available server" page.
+	//
+	// We declare the dependency in YAML (services.X.databases). The
+	// deploy pipeline owes the operator the symmetric guarantee: when
+	// it returns, every declared resource is actually healthy.
+	//
+	// Only StatefulSets in the plan are gated — SaaS engines emit
+	// Secret-only plans (the endpoint is already up by the time their
+	// runtime adapter ran), so the loop is a no-op there.
+	for _, obj := range plan.Workloads {
+		ss, ok := obj.(*appsv1.StatefulSet)
+		if !ok {
+			continue
+		}
+		s.Lg.Info(fmt.Sprintf("waiting for database statefulset/%s to be ready", ss.Name))
+		if err := kc.WaitStatefulSetReady(ctx, namespace, ss.Name); err != nil {
+			return fmt.Errorf("wait %s ready: %w", ss.Name, err)
 		}
 	}
 	return nil

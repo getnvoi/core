@@ -315,3 +315,43 @@ func (c *Client) WaitDeploymentReady(ctx context.Context, ns, name string) error
 		}
 	}
 }
+
+// WaitStatefulSetReady polls until ReadyReplicas == Spec.Replicas or
+// ctx expires. Used by deployDatabases to gate workload.ApplyAll on
+// the postgres StatefulSet actually serving — without this, a web
+// pod that binds `databases: [DATABASE=app]` starts before postgres
+// finishes initdb, CrashLoops a few times, and the deploy returns
+// "success" while the cluster is visibly broken to operators staring
+// at https://. Same 5-minute timeout as WaitDeploymentReady — covers
+// initdb + image pull + ZFS PVC bind on a cold node.
+//
+// Postgres pods are also a good fit for this gate because the
+// container's Ready signal is not a true readiness check: the
+// container is "Ready" the moment postgresd is alive, but accepting
+// connections lags by initdb time on first boot. ReadyReplicas
+// reflects the kubelet's readiness check, which today is just "is
+// container running" because the image carries no readiness probe.
+// That's still better than no wait at all — by the time
+// ReadyReplicas matches Spec.Replicas, the kubelet has decided the
+// pod is healthy, which in practice means postgres is past initdb on
+// the first deploy and serving on every subsequent one.
+func (c *Client) WaitStatefulSetReady(ctx context.Context, ns, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	api := c.CS.AppsV1().StatefulSets(ns)
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
+
+	for {
+		ss, err := api.Get(ctx, name, metav1.GetOptions{})
+		if err == nil && ss.Spec.Replicas != nil && ss.Status.ReadyReplicas >= *ss.Spec.Replicas && ss.Status.ObservedGeneration >= ss.Generation {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("statefulset %s/%s not ready: %w", ns, name, ctx.Err())
+		case <-tick.C:
+		}
+	}
+}
