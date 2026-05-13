@@ -49,6 +49,7 @@ func newRoot(r *rt) *cobra.Command {
 		execCmd(r),
 		logsCmd(r),
 		monitorCmd(r),
+		databaseCmd(r),
 	)
 	return root
 }
