@@ -1,0 +1,133 @@
+# Managed Postgres dogfood — cmd/web + the new databases: block.
+#
+# Replaces the old in-cluster-postgres-as-a-service pattern from
+# nvoi.yaml (postgres declared under `services:` with storage:).
+# Same dogfood app (cmd/web — Gin + gorm/postgres visit log),
+# different substrate underneath:
+#
+#   nvoi.yaml (current main):       nvoi deploys postgres as a regular
+#                                   service on local-path hostPath storage,
+#                                   pinned to master. No backups, no
+#                                   snapshots, no branching, no migrate.
+#
+#   examples/postgres.yaml (here):  nvoi deploys postgres on a dedicated
+#                                   db-worker via OpenEBS ZFS-LocalPV.
+#                                   Full capability matrix — snapshot,
+#                                   branch (sub-second CoW clones),
+#                                   migrate, rollback. Backups gzipped
+#                                   to R2 daily, 14-day retention.
+#
+# What the operator gets:
+#
+#   nvoi deploy -c examples/postgres.yaml
+#   # → provisions master + db-worker on Hetzner; installs k3s;
+#   #   installs ZFS-LocalPV CSI; preps the db-worker's zpool;
+#   #   reconciles postgres (StatefulSet + PVC + Service +
+#   #   credentials Secret + backup CronJob); reconciles web
+#   #   (Deployment + Service + Ingress) with DATABASE_URL +
+#   #   DATABASE_HOST + DATABASE_PORT + DATABASE_USER +
+#   #   DATABASE_PASSWORD injected from the credentials Secret.
+#
+#   curl https://www.nvoi.to/         # logs a visit
+#   nvoi database sql app "SELECT count(*) FROM visits"
+#   nvoi database backup now app
+#   nvoi database backup list app
+#   nvoi database snapshot app --label pre-experiment
+#   nvoi database branch app pr-142   # O(100ms) — CoW clone, 0 bytes
+#                                     # of new disk until writes happen
+#   nvoi database branch-delete app pr-142
+#   nvoi database rollback app --to nvoi-nvoi-production-db-app-snap-pre-experiment --yes
+#
+# Required env vars (already in .env at the repo root):
+#   HCLOUD_TOKEN                       (providers.infra)
+#   CF_API_KEY / CF_ACCOUNT_ID         (providers.storage — backup bucket)
+#   CF_API_KEY / CF_ZONE_ID / CF_ZONE  (providers.dns — DNS records)
+#   POSTGRES_USER / _PASSWORD / _DB    (databases.app.credentials.*)
+#   DOCKER_REGISTRY_USER / _PASSWORD   (registry — pulls the web image)
+
+app: nvoi
+env: production
+
+providers:
+  infra: hetzner
+  storage: cloudflare       # required for databases.app.backup
+  dns: cloudflare
+
+ssh_key: ~/.ssh/id_rsa.pub
+
+servers:
+  # Master holds etcd + apiserver + ingress. Stays on cax11 — postgres
+  # I/O moves off to db-worker. Validator hard-errors on DB-on-master.
+  master:
+    type: cax11
+    region: nbg1
+    role: master
+
+  # Dedicated postgres node. cax21 for headroom — ZFS pool (sized 2x
+  # the DB's declared size) + working set + a little air for spikes.
+  # If you outgrow this, edit `type:` and `nvoi deploy` runs predrain
+  # → tofu replaces the node → migrate moves the DB to it.
+  db-worker:
+    type: cax21
+    region: nbg1
+    role: worker
+
+registry:
+  docker.io:
+    username: $DOCKER_REGISTRY_USER
+    password: $DOCKER_REGISTRY_PASSWORD
+
+# Managed Postgres on the operator's own cluster, ZFS-LocalPV-backed.
+# Credentials flow through env vars at the cmd/cli boundary — every
+# $VAR resolves at validate-time, so a typo fails before any infra
+# touches the network.
+databases:
+  app:
+    engine: postgres
+    version: "17"
+    server: db-worker       # validator rejects DB-on-master
+    size: 20                # GiB, hard ZFS refquota — writes past it
+                            # ENOSPC at the pod, node stays healthy
+    credentials:
+      user: $POSTGRES_USER
+      password: $POSTGRES_PASSWORD
+      database: $POSTGRES_DB
+    backup:
+      schedule: "0 3 * * *" # daily at 03:00 UTC
+      retention: 14         # days; bucket lifecycle rule
+
+services:
+  # The same cmd/web binary the current dogfood ships, now binding
+  # the canonical DATABASE_* env vars via SecretKeyRef instead of
+  # the old shared `secrets: [DATABASE_URL]` path. Single-line change
+  # for the operator; identical for the app — DATABASE_URL is still
+  # the env var gorm reads.
+  web:
+    image: nvoi/web
+    build:
+      context: .
+      dockerfile: cmd/web/Dockerfile
+    port: 8080
+    databases:
+      - DATABASE=app        # → DATABASE_URL / _HOST / _PORT / _USER / _PASSWORD
+
+domains:
+  web:
+    - www.nvoi.to
+
+acme_email: ops@nvoi.to
+
+# Operator shortcuts — `nvoi visits` etc. expand verbatim into the
+# verb tree. The pgshell/psql aliases now route through
+# `nvoi database sql` instead of `nvoi exec postgres -- psql ...`,
+# because the postgres pod is under databases-management, not
+# services-management.
+aliases:
+  visits:  database sql app "SELECT COUNT(*) FROM visits"
+  weblogs: logs web -f
+
+  # Day-2 database workflow aliases — operator muscle memory.
+  pgsnap:    database snapshot app
+  pgsnaps:   database snapshots app
+  pgback:    database backup now app
+  pgbacks:   database backup list app
