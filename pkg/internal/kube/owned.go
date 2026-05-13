@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +33,18 @@ const (
 	OwnerAppSecrets = "app-secrets" // Opaque Secret holding cfg.Secrets values
 	OwnerIngress    = "ingress"     // per-service Ingress resources (Traefik consumes them)
 	OwnerTunnel     = "tunnel"      // cloudflared Deployment + token Secret
+
+	// OwnerDatabases scopes per-database PRIMARY workloads: StatefulSet
+	// + Service + PVC + credentials Secret + backup CronJob + backup-
+	// creds Secret. The reconcile sweep deletes only objects in this
+	// owner set when a YAML entry is removed.
+	OwnerDatabases = "databases"
+
+	// OwnerDatabaseBranches scopes ephemeral postgres branches
+	// (StatefulSet + Service + PVC per branch). Separate owner so
+	// SweepOwned on `databases` never eats branches — their lifecycle
+	// is managed by `nvoi database branch-delete`, not by deploy.
+	OwnerDatabaseBranches = "database-branches"
 )
 
 // Kind names a typed resource kind List / Sweep dispatch supports.
@@ -40,11 +54,15 @@ const (
 type Kind string
 
 const (
-	KindDeployment  Kind = "Deployment"
-	KindStatefulSet Kind = "StatefulSet"
-	KindService     Kind = "Service"
-	KindSecret      Kind = "Secret"
-	KindIngress     Kind = "Ingress"
+	KindDeployment   Kind = "Deployment"
+	KindStatefulSet  Kind = "StatefulSet"
+	KindService      Kind = "Service"
+	KindSecret       Kind = "Secret"
+	KindIngress      Kind = "Ingress"
+	KindPVC          Kind = "PersistentVolumeClaim"
+	KindCronJob      Kind = "CronJob"      // batch/v1 — scheduled DB backups
+	KindJob          Kind = "Job"          // batch/v1 — one-shot manual backups + restores
+	KindStorageClass Kind = "StorageClass" // storage.k8s.io/v1 — cluster-scoped (postgres ZFS-LocalPV)
 )
 
 // Scope is the (namespace, owner) pair every owned-resource operation
@@ -93,8 +111,16 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applySecret(ctx, ns, o)
 	case *corev1.Namespace:
 		return c.applyNamespace(ctx, o)
+	case *corev1.PersistentVolumeClaim:
+		return c.applyPVC(ctx, ns, o)
 	case *networkingv1.Ingress:
 		return c.applyIngress(ctx, ns, o)
+	case *batchv1.CronJob:
+		return c.applyCronJob(ctx, ns, o)
+	case *batchv1.Job:
+		return c.applyJob(ctx, ns, o)
+	case *storagev1.StorageClass:
+		return c.applyStorageClass(ctx, o)
 	default:
 		return fmt.Errorf("ApplyOwned: unsupported kind %T", obj)
 	}
@@ -133,10 +159,6 @@ func (c *Client) SweepOwned(ctx context.Context, scope Scope, kind Kind, desired
 // ListOwned returns the names of every resource of `kind` in
 // scope.Namespace carrying nvoi/owner=<scope.Owner>. Read-only mirror
 // of SweepOwned.
-//
-// Dispatches once on Kind to pick the right typed-client List call,
-// then extracts names via meta.ExtractList — one shared loop body
-// instead of one per kind.
 func (c *Client) ListOwned(ctx context.Context, scope Scope, kind Kind) ([]string, error) {
 	if scope.Owner == "" {
 		return nil, fmt.Errorf("ListOwned: owner required")
@@ -160,9 +182,7 @@ func (c *Client) ListOwned(ctx context.Context, scope Scope, kind Kind) ([]strin
 	return names, nil
 }
 
-// listOwned is the per-kind typed-client dispatch. Returns a
-// runtime.Object that meta.ExtractList walks; the caller doesn't care
-// about the concrete list type.
+// listOwned is the per-kind typed-client dispatch.
 func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (runtime.Object, error) {
 	opts := metav1.ListOptions{LabelSelector: ownerSelector(owner)}
 	switch kind {
@@ -176,14 +196,20 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.CoreV1().Secrets(ns).List(ctx, opts)
 	case KindIngress:
 		return c.CS.NetworkingV1().Ingresses(ns).List(ctx, opts)
+	case KindPVC:
+		return c.CS.CoreV1().PersistentVolumeClaims(ns).List(ctx, opts)
+	case KindCronJob:
+		return c.CS.BatchV1().CronJobs(ns).List(ctx, opts)
+	case KindJob:
+		return c.CS.BatchV1().Jobs(ns).List(ctx, opts)
+	case KindStorageClass:
+		return c.CS.StorageV1().StorageClasses().List(ctx, opts)
 	default:
 		return nil, fmt.Errorf("listOwned: unsupported kind %q", kind)
 	}
 }
 
-// deleteByKind is SweepOwned's per-kind delete dispatch. Same closed
-// switch — adding a new kind means one case here, one in listOwned,
-// one in ApplyOwned.
+// deleteByKind is SweepOwned's per-kind delete dispatch.
 func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name string) error {
 	opts := metav1.DeleteOptions{}
 	switch kind {
@@ -197,6 +223,15 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		return ignoreNotFound(c.CS.CoreV1().Secrets(ns).Delete(ctx, name, opts))
 	case KindIngress:
 		return ignoreNotFound(c.CS.NetworkingV1().Ingresses(ns).Delete(ctx, name, opts))
+	case KindPVC:
+		return ignoreNotFound(c.CS.CoreV1().PersistentVolumeClaims(ns).Delete(ctx, name, opts))
+	case KindCronJob:
+		return ignoreNotFound(c.CS.BatchV1().CronJobs(ns).Delete(ctx, name, opts))
+	case KindJob:
+		bg := metav1.DeletePropagationBackground
+		return ignoreNotFound(c.CS.BatchV1().Jobs(ns).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &bg}))
+	case KindStorageClass:
+		return ignoreNotFound(c.CS.StorageV1().StorageClasses().Delete(ctx, name, opts))
 	default:
 		return fmt.Errorf("deleteByKind: unsupported kind %q", kind)
 	}

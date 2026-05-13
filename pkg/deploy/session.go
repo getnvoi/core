@@ -56,6 +56,14 @@ type Session struct {
 	// initialised workdir. Init() is idempotent so verbs and Run
 	// can both call it without coordination.
 	inited bool
+
+	// dbImageRef caches the digest-pinned reference for the
+	// `docker.io/nvoi/db` image — resolved once per deploy by
+	// deployDatabases (or once per verb by the CLI database
+	// path) and threaded into every per-database backup CronJob
+	// / restore Job. Empty means unresolved; ResolveDBImage
+	// runs once on first read.
+	dbImageRef string
 }
 
 // RunWithSession is the entry point cmd/cli verbs use when they need

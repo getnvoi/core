@@ -42,6 +42,23 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	if err != nil {
 		return nil, err
 	}
+	// Database credentials reference $VARs the operator hasn't
+	// necessarily duplicated under top-level `secrets:`. Resolve them
+	// here at the boundary and merge into the same map so the deploy
+	// reconciler reads ONE secrets source. Hard-error semantics match
+	// ResolveSecrets — every missing var surfaces in one error.
+	dbSecrets, err := ResolveDatabaseSecrets(cfg, os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbSecrets) > 0 {
+		if secrets == nil {
+			secrets = map[string]string{}
+		}
+		for k, v := range dbSecrets {
+			secrets[k] = v
+		}
+	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
 
 	// Tunnel prerequisite: CF_TUNNEL_SECRET is operator-supplied
@@ -57,12 +74,13 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	}
 
 	var backend *state.Backend
+	var bp providers.BucketProvider
 	if cfg.Providers.Storage != "" {
 		bucketCreds, err := ResolveBucketCreds(cfg.Providers.Storage, os.Getenv)
 		if err != nil {
 			return nil, err
 		}
-		bp, err := providers.ResolveBucket(cfg.Providers.Storage, bucketCreds)
+		bp, err = providers.ResolveBucket(cfg.Providers.Storage, bucketCreds)
 		if err != nil {
 			return nil, err
 		}
@@ -86,6 +104,7 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		},
 		DeployHash:    time.Now().UTC().Format("20060102-150405"),
 		StateBackend:  backend,
+		StorageBucket: bp,
 		Secrets:       secrets,
 		RegistryCreds: registryCreds,
 		Providers:     providerInputs,

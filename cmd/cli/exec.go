@@ -11,6 +11,7 @@ import (
 	"github.com/getnvoi/core/pkg/deploy"
 	"github.com/getnvoi/core/pkg/install"
 	"github.com/getnvoi/core/pkg/log"
+	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/ssh"
 )
 
@@ -57,13 +58,24 @@ func parseExecArgs(cmd *cobra.Command, args []string) (string, []string, error) 
 	return args[0], execArgs, nil
 }
 
-func execTarget(cfg *config.Config, service string) (string, error) {
-	svc, ok := cfg.Services[service]
-	if !ok {
-		return "", fmt.Errorf("services.%s: not declared in nvoi.yaml", service)
+// execTarget resolves `<name>` to a kubectl target (deployment/X or
+// statefulset/X). Looks first under cfg.Services; if absent, falls
+// back to cfg.Databases (the StatefulSet name is the fully-qualified
+// naming.Database). Errors with a clear "neither service nor
+// database" message when the name is unknown — `nvoi logs` /
+// `nvoi exec` work uniformly across both registries.
+func execTarget(cfg *config.Config, name string) (string, error) {
+	if svc, ok := cfg.Services[name]; ok {
+		if svc.IsStateful() {
+			return "statefulset/" + name, nil
+		}
+		return "deployment/" + name, nil
 	}
-	if svc.IsStateful() {
-		return "statefulset/" + service, nil
+	if _, ok := cfg.Databases[name]; ok {
+		// Databases are always StatefulSets (postgres today). Name
+		// comes from naming.Database to match what the engine
+		// emitted under OwnerDatabases.
+		return "statefulset/" + naming.Database(cfg.App, cfg.Env, name), nil
 	}
-	return "deployment/" + service, nil
+	return "", fmt.Errorf("%q: not declared as a service or a database in nvoi.yaml", name)
 }

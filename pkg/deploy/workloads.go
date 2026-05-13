@@ -20,10 +20,14 @@ import (
 //
 // Single SSH per server per deploy — no fresh dial here.
 //
-// Order matters:
+// Order:
 //  1. Node labels MUST land before workloads — pods scheduled with a
 //     nodeSelector on a not-yet-labeled node hang Pending.
-//  2. cloudflared Deployment lands AFTER workload Services exist —
+//  2. Databases reconcile BEFORE workload.ApplyAll — services that
+//     bind `databases: [PREFIX=name]` resolve SecretKeyRef against
+//     the per-DB credentials Secret which only exists after the
+//     databases step writes it.
+//  3. cloudflared Deployment lands AFTER workload Services exist —
 //     its first reconnect immediately finds the upstream Service DNS
 //     resolvable.
 //
@@ -37,10 +41,6 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		return fmt.Errorf("primary master %s has no open shell", primaryName)
 	}
 
-	// kube client opens ONCE per Run and stays alive across
-	// deployWorkloads (caller closes via the deferred shell cleanup
-	// in Run). Idempotent open — if a previous phase already built
-	// kc, reuse it.
 	if s.kc == nil {
 		s.Lg.Step("kube-tunnel")
 		kc, err := kube.New(ctx, primaryShell)
@@ -60,6 +60,14 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		s.Lg.Info(fmt.Sprintf("labeled %s with %s=%s", hostname, workload.LabelNvoiRole, key))
 	}
 
+	// Databases reconcile — runs BEFORE workload.ApplyAll so the
+	// canonical credentials Secret is in place when services'
+	// SecretKeyRef bindings resolve. Installs ZFS CSI (once globally)
+	// + per-DB workloads + backup CronJobs. Idempotent.
+	if err := s.deployDatabases(ctx); err != nil {
+		return fmt.Errorf("databases: %w", err)
+	}
+
 	s.Lg.Step("workloads")
 	if err := workload.ApplyAll(ctx, rt, kc, s.Lg); err != nil {
 		return err
@@ -67,9 +75,7 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 
 	// cloudflared lands AFTER workload Services so its first reconnect
 	// finds upstream Service DNS resolvable. Activated by the presence
-	// of domains: (the only ingress path). Without domains: there's no
-	// tunnel to deploy — and the validator allows that (cluster with
-	// services but no public domains, e.g. internal-only cron jobs).
+	// of domains: (the only ingress path).
 	if len(rt.Cfg.Domains) > 0 {
 		if eps == nil || !eps.HasTunnel() {
 			return fmt.Errorf("ingress: domains set but tofu tunnel output is empty (run plan + apply first)")
@@ -81,9 +87,6 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 			return fmt.Errorf("apply tunnel: %w", err)
 		}
 	} else {
-		// Sweep any cloudflared leftover from a prior deploy that had
-		// domains: set (operator removed domains entirely). No-op when
-		// nothing matches.
 		if err := kc.SweepTunnel(ctx, s.Lg); err != nil {
 			return fmt.Errorf("sweep abandoned tunnel: %w", err)
 		}

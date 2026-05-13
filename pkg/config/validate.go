@@ -21,6 +21,7 @@ var reservedAliasNames = map[string]bool{
 	"kubectl":    true,
 	"exec":       true,
 	"logs":       true,
+	"database":   true,
 	"help":       true,
 	"completion": true,
 }
@@ -109,6 +110,9 @@ func (c *Config) Validate() error {
 	if err := validateDomains(c); err != nil {
 		return err
 	}
+	if err := validateDatabases(c); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -150,6 +154,160 @@ func validateHA(c *Config, masters, primaries int) error {
 		return fmt.Errorf("ha: true with %d masters: exactly one must have primary: true (got %d) — the primary runs --cluster-init on cold start", masters, primaries)
 	}
 	return nil
+}
+
+func validateDatabases(c *Config) error {
+	registered := providers.RegisteredDatabaseEngines()
+	dbNodes := map[string]string{}
+
+	for name, db := range c.Databases {
+		if name == "" {
+			return fmt.Errorf("databases: empty database name")
+		}
+		if db.Engine == "" {
+			return fmt.Errorf("databases.%s.engine: required (one of %v)", name, registered)
+		}
+		if !providers.IsRegisteredDatabase(db.Engine) {
+			return fmt.Errorf("databases.%s.engine: unknown engine %q (registered: %v)", name, db.Engine, registered)
+		}
+
+		switch db.Engine {
+		case "postgres":
+			if db.Server == "" {
+				return fmt.Errorf("databases.%s.server: required for engine=postgres (the YAML key of a role: worker server dedicated to this DB)", name)
+			}
+			if db.Size <= 0 {
+				return fmt.Errorf("databases.%s.size: required for engine=postgres (GiB, hard ZFS quota)", name)
+			}
+			if db.Region != "" {
+				return fmt.Errorf("databases.%s.region: not valid for engine=postgres", name)
+			}
+			if db.InstanceClass != "" {
+				return fmt.Errorf("databases.%s.instance_class: not valid for engine=postgres", name)
+			}
+			if db.Credentials == nil {
+				return fmt.Errorf("databases.%s.credentials: required for engine=postgres", name)
+			}
+			if db.Credentials.User == "" {
+				return fmt.Errorf("databases.%s.credentials.user: required", name)
+			}
+			if db.Credentials.Password == "" {
+				return fmt.Errorf("databases.%s.credentials.password: required", name)
+			}
+			if db.Credentials.Database == "" {
+				return fmt.Errorf("databases.%s.credentials.database: required", name)
+			}
+			srv, ok := c.Servers[db.Server]
+			if !ok {
+				return fmt.Errorf("databases.%s.server: %q is not a declared server", name, db.Server)
+			}
+			if srv.Role != "worker" {
+				return fmt.Errorf("databases.%s.server: %q must have role: worker (selfhosted DBs need a dedicated node; the master runs etcd + apiserver)", name, db.Server)
+			}
+			if prior, dup := dbNodes[db.Server]; dup {
+				return fmt.Errorf("databases.%s.server: %q is already pinned by databases.%s (one selfhosted DB per node — pools are node-local)", name, db.Server, prior)
+			}
+			dbNodes[db.Server] = name
+
+		default:
+			if db.Server != "" {
+				return fmt.Errorf("databases.%s.server: not valid for engine=%s (SaaS engines have no node)", name, db.Engine)
+			}
+			if db.Size != 0 {
+				return fmt.Errorf("databases.%s.size: not valid for engine=%s", name, db.Engine)
+			}
+			if db.Credentials != nil {
+				return fmt.Errorf("databases.%s.credentials: not valid for engine=%s (vendor API owns credentials)", name, db.Engine)
+			}
+			if db.Engine == "rds-postgres" {
+				if db.InstanceClass == "" {
+					return fmt.Errorf("databases.%s.instance_class: required for engine=rds-postgres", name)
+				}
+			} else if db.InstanceClass != "" {
+				return fmt.Errorf("databases.%s.instance_class: not valid for engine=%s", name, db.Engine)
+			}
+			if db.Region == "" {
+				return fmt.Errorf("databases.%s.region: required for engine=%s", name, db.Engine)
+			}
+		}
+
+		if db.Backup != nil {
+			if db.Backup.Schedule == "" {
+				return fmt.Errorf("databases.%s.backup.schedule: required when backup: is set", name)
+			}
+			if db.Backup.Retention <= 0 {
+				return fmt.Errorf("databases.%s.backup.retention: must be > 0 days", name)
+			}
+			if c.Providers.Storage == "" {
+				return fmt.Errorf("databases.%s.backup: requires providers.storage (the bucket holds gzipped dumps)", name)
+			}
+		}
+	}
+
+	for svcName, svc := range c.Services {
+		for _, srv := range svc.Servers {
+			if dbName, hit := dbNodes[srv]; hit {
+				return fmt.Errorf("services.%s.servers: %q hosts databases.%s — selfhosted DB nodes are exclusive (no other workloads). Move the service to a different worker", svcName, srv, dbName)
+			}
+		}
+	}
+
+	for svcName, svc := range c.Services {
+		seenPrefix := map[string]string{}
+		for _, entry := range svc.Databases {
+			prefix, dbName, err := parseDatabaseBinding(entry)
+			if err != nil {
+				return fmt.Errorf("services.%s.databases: %w", svcName, err)
+			}
+			if _, ok := c.Databases[dbName]; !ok {
+				return fmt.Errorf("services.%s.databases: %q references undeclared database %q", svcName, entry, dbName)
+			}
+			if prior, dup := seenPrefix[prefix]; dup {
+				return fmt.Errorf("services.%s.databases: prefix %q used by both %q and %q (each service must use distinct prefixes)", svcName, prefix, prior, entry)
+			}
+			seenPrefix[prefix] = entry
+		}
+	}
+
+	return nil
+}
+
+// ParseDatabaseBinding is the public re-export of parseDatabaseBinding —
+// pkg/workload (env-var injection) uses it so the parser the
+// validator runs is the parser the manifest builder runs. One source
+// of truth.
+func ParseDatabaseBinding(entry string) (prefix, dbName string, err error) {
+	return parseDatabaseBinding(entry)
+}
+
+func parseDatabaseBinding(entry string) (prefix, dbName string, err error) {
+	if entry == "" {
+		return "", "", fmt.Errorf("empty entry")
+	}
+	if i := strings.IndexByte(entry, '='); i >= 0 {
+		prefix = entry[:i]
+		dbName = entry[i+1:]
+	} else {
+		prefix = "DATABASE"
+		dbName = entry
+	}
+	if prefix == "" {
+		return "", "", fmt.Errorf("%q: empty prefix", entry)
+	}
+	if dbName == "" {
+		return "", "", fmt.Errorf("%q: empty database name (use PREFIX=dbname)", entry)
+	}
+	for _, r := range prefix {
+		if !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' {
+			return "", "", fmt.Errorf("%q: prefix must be UPPER_CASE_WITH_UNDERSCORES (got %q)", entry, prefix)
+		}
+	}
+	for _, suf := range []string{"_URL", "_HOST", "_PORT", "_USER", "_PASSWORD"} {
+		if strings.HasSuffix(prefix, suf) {
+			return "", "", fmt.Errorf("%q: prefix ends with %q which collides with the canonical suffix. Write %s=%s instead — the prefix expands to <PREFIX>_URL, _HOST, _PORT, _USER, _PASSWORD automatically", entry, suf, strings.TrimSuffix(prefix, suf), dbName)
+		}
+	}
+	return prefix, dbName, nil
 }
 
 // validateDomains enforces:

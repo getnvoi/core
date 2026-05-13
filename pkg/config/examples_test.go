@@ -13,6 +13,7 @@ import (
 	// that references a new provider, we add the blank-import here.
 	_ "github.com/getnvoi/core/pkg/providers/cloudflare"
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
+	_ "github.com/getnvoi/core/pkg/providers/postgres"
 )
 
 // TestExamples_LoadAndValidate exercises every YAML in examples/.
