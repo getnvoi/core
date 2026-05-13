@@ -153,6 +153,9 @@ func (s *Session) reconcileOneDatabase(ctx context.Context, name string, def con
 			req.NodeSSH = shell
 		}
 	}
+	if err := ensureDatabaseNodeUnchanged(ctx, kc, req); err != nil {
+		return err
+	}
 
 	// Backup bucket — provisioned implicitly when backup is set.
 	// providers.storage is validated non-empty by the validator
@@ -312,6 +315,24 @@ func (s *Session) sweepDatabases(ctx context.Context, desiredKeys []string) erro
 		}
 	}
 	return nil
+}
+
+func ensureDatabaseNodeUnchanged(ctx context.Context, kc *kube.Client, req providers.DatabaseRequest) error {
+	if kc == nil || req.Spec.Server == "" {
+		return nil
+	}
+	ss, err := kc.GetStatefulSet(ctx, req.Namespace, req.FullName)
+	if err != nil {
+		return err
+	}
+	if ss == nil {
+		return nil
+	}
+	current := ss.Spec.Template.Spec.NodeSelector["nvoi-role"]
+	if current == "" || current == req.Spec.Server {
+		return nil
+	}
+	return fmt.Errorf("database %q is pinned to server %q but config now requests %q; migrate is required before changing databases.%s.server", req.Name, current, req.Spec.Server, req.Name)
 }
 
 // hasSelfhostedDB reports whether any database in cfg uses a

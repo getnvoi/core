@@ -6,6 +6,13 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeobj "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	testingk8s "k8s.io/client-go/testing"
+
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/providers/postgres"
 )
 
@@ -104,5 +111,52 @@ func TestDeleteSnapshot_ValidatesName(t *testing.T) {
 	}
 	if err := postgres.DeleteSnapshot(context.Background(), sh, "ns", "valid-name"); err != nil {
 		t.Errorf("valid name rejected: %v", err)
+	}
+}
+
+func TestBranch_WaitsForStatefulSetReady(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("create", "statefulsets", func(action testingk8s.Action) (bool, runtimeobj.Object, error) {
+		create := action.(testingk8s.CreateAction)
+		ss := create.GetObject().(*appsv1.StatefulSet).DeepCopy()
+		ss.Generation = 1
+		if ss.Spec.Replicas == nil {
+			replicas := int32(1)
+			ss.Spec.Replicas = &replicas
+		}
+		ss.Status.ReadyReplicas = *ss.Spec.Replicas
+		ss.Status.ObservedGeneration = ss.Generation
+		if err := cs.Tracker().Add(ss); err != nil {
+			return true, nil, err
+		}
+		return true, ss, nil
+	})
+
+	kc := kube.NewForTest(cs)
+	sh := &fakeShell{}
+	ref, err := postgres.Branch(context.Background(), kc, sh, postgres.BranchSource{
+		App:        "myapp",
+		Env:        "prod",
+		DBName:     "app",
+		Size:       20,
+		Version:    "17",
+		ServerRole: "db-worker",
+	}, "pr-1")
+	if err != nil {
+		t.Fatalf("Branch: %v", err)
+	}
+	if ref.Endpoint != "nvoi-myapp-prod-db-app-br-pr-1.default.svc.cluster.local:5432" {
+		t.Errorf("endpoint = %q", ref.Endpoint)
+	}
+
+	ss, err := cs.AppsV1().StatefulSets("default").Get(context.Background(), "nvoi-myapp-prod-db-app-br-pr-1", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get branch statefulset: %v", err)
+	}
+	if ss.Status.ReadyReplicas != 1 || ss.Status.ObservedGeneration != ss.Generation {
+		t.Fatalf("branch statefulset was not made ready for the waiter: %+v", ss.Status)
+	}
+	if len(sh.calls) != 2 {
+		t.Fatalf("snapshot apply calls = %d, want 2", len(sh.calls))
 	}
 }

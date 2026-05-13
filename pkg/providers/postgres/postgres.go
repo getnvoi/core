@@ -29,6 +29,8 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -153,10 +155,7 @@ func (p *Provider) ExecSQL(ctx context.Context, req providers.DatabaseRequest, s
 	if req.Kube == nil {
 		return nil, fmt.Errorf("postgres.ExecSQL requires kube client")
 	}
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@127.0.0.1:5432/%s?sslmode=disable",
-		req.Spec.User, req.Spec.Password, req.Spec.Database,
-	)
+	dsn := buildDSN("127.0.0.1", 5432, req.Spec.User, req.Spec.Password, req.Spec.Database, "disable")
 	var stdout, stderr bytes.Buffer
 	if err := req.Kube.Exec(ctx, kube.ExecRequest{
 		Namespace: req.Namespace,
@@ -276,7 +275,7 @@ func (p *Provider) DeleteBranch(ctx context.Context, req providers.DatabaseReque
 // boundary, in-cluster traffic is private.
 func credentials(req providers.DatabaseRequest) providers.DatabaseCredentials {
 	return providers.DatabaseCredentials{
-		URL:      fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", req.Spec.User, req.Spec.Password, req.FullName, req.Spec.Database),
+		URL:      buildDSN(req.FullName, 5432, req.Spec.User, req.Spec.Password, req.Spec.Database, "disable"),
 		Host:     req.FullName,
 		Port:     5432,
 		User:     req.Spec.User,
@@ -284,6 +283,22 @@ func credentials(req providers.DatabaseRequest) providers.DatabaseCredentials {
 		Database: req.Spec.Database,
 		SSLMode:  "disable",
 	}
+}
+
+func buildDSN(host string, port int, user, password, database, sslmode string) string {
+	q := url.Values{}
+	if sslmode != "" {
+		q.Set("sslmode", sslmode)
+	}
+	u := &url.URL{
+		Scheme:   "postgres",
+		Host:     net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:     "/" + database,
+		RawPath:  "/" + url.PathEscape(database),
+		RawQuery: q.Encode(),
+		User:     url.UserPassword(user, password),
+	}
+	return u.String()
 }
 
 // parseCSV converts psql --csv output (header row + N data rows)

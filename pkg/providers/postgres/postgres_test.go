@@ -124,13 +124,14 @@ func TestEnsureCredentials_WritesCanonicalSecret(t *testing.T) {
 	cs := fake.NewSimpleClientset()
 	kc := kube.NewForTest(cs)
 	req := baseReq()
+	req.Spec.Password = "pw@with:/?percent%"
 
 	p := &postgres.Provider{}
 	creds, err := p.EnsureCredentials(context.Background(), kc, req)
 	if err != nil {
 		t.Fatalf("EnsureCredentials: %v", err)
 	}
-	if !strings.Contains(creds.URL, "postgres://app_user:app_pw@nvoi-myapp-prod-db-app:5432/app_db") {
+	if !strings.Contains(creds.URL, "postgres://app_user:pw%40with%3A%2F%3Fpercent%25@nvoi-myapp-prod-db-app:5432/app_db") {
 		t.Errorf("URL = %q", creds.URL)
 	}
 
@@ -145,6 +146,9 @@ func TestEnsureCredentials_WritesCanonicalSecret(t *testing.T) {
 	}
 	if string(got.Data["host"]) != "nvoi-myapp-prod-db-app" {
 		t.Errorf("host = %q", string(got.Data["host"]))
+	}
+	if string(got.Data["password"]) != "pw@with:/?percent%" {
+		t.Errorf("password mutated in secret: %q", string(got.Data["password"]))
 	}
 	if got.Labels[kube.LabelOwner] != kube.OwnerDatabases {
 		t.Errorf("owner label = %q, want %q", got.Labels[kube.LabelOwner], kube.OwnerDatabases)

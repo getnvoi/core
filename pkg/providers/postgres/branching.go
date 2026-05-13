@@ -302,6 +302,9 @@ func Branch(ctx context.Context, kc *kube.Client, masterSSH ssh.Shell, src Branc
 	if err := kc.ApplyOwned(ctx, scope, buildBranchStatefulSet(src, branchWorkload)); err != nil {
 		return providers.BranchRef{}, fmt.Errorf("apply branch StatefulSet: %w", err)
 	}
+	if err := kc.WaitStatefulSetReady(ctx, namespace, branchWorkload); err != nil {
+		return providers.BranchRef{}, fmt.Errorf("wait branch StatefulSet ready: %w", err)
+	}
 
 	return providers.BranchRef{
 		Name:     branchName,
