@@ -16,10 +16,25 @@ import (
 	"strings"
 
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/ssh"
 )
+
+// SolverSecret is a runtime-resolved credential cert-manager needs
+// (via DNS-01). nvoi materializes a k8s Secret in CertManagerNamespace
+// named .Name with .Key → .Value. The solver YAML references it by
+// (.Name, .Key).
+//
+// Lifted from pkg/internal/compile (same fields, identical semantics).
+// Lives here so pkg/internal/kube doesn't import pkg/internal/compile
+// — breaking an import cycle that would otherwise prevent
+// pkg/providers from referencing kube types. Conversion happens at
+// the deploy call site (pkg/deploy/workloads.go).
+type SolverSecret struct {
+	Name  string // e.g. "cloudflare-api-token"
+	Key   string // e.g. "api-token"
+	Value string // resolved cred (e.g. the CF API token bytes)
+}
 
 // CertManagerVersion pins the cert-manager release we apply. Bumping
 // this is a one-line change; review release notes for breaking CRD
@@ -88,9 +103,16 @@ func ApplyYAML(ctx context.Context, sh ssh.Shell, yaml []byte) error {
 }
 
 // BuildSolverSecretsYAML renders one Secret manifest per
-// compile.SolverSecret cert-manager needs (DNS provider's credential),
+// kube.SolverSecret cert-manager needs (DNS provider's credential),
 // all in CertManagerNamespace. Empty input returns nil.
-func BuildSolverSecretsYAML(secrets []compile.SolverSecret) []byte {
+//
+// kube owns this type (rather than re-using pkg/internal/compile's
+// equivalent struct) so kube doesn't import compile — the compile
+// package transitively reaches pkg/config which imports pkg/providers,
+// and pkg/providers needs to import kube. Breaking that loop here
+// keeps every other consumer (deploy.workloads) responsible for one
+// tiny conversion, in exchange for an open architecture below.
+func BuildSolverSecretsYAML(secrets []SolverSecret) []byte {
 	if len(secrets) == 0 {
 		return nil
 	}

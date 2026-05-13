@@ -163,7 +163,16 @@ func (s *Session) applyCertInfrastructure(ctx context.Context, sh ssh.Shell) err
 	}
 
 	s.Lg.Step("cert-manager-secrets")
-	if y := kube.BuildSolverSecretsYAML(secrets); y != nil {
+	// compile.SolverSecret and kube.SolverSecret carry identical
+	// fields by design — kube owns its own type so the kube package
+	// doesn't import pkg/internal/compile (which would close an
+	// import cycle through pkg/runtime → pkg/config → pkg/providers
+	// → pkg/internal/kube). Conversion is local + cheap.
+	kubeSecrets := make([]kube.SolverSecret, len(secrets))
+	for i, s := range secrets {
+		kubeSecrets[i] = kube.SolverSecret{Name: s.Name, Key: s.Key, Value: s.Value}
+	}
+	if y := kube.BuildSolverSecretsYAML(kubeSecrets); y != nil {
 		if err := kube.ApplyYAML(ctx, sh, y); err != nil {
 			return fmt.Errorf("apply solver secrets: %w", err)
 		}

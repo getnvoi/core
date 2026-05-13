@@ -34,6 +34,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
+	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/log"
 	"github.com/getnvoi/core/pkg/ssh"
 )
@@ -63,12 +64,7 @@ type DatabaseProvider interface {
 	// sslmode. Idempotent — re-reads existing Secret first when the
 	// vendor's API permits it. Returns the resolved credentials so the
 	// reconciler can populate DATABASE_URL_<NAME> in services' env.
-	//
-	// The kc argument is *kube.Client; passed as `any` here to break
-	// an import cycle (pkg/config imports pkg/providers for AlertSpec
-	// while pkg/internal/kube transitively reaches pkg/config via
-	// compile→runtime). Engine implementations cast to *kube.Client.
-	EnsureCredentials(ctx context.Context, kc any, req DatabaseRequest) (DatabaseCredentials, error)
+	EnsureCredentials(ctx context.Context, kc *kube.Client, req DatabaseRequest) (DatabaseCredentials, error)
 
 	// Reconcile returns the kube workloads this engine needs in the
 	// cluster. Postgres: StorageClass + PVC + Service + StatefulSet +
@@ -140,16 +136,10 @@ type DatabaseRequest struct {
 	// providers.storage backend.
 	Bucket *BucketHandle
 
-	// Kube is the master-tunneled clientset (`*kube.Client` at
-	// runtime). Required for cluster-side operations (ExecSQL via
-	// pod-exec, Secret writes, Job submission for backup/restore).
-	//
-	// Declared as `any` to break an import cycle (pkg/config imports
-	// pkg/providers for AlertSpec while pkg/internal/kube transitively
-	// reaches pkg/config via compile→runtime). Engine implementations
-	// type-assert to *kube.Client at the top of every method that
-	// needs it.
-	Kube any
+	// Kube is the master-tunneled clientset. Required for cluster-
+	// side operations (ExecSQL via pod-exec, Secret writes, Job
+	// submission for backup/restore).
+	Kube *kube.Client
 
 	// NodeSSH is the per-node shell — postgres uses it for the ZFS
 	// prepare-node phase (apt-install zfsutils, zpool create). nil
