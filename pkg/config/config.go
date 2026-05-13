@@ -36,6 +36,15 @@ type Config struct {
 	// names that service consumes via env-via-secretKeyRef injection.
 	Secrets []string `yaml:"secrets,omitempty"`
 
+	// Databases is the per-database block — declarative provisioning +
+	// connection material for every backend nvoi knows. Each entry's
+	// `engine:` resolves through the providers.RegisterDatabase
+	// registry. Postgres is the reference (in-cluster on ZFS-LocalPV);
+	// every other engine is an HCL emitter + Go API adapter living
+	// under pkg/providers/<engine>/. See pkg/providers/database.go and
+	// .claude/todos/database/ for the full contract.
+	Databases map[string]DatabaseSpec `yaml:"databases,omitempty"`
+
 	Services map[string]ServiceSpec `yaml:"services,omitempty"`
 
 	// Aliases are operator-defined shortcuts. Each entry maps a name
@@ -132,6 +141,63 @@ type RegistryDef struct {
 	Password string `yaml:"password"`
 }
 
+// DatabaseSpec is the per-database YAML shape. Engine-agnostic on
+// purpose — each engine reads the fields it cares about and the
+// validator rejects fields that don't apply to the declared engine.
+//
+//	postgres (selfhosted, ZFS-LocalPV — reference impl):
+//	  engine: postgres, version, server, size, credentials, backup
+//	planetscale (managed MySQL):
+//	  engine: planetscale, region, backup
+//	turso (libsql, edge-replicated SQLite):
+//	  engine: turso, region, backup
+//	rds-postgres (AWS RDS):
+//	  engine: rds-postgres, region, instance_class, version, backup
+//	neon (managed Postgres):
+//	  engine: neon, region, backup
+//
+// `backup:` is universal — when set, the reconciler provisions the
+// per-DB backup bucket on providers.storage and emits the shared
+// backup CronJob via cmd/db. providers.storage is mandatory when any
+// database carries `backup:`; the validator enforces it.
+type DatabaseSpec struct {
+	Engine        string              `yaml:"engine"`
+	Version       string              `yaml:"version,omitempty"`
+	Server        string              `yaml:"server,omitempty"`
+	Size          int                 `yaml:"size,omitempty"`
+	Region        string              `yaml:"region,omitempty"`
+	InstanceClass string              `yaml:"instance_class,omitempty"`
+	Credentials   *DatabaseCredsSpec  `yaml:"credentials,omitempty"`
+	Backup        *DatabaseBackupSpec `yaml:"backup,omitempty"`
+}
+
+// DatabaseCredsSpec carries the operator's chosen credentials for a
+// selfhosted database (postgres only). Every field accepts a literal
+// or a `$VAR` reference resolved at the cmd/ boundary from os.Getenv.
+//
+// Rejected on SaaS engines — they own their credentials at the vendor
+// API level; nvoi reads them out of tofu output and writes them into
+// the credentials Secret without operator-supplied material.
+type DatabaseCredsSpec struct {
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+}
+
+// DatabaseBackupSpec configures the scheduled-backup CronJob the
+// reconciler emits. The bucket itself (`nvoi-{app}-{env}-db-{name}-
+// backups`) is provisioned implicitly on providers.storage. Retention
+// is days, applied as a bucket-lifecycle policy by BucketProvider.
+//
+// Backups are gzipped logical dumps in the bucket (key shape:
+// YYYYMMDDTHHMMSSZ.sql.gz). The cmd/db image dumps via pg_dump /
+// mysqldump and restores by piping the inverse — uniform across
+// every engine.
+type DatabaseBackupSpec struct {
+	Schedule  string `yaml:"schedule"`
+	Retention int    `yaml:"retention"`
+}
+
 // ServiceSpec describes one workload to deploy. Image is required —
 // either pre-built (`image: nginx:1.27-alpine`) or paired with `build:`
 // for code we compile locally and push.
@@ -158,6 +224,25 @@ type ServiceSpec struct {
 	Storage  *StorageSpec `yaml:"storage,omitempty"`
 	Servers  []string     `yaml:"servers,omitempty"`
 	Secrets  []string     `yaml:"secrets,omitempty"`
+
+	// Databases binds this service's pod env to one or more databases
+	// declared at the top level. Each entry is `<PREFIX>=<dbname>`
+	// (e.g. `DATABASE=app`, `REPORTS=analytics`); the prefix expands
+	// to the canonical 5-var bundle wired through SecretKeyRef:
+	//
+	//   <PREFIX>_URL      ← credentials Secret key `url`
+	//   <PREFIX>_HOST     ← `host`
+	//   <PREFIX>_PORT     ← `port`
+	//   <PREFIX>_USER     ← `user`
+	//   <PREFIX>_PASSWORD ← `password`
+	//
+	// Default prefix is `DATABASE` when the operator writes just the
+	// database name (`databases: [app]`). Validator rejects duplicate
+	// prefixes within one service and prefixes referencing undeclared
+	// databases. Secrets normalization is non-negotiable: every
+	// engine writes the same key shape into the credentials Secret;
+	// apps depend on the canonical env-var names.
+	Databases []string `yaml:"databases,omitempty"`
 }
 
 // StorageSpec is the per-service persistent volume request. Two fields

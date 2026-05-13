@@ -6,6 +6,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -193,6 +194,48 @@ func (c *Client) applyDaemonSet(ctx context.Context, ns string, ds *appsv1.Daemo
 		_, err = api.Update(ctx, ds, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
 	})
+}
+
+// applyCronJob is a Get → Create-or-Update for batch/v1 CronJobs.
+// Database backups are the v1 user. Preserves Status (controller
+// records LastScheduleTime / Active counts there async) and
+// ResourceVersion (controller bumps it on every schedule firing).
+func (c *Client) applyCronJob(ctx context.Context, ns string, cj *batchv1.CronJob) error {
+	api := c.CS.BatchV1().CronJobs(ns)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing, err := api.Get(ctx, cj.Name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			_, err := api.Create(ctx, cj, metav1.CreateOptions{FieldManager: FieldManager})
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		cj.ResourceVersion = existing.ResourceVersion
+		cj.Status = existing.Status
+		_, err = api.Update(ctx, cj, metav1.UpdateOptions{FieldManager: FieldManager})
+		return err
+	})
+}
+
+// applyJob is a Get → Create for batch/v1 Jobs. Jobs are
+// effectively immutable post-create: most spec fields (PodTemplate,
+// BackoffLimit) reject Update. Manual backup + restore Jobs are
+// always created fresh (the caller picks a unique name embedding a
+// unix timestamp), so this helper short-circuits to Create when the
+// name isn't already present and leaves an existing Job untouched
+// — operator-facing semantics: "this Job already ran".
+func (c *Client) applyJob(ctx context.Context, ns string, j *batchv1.Job) error {
+	api := c.CS.BatchV1().Jobs(ns)
+	_, err := api.Get(ctx, j.Name, metav1.GetOptions{})
+	if err == nil {
+		return nil // already submitted; leave it alone
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	_, err = api.Create(ctx, j, metav1.CreateOptions{FieldManager: FieldManager})
+	return err
 }
 
 // applyNamespace is a cluster-scoped Get → Create-or-Update. The

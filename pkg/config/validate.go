@@ -115,7 +115,212 @@ func (c *Config) Validate() error {
 	if err := validateMonitor(c); err != nil {
 		return err
 	}
+	if err := validateDatabases(c); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateDatabases enforces the databases: block invariants. Pure —
+// no env, no disk. Engine registration checks rely on the same
+// blank-import discipline as the other registries (every database
+// engine linked into the binary registers itself in init()).
+//
+// Rules (per engine — see pkg/providers/database.go for the full
+// engine matrix; the validator delegates field gating to
+// engineAllowedFields).
+//
+//   - engine must be registered (providers.IsRegisteredDatabase).
+//   - Selfhosted engines (postgres) require server, size, credentials.
+//   - SaaS engines require region; reject server / size / credentials
+//     (the vendor's API owns those).
+//   - DB-on-master rejected for selfhosted engines: server: <name>
+//     must reference a worker (or the lone single-master is allowed
+//     only when it has no role: master — never today).
+//   - DB-node-shared-with-services rejected: a selfhosted DB node is
+//     exclusive (ZFS pool + PVCs).
+//   - backup: requires providers.storage.
+//   - $VAR references in credentials are NOT resolved here (boundary
+//     concern); the validator only checks shape.
+//   - services.X.databases entries must reference declared databases
+//     and use distinct prefixes within one service.
+func validateDatabases(c *Config) error {
+	registered := providers.RegisteredDatabaseEngines()
+
+	// Collect selfhosted-DB-pinned nodes so we can cross-check against
+	// services placement after the per-DB loop.
+	dbNodes := map[string]string{} // server name → database name pinning it
+
+	for name, db := range c.Databases {
+		if name == "" {
+			return fmt.Errorf("databases: empty database name")
+		}
+		if db.Engine == "" {
+			return fmt.Errorf("databases.%s.engine: required (one of %v)", name, registered)
+		}
+		if !providers.IsRegisteredDatabase(db.Engine) {
+			return fmt.Errorf("databases.%s.engine: unknown engine %q (registered: %v)", name, db.Engine, registered)
+		}
+
+		// Engine-specific field gating.
+		switch db.Engine {
+		case "postgres":
+			if db.Server == "" {
+				return fmt.Errorf("databases.%s.server: required for engine=postgres (the YAML key of a role: worker server dedicated to this DB)", name)
+			}
+			if db.Size <= 0 {
+				return fmt.Errorf("databases.%s.size: required for engine=postgres (GiB, hard ZFS quota)", name)
+			}
+			if db.Region != "" {
+				return fmt.Errorf("databases.%s.region: not valid for engine=postgres (region applies to SaaS engines only)", name)
+			}
+			if db.InstanceClass != "" {
+				return fmt.Errorf("databases.%s.instance_class: not valid for engine=postgres (selfhosted engines run on the nvoi-provisioned node)", name)
+			}
+			if db.Credentials == nil {
+				return fmt.Errorf("databases.%s.credentials: required for engine=postgres (user / password / database; literals or $VAR references)", name)
+			}
+			if db.Credentials.User == "" {
+				return fmt.Errorf("databases.%s.credentials.user: required", name)
+			}
+			if db.Credentials.Password == "" {
+				return fmt.Errorf("databases.%s.credentials.password: required", name)
+			}
+			if db.Credentials.Database == "" {
+				return fmt.Errorf("databases.%s.credentials.database: required", name)
+			}
+			// Server must exist and be a worker. Master nodes hold etcd
+			// + apiserver + ingress + (in tunnel mode) cloudflared —
+			// adding the DB's I/O on top is a bad neighbor pattern and
+			// blocks operator scaling of the control plane.
+			srv, ok := c.Servers[db.Server]
+			if !ok {
+				return fmt.Errorf("databases.%s.server: %q is not a declared server", name, db.Server)
+			}
+			if srv.Role != "worker" {
+				return fmt.Errorf("databases.%s.server: %q must have role: worker (selfhosted DBs need a dedicated node; the master runs etcd + apiserver)", name, db.Server)
+			}
+			if prior, dup := dbNodes[db.Server]; dup {
+				return fmt.Errorf("databases.%s.server: %q is already pinned by databases.%s (one selfhosted DB per node — pools are node-local)", name, db.Server, prior)
+			}
+			dbNodes[db.Server] = name
+
+		default:
+			// SaaS engines — reject the selfhosted-only fields.
+			if db.Server != "" {
+				return fmt.Errorf("databases.%s.server: not valid for engine=%s (SaaS engines have no node)", name, db.Engine)
+			}
+			if db.Size != 0 {
+				return fmt.Errorf("databases.%s.size: not valid for engine=%s (SaaS engines have no local quota)", name, db.Engine)
+			}
+			if db.Credentials != nil {
+				return fmt.Errorf("databases.%s.credentials: not valid for engine=%s (vendor API owns credentials; nvoi reads them from tofu output)", name, db.Engine)
+			}
+			// rds-postgres requires instance_class; other SaaS engines
+			// (planetscale, turso, neon) reject it.
+			if db.Engine == "rds-postgres" {
+				if db.InstanceClass == "" {
+					return fmt.Errorf("databases.%s.instance_class: required for engine=rds-postgres (e.g. db.t3.micro)", name)
+				}
+			} else if db.InstanceClass != "" {
+				return fmt.Errorf("databases.%s.instance_class: not valid for engine=%s", name, db.Engine)
+			}
+			if db.Region == "" {
+				return fmt.Errorf("databases.%s.region: required for engine=%s (vendor-specific — checked at the emitter)", name, db.Engine)
+			}
+		}
+
+		// Backup is universal — every engine routes through the same
+		// cmd/db Job substrate. providers.storage holds the artifacts.
+		if db.Backup != nil {
+			if db.Backup.Schedule == "" {
+				return fmt.Errorf("databases.%s.backup.schedule: required when backup: is set (cron expression)", name)
+			}
+			if db.Backup.Retention <= 0 {
+				return fmt.Errorf("databases.%s.backup.retention: must be > 0 days", name)
+			}
+			if c.Providers.Storage == "" {
+				return fmt.Errorf("databases.%s.backup: requires providers.storage (the bucket holds gzipped dumps)", name)
+			}
+		}
+	}
+
+	// Cross-check: no service may pin its workload to a server that
+	// hosts a selfhosted DB. ZFS + the DB's I/O profile are exclusive.
+	for svcName, svc := range c.Services {
+		for _, srv := range svc.Servers {
+			if dbName, hit := dbNodes[srv]; hit {
+				return fmt.Errorf("services.%s.servers: %q hosts databases.%s — selfhosted DB nodes are exclusive (no other workloads). Move the service to a different worker", svcName, srv, dbName)
+			}
+		}
+	}
+
+	// services.X.databases — env-binding shape: <PREFIX>=<dbname>.
+	// Default prefix is DATABASE when only the dbname is supplied.
+	for svcName, svc := range c.Services {
+		seenPrefix := map[string]string{} // prefix → entry literal
+		for _, entry := range svc.Databases {
+			prefix, dbName, err := parseDatabaseBinding(entry)
+			if err != nil {
+				return fmt.Errorf("services.%s.databases: %w", svcName, err)
+			}
+			if _, ok := c.Databases[dbName]; !ok {
+				return fmt.Errorf("services.%s.databases: %q references undeclared database %q", svcName, entry, dbName)
+			}
+			if prior, dup := seenPrefix[prefix]; dup {
+				return fmt.Errorf("services.%s.databases: prefix %q used by both %q and %q (each service must use distinct prefixes)", svcName, prefix, prior, entry)
+			}
+			seenPrefix[prefix] = entry
+		}
+	}
+
+	return nil
+}
+
+// parseDatabaseBinding parses one entry from services.X.databases.
+// Accepted shapes:
+//
+//	"app"                  → prefix=DATABASE, dbname=app
+//	"DATABASE=app"         → prefix=DATABASE, dbname=app
+//	"REPORTS=analytics"    → prefix=REPORTS,  dbname=analytics
+//
+// Prefix must be ALL_CAPS_WITH_UNDERSCORES (env-var safe) and not end
+// with a suffix that collides with the canonical suffixes (_URL, _HOST,
+// _PORT, _USER, _PASSWORD) — that's a foot-gun where the operator
+// wrote `DATABASE_URL=app` expecting the old single-var behavior; we
+// reject with a pointer to the new prefix-based shape.
+func parseDatabaseBinding(entry string) (prefix, dbName string, err error) {
+	if entry == "" {
+		return "", "", fmt.Errorf("empty entry")
+	}
+	if i := strings.IndexByte(entry, '='); i >= 0 {
+		prefix = entry[:i]
+		dbName = entry[i+1:]
+	} else {
+		prefix = "DATABASE"
+		dbName = entry
+	}
+	if prefix == "" {
+		return "", "", fmt.Errorf("%q: empty prefix", entry)
+	}
+	if dbName == "" {
+		return "", "", fmt.Errorf("%q: empty database name (use PREFIX=dbname)", entry)
+	}
+	for _, r := range prefix {
+		if !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' {
+			return "", "", fmt.Errorf("%q: prefix must be UPPER_CASE_WITH_UNDERSCORES (got %q)", entry, prefix)
+		}
+	}
+	// Reject the old single-var alias form. Operators writing
+	// `DATABASE_URL=app` are following the pre-normalization pattern;
+	// the new contract expands the prefix to all five canonical
+	// suffixes, so the entry should be `DATABASE=app`.
+	for _, suf := range []string{"_URL", "_HOST", "_PORT", "_USER", "_PASSWORD"} {
+		if strings.HasSuffix(prefix, suf) {
+			return "", "", fmt.Errorf("%q: prefix ends with %q which collides with the canonical suffix. Write %s=%s instead — the prefix expands to <PREFIX>_URL, _HOST, _PORT, _USER, _PASSWORD automatically", entry, suf, strings.TrimSuffix(prefix, suf), dbName)
+		}
+	}
+	return prefix, dbName, nil
 }
 
 // validateMonitor enforces the monitor: block invariants. Pure — no

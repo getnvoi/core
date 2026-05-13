@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -34,6 +35,17 @@ const (
 	OwnerTunnel        = "tunnel"        // cloudflared Deployment + token Secret (ingress=cloudflare)
 	OwnerAddons        = "addons"        // cluster-level prerequisites (metrics-server, future addons)
 	OwnerObservability = "observability" // Prom + Thanos + Loki + Grafana stack
+
+	// OwnerDatabases scopes every per-database PRIMARY workload: the
+	// StatefulSet (postgres), Service, PVC, credentials Secret, backup
+	// CronJob, backup-creds Secret. The reconcile sweep deletes only
+	// objects in this owner set when a YAML entry is removed.
+	OwnerDatabases = "databases"
+
+	// OwnerDatabaseBranches scopes ephemeral postgres branches —
+	// separate owner so SweepOwned on `databases` never eats branches
+	// (which have their own lifecycle via `nvoi database branch-delete`).
+	OwnerDatabaseBranches = "database-branches"
 )
 
 // Kind names a typed resource kind ApplyOwned / SweepOwned / ListOwned
@@ -56,6 +68,8 @@ const (
 	KindRoleBinding        Kind = "RoleBinding"        // namespaced: Grafana SA → Role binding
 	KindClusterRole        Kind = "ClusterRole"        // Promtail pod-list permission
 	KindClusterRoleBinding Kind = "ClusterRoleBinding" // Promtail SA → ClusterRole binding
+	KindCronJob            Kind = "CronJob"            // batch/v1 — scheduled DB backups
+	KindJob                Kind = "Job"                // batch/v1 — one-shot manual backups + restores
 )
 
 // Scope is the (namespace, owner) pair every owned-resource operation
@@ -118,6 +132,10 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applyClusterRole(ctx, o)
 	case *rbacv1.ClusterRoleBinding:
 		return c.applyClusterRoleBinding(ctx, o)
+	case *batchv1.CronJob:
+		return c.applyCronJob(ctx, ns, o)
+	case *batchv1.Job:
+		return c.applyJob(ctx, ns, o)
 	default:
 		return fmt.Errorf("ApplyOwned: unsupported kind %T", obj)
 	}
@@ -217,6 +235,10 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.RbacV1().ClusterRoles().List(ctx, opts)
 	case KindClusterRoleBinding:
 		return c.CS.RbacV1().ClusterRoleBindings().List(ctx, opts)
+	case KindCronJob:
+		return c.CS.BatchV1().CronJobs(ns).List(ctx, opts)
+	case KindJob:
+		return c.CS.BatchV1().Jobs(ns).List(ctx, opts)
 	default:
 		return nil, fmt.Errorf("listOwned: unsupported kind %q", kind)
 	}
@@ -256,6 +278,13 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		return ignoreNotFound(c.CS.RbacV1().ClusterRoles().Delete(ctx, name, opts))
 	case KindClusterRoleBinding:
 		return ignoreNotFound(c.CS.RbacV1().ClusterRoleBindings().Delete(ctx, name, opts))
+	case KindCronJob:
+		return ignoreNotFound(c.CS.BatchV1().CronJobs(ns).Delete(ctx, name, opts))
+	case KindJob:
+		// Deleting a Job leaves its pods around by default; propagate
+		// foreground deletion so the pods go too.
+		bg := metav1.DeletePropagationBackground
+		return ignoreNotFound(c.CS.BatchV1().Jobs(ns).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &bg}))
 	default:
 		return fmt.Errorf("deleteByKind: unsupported kind %q", kind)
 	}
