@@ -14,6 +14,7 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/naming"
+	"github.com/getnvoi/core/pkg/providers/cloudflare"
 	nvoiRuntime "github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -22,15 +23,21 @@ import (
 // concern:
 //
 //	backend.tf            terraform { required_providers + backend }
-//	                      — aggregated from every active provider's
-//	                      Provider() declaration
+//	                      — aggregated from infra + (when domains:)
+//	                      the Cloudflare DNS+tunnel emitter.
 //	<infra-provider>.tf   provider "X" {} + servers/network/firewall
-//	<dns-provider>-dns.tf provider "X" {} + cloudflare_record etc
+//	cloudflare-dns.tf     provider "cloudflare" {} + tunnel resource +
+//	                      ingress config + CNAME records. Emitted only
+//	                      when cfg.Domains is non-empty.
 //
 // Each provider's emitter writes ONLY its provider-config block + its
 // resources. The terraform meta-block lives in backend.tf alone —
 // tofu rejects duplicate `required_providers` blocks at the
 // module level, so per-provider declarations must aggregate.
+//
+// DNS is NOT pluggable: Cloudflare is the only DNS+tunnel provider
+// (substrate-level dependency). Compile calls cloudflare.EmitTunnelDNS
+// directly — keeps the seam honest about the hard dep.
 func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 	b := NewBundle()
 
@@ -50,18 +57,16 @@ func Compile(rt *nvoiRuntime.Runtime) (*Bundle, error) {
 	}
 	b.Set(naming.ProviderHCL(rt.Cfg.Providers.Infra), infraHCL)
 
-	// DNS records are tf-managed: A record per (service, domain) →
-	// master IPv4.
-	if len(rt.Cfg.Domains) > 0 && rt.Cfg.Providers.DNS != "" {
-		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
+	// CF tunnel + CNAME records are tf-managed: one CNAME per
+	// (service, domain) → tunnel CNAME target; tunnel resource +
+	// ingress config carry the route table. Activated by the
+	// presence of cfg.Domains alone — no separate toggle.
+	if len(rt.Cfg.Domains) > 0 {
+		dnsHCL, err := cloudflare.EmitTunnelDNS(rt)
 		if err != nil {
 			return nil, err
 		}
-		dnsHCL, err := dns.EmitDNS(rt)
-		if err != nil {
-			return nil, err
-		}
-		b.Set(rt.Cfg.Providers.DNS+"-dns.tf", dnsHCL)
+		b.Set("cloudflare-dns.tf", dnsHCL)
 	}
 
 	return b, nil

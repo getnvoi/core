@@ -15,8 +15,6 @@ import (
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
 	_ "github.com/getnvoi/core/pkg/providers/planetscale"
 	_ "github.com/getnvoi/core/pkg/providers/postgres"
-	_ "github.com/getnvoi/core/pkg/providers/postmark"
-	_ "github.com/getnvoi/core/pkg/providers/twilio"
 )
 
 // TestExamples_LoadAndValidate exercises every YAML in examples/.
@@ -55,12 +53,6 @@ func TestExamples_LoadAndValidate(t *testing.T) {
 			}
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("Validate %s: %v", path, err)
-			}
-			// Warnings are advisories, not errors — log them so test
-			// output surfaces sizing hints. The presence of warnings
-			// doesn't fail the test.
-			for _, w := range cfg.Warnings() {
-				t.Logf("%s warning: %s", name, w)
 			}
 		})
 	}

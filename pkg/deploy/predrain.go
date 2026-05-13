@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/install"
@@ -137,76 +136,4 @@ func pickSurvivorMaster(cfg *config.Config, leaving []string) string {
 		}
 	}
 	return pick
-}
-
-// drainCertificates deletes cert-manager Certificate resources cluster-wide
-// before tofu destroys the cluster. cert-manager's Challenge finalizer
-// runs the DNS-01 solver's Cleanup() in response, which removes the
-// `_acme-challenge.<domain>` TXT records via the DNS provider's API.
-// Without this step, those scratch TXT records orphan in the operator's
-// zone — tofu doesn't manage them (cert-manager wrote them out-of-band)
-// so `tf destroy` can't clean them up.
-//
-// Best-effort throughout: every failure path warns and proceeds with the
-// destroy. Worst case is the TXT records stay orphan, which is the
-// status quo without this step. Bounded waits (60s) keep the destroy
-// from hanging if cert-manager is unhealthy.
-//
-// Skipped silently when:
-//   - Endpoints output is unreadable (cluster never existed / state corrupt)
-//   - No master is reachable (everything's already torn down)
-//   - SSH to master fails (master is down — destroy will clean it up regardless)
-//   - No Certificate resources exist (cluster never had domains)
-func (s *Session) drainCertificates(ctx context.Context) error {
-	eps, err := s.Run.Endpoints(ctx)
-	if err != nil {
-		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: cannot read endpoints (%v); skipping", err))
-		return nil
-	}
-
-	// Pick any reachable master. Destroy targets ALL nodes; we just
-	// need one alive long enough to issue the kubectl delete.
-	var masterName string
-	for name, srv := range eps.Servers {
-		if srv.Role == "master" && srv.IPv4 != "" {
-			masterName = name
-			break
-		}
-	}
-	if masterName == "" {
-		return nil
-	}
-	srv := eps.Servers[masterName]
-
-	sh, err := ssh.Dial(ctx, srv.IPv4+":22", install.DefaultUser, s.Rt.SSHPrivKey)
-	if err != nil {
-		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: ssh %s (%s): %v; skipping", masterName, srv.IPv4, err))
-		return nil
-	}
-	defer sh.Close()
-
-	out, err := install.Kubectl(ctx, sh, "get", "certificate", "-A", "-o", "name", "--ignore-not-found")
-	if err != nil {
-		// Likely cert-manager CRDs aren't installed (cluster never had
-		// domains). That's the silent-skip case.
-		return nil
-	}
-	if strings.TrimSpace(string(out)) == "" {
-		return nil
-	}
-
-	s.Lg.Step("drain-cert-manager")
-	s.Lg.Info("deleting Certificate resources; cert-manager finalizers clean up _acme-challenge TXT records via the DNS provider API")
-
-	if out, err := install.Kubectl(ctx, sh, "delete", "certificate", "--all", "-A", "--timeout=60s"); err != nil {
-		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: delete: %v (out: %s)", err, strings.TrimSpace(string(out))))
-		// Continue to wait — kubectl delete may have queued the
-		// deletion even if the CLI returned an error.
-	}
-	if out, err := install.Kubectl(ctx, sh, "wait", "--for=delete", "certificate", "--all", "-A", "--timeout=60s"); err != nil {
-		s.Lg.Warn(fmt.Sprintf("drain-cert-manager: wait: %v (out: %s) — proceeding to destroy; orphan TXT records possible", err, strings.TrimSpace(string(out))))
-		return nil
-	}
-	s.Lg.Info("Certificate finalizers complete; TXT records cleaned via provider API")
-	return nil
 }

@@ -13,8 +13,6 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/getnvoi/core/pkg/providers"
 )
 
 // Config is the parsed YAML. One struct, one shape, mirrors the
@@ -62,75 +60,30 @@ type Config struct {
 	// the verbs the alias expands to, not from the alias layer).
 	Aliases map[string]string `yaml:"aliases,omitempty"`
 
-	// Domains maps a service name to its public hostnames. Requires
-	// providers.dns when non-empty. Each key must exist in services:.
-	// Ingress flows: master 80/443 → in-cluster Caddy → Service.
+	// Domains maps a service name to its public hostnames. Each key
+	// must exist in services:. CF tunnel + per-domain CNAMEs activate
+	// implicitly whenever Domains is non-empty (no `providers.dns` or
+	// `providers.ingress` toggle — Cloudflare is the only DNS+tunnel
+	// path in this substrate).
 	Domains Domains `yaml:"domains,omitempty"`
 
-	// ACMEEmail is the contact address Caddy registers with Let's
-	// Encrypt. Optional — when empty, BuildCaddyConfig falls back to
-	// `acme@<first-domain>`. Real operators want a real address so
-	// LE rate-limit and expiration warnings reach a human.
-	ACMEEmail string `yaml:"acme_email,omitempty"`
-
-	// Monitor activates the observability stack (Prometheus + Thanos +
-	// Loki + Grafana + dashboards + alert rules + contact points)
-	// when non-nil. Presence is the toggle — same convention as
-	// `build:` / `storage:` / `domains:` everywhere else. Empty
-	// `monitor: {}` is the minimum valid form (stack on, tunnel-only
-	// access via `nvoi monitor`, no alert routing).
-	Monitor *MonitorSpec `yaml:"monitor,omitempty"`
-}
-
-// MonitorSpec configures the observability stack. Tunnel-only access
-// is the default — operators reach Grafana via `nvoi monitor` (SSH
-// port-forward). Set Domain to also expose Grafana over a public
-// Ingress with cert-manager-issued TLS.
-//
-// AdminPassword is required when Domain is set (public exposure must
-// have real auth). Tunnel-only mode runs Grafana with anonymous
-// viewer access — no admin password needed because the SSH tunnel is
-// the access control.
-//
-// Both Domain and AdminPassword accept literal values or `$VAR`
-// references resolved at the cmd/cli boundary.
-type MonitorSpec struct {
-	Domain        string      `yaml:"domain,omitempty"`
-	AdminPassword string      `yaml:"admin_password,omitempty"`
-	Alerts        *AlertsSpec `yaml:"alerts,omitempty"`
-
-	// Dashboards lists glob paths (relative to the config file) to
-	// Grafana dashboard JSON files. Each match becomes one ConfigMap
-	// the Grafana sidecar provisions. Empty → no dashboards (operator
-	// can still explore raw metrics via Grafana's Explore tab).
+	// HA is the opt-in apiserver high-availability flag.
 	//
-	// nvoi ships reference dashboards under examples/dashboards/ —
-	// operators copy + customize, OR pull from grafana.com.
-	Dashboards []string `yaml:"dashboards,omitempty"`
-
-	// AlertRules lists glob paths to Grafana alert-rule provisioning
-	// YAML files. Each match becomes a file in Grafana's
-	// /etc/grafana/provisioning/alerting/ directory. Empty → no alert
-	// rules (only datasources + contact points come from nvoi).
+	//   unset / false (default):
+	//     Single master. Validator REQUIRES exactly 1 master. Workers
+	//     join via the master's private IP. Hardware failure = sub-90s
+	//     rebuild from R2-stored tfstate (Hetzner per-server SLA
+	//     ~99.9%). No load balancer. The 90% case.
 	//
-	// nvoi ships reference alert rules under examples/alerts/.
-	AlertRules []string `yaml:"alert_rules,omitempty"`
-}
-
-// AlertsSpec configures notification channels. Each non-nil field is
-// provisioned as a Grafana contact point + folded into the default
-// notification policy (every firing alert routes through every
-// configured channel for v1). When AlertsSpec is nil, alerts fire to
-// the Grafana dashboard only — operators see them on the home page,
-// no external notification.
-//
-// Slack is a plain webhook URL (single-vendor field, no provider
-// abstraction). Email and SMS dispatch through registered providers
-// (postmark, twilio, …) — same registry pattern as BucketProvider.
-type AlertsSpec struct {
-	Slack string               `yaml:"slack,omitempty"`
-	Email *providers.AlertSpec `yaml:"email,omitempty"`
-	SMS   *providers.AlertSpec `yaml:"sms,omitempty"`
+	//   true:
+	//     Validator REQUIRES an odd master count ≥3 (etcd quorum:
+	//     3/5/7…). Provisions a private-only hcloud LB on port 6443
+	//     fronting the master pool; secondary masters + workers join
+	//     via the LB IP. Apiserver failover is cloud-router-mediated
+	//     (~5s LB health check); etcd tolerates ⌊(N-1)/2⌋ master
+	//     failures. ~5€/month per cluster for the LB. The opt-in
+	//     production path.
+	HA bool `yaml:"ha,omitempty"`
 }
 
 // RegistryDef holds pull credentials for a single private container
@@ -266,54 +219,12 @@ type Providers struct {
 	// and tofu's `s3` backend points at it. Transitions both
 	// directions auto-migrate state.
 	Storage string `yaml:"storage,omitempty"`
-
-	// DNS is REQUIRED when Domains is non-empty. Today: cloudflare.
-	// The named provider's emitter writes tofu resources for the
-	// domain → master IP bindings; tofu owns the lifecycle (drift
-	// detection, deletion) — there are no runtime API calls from
-	// nvoi to the DNS provider.
-	DNS string `yaml:"dns,omitempty"`
-
-	// Ingress is OPTIONAL. Selects the public ingress transport for
-	// services with declared domains.
-	//
-	//   - "" / "traefik" (default): cloud LB (HA) or master:80,443
-	//     (single-master) → klipper-lb hostPort → Traefik → Service.
-	//     cert-manager issues per-domain TLS via DNS-01.
-	//   - "cloudflare": outbound tunnel terminating at Cloudflare's
-	//     edge. No public 80/443. cloudflared system Deployment
-	//     routes per-domain ingress directly to the workload's
-	//     ClusterIP Service. CF terminates TLS at the edge;
-	//     cert-manager is skipped. Requires providers.dns:
-	//     cloudflare and a non-empty domains:.
-	//
-	// Modes are mutually exclusive; the cluster runs exactly one
-	// ingress transport at a time. Flipping the field is a workload
-	// + firewall diff — no k3s reinstall.
-	Ingress string `yaml:"ingress,omitempty"`
-}
-
-// Ingress mode names. Closed enum — Validate rejects anything else.
-// Downstream packages branch on Providers.IngressMode(), which folds
-// "" → IngressTraefik so they never have to handle three cases.
-const (
-	IngressTraefik    = "traefik"
-	IngressCloudflare = "cloudflare"
-)
-
-// IngressMode returns the effective ingress transport. Empty
-// Providers.Ingress is folded to IngressTraefik.
-func (p Providers) IngressMode() string {
-	if p.Ingress == "" {
-		return IngressTraefik
-	}
-	return p.Ingress
 }
 
 // Domains maps service names to public hostnames. Each service must
-// already exist in cfg.Services. When non-empty, providers.dns is
-// required (and the chosen DNS backend's emitter writes the records
-// during tf-apply).
+// already exist in cfg.Services. When non-empty, the CF DNS+tunnel
+// emitter activates implicitly — Cloudflare is the only DNS+tunnel
+// path in this substrate, so there's no provider toggle.
 type Domains map[string][]string
 
 // ServerSpec describes one server. Role is `master` or `worker`.
@@ -414,3 +325,16 @@ func (c *Config) PrimaryMaster() string {
 	}
 	return lone // single-master implicit
 }
+
+// MasterCount returns the number of servers with role=master. Used by
+// HA decisions in the install pipeline read this.
+func (c *Config) MasterCount() int {
+	n := 0
+	for _, srv := range c.Servers {
+		if srv.Role == "master" {
+			n++
+		}
+	}
+	return n
+}
+

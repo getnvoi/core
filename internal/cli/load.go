@@ -60,19 +60,17 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		}
 	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
-	// cfg-file directory is the base for monitor.dashboards /
-	// monitor.alert_rules globs — operator-written paths in the YAML
-	// are resolved relative to the YAML itself, NOT cwd. Matches the
-	// way every other config-relative path in nvoi resolves.
-	configDir := filepath.Dir(flags.ConfigPath)
-	monitor, err := ResolveMonitor(cfg, os.Getenv, configDir)
-	if err != nil {
-		return nil, err
-	}
-	// Advisory warnings — non-fatal but operator-visible. Emit via
-	// the boundary's log sink; internal packages must not warn.
-	for _, w := range cfg.Warnings() {
-		lg.Warn(w)
+
+	// Tunnel prerequisite: CF_TUNNEL_SECRET is operator-supplied
+	// (32 random bytes, base64). Pinned here at the cmd/cli boundary
+	// so the missing-secret failure surfaces ONCE, before any tofu
+	// invocation — not as a downstream "Missing required argument" at
+	// plan time. CF DNS+tunnel activates implicitly whenever
+	// cfg.Domains is non-empty (no provider toggle).
+	if len(cfg.Domains) > 0 {
+		if providerInputs.Cloudflare == nil || providerInputs.Cloudflare.TunnelSecret == "" {
+			return nil, fmt.Errorf("domains: requires CF_TUNNEL_SECRET env var (32-byte base64 string; operator-generated and stored — nvoi does not mint it)")
+		}
 	}
 
 	var backend *state.Backend
@@ -110,6 +108,5 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		Secrets:       secrets,
 		RegistryCreds: registryCreds,
 		Providers:     providerInputs,
-		Monitor:       monitor,
 	})
 }

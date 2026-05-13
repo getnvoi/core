@@ -56,11 +56,12 @@ func ResolveProviderInputs(getenv func(string) string) runtime.ProviderInputs {
 	}
 	return runtime.ProviderInputs{
 		Cloudflare: &runtime.CloudflareInputs{
-			APIToken:  apiToken,
-			APIKey:    apiKey,
-			AccountID: getenv("CF_ACCOUNT_ID"),
-			ZoneID:    getenv("CF_ZONE_ID"),
-			Zone:      getenv("CF_ZONE"),
+			APIToken:     apiToken,
+			APIKey:       apiKey,
+			AccountID:    getenv("CF_ACCOUNT_ID"),
+			ZoneID:       getenv("CF_ZONE_ID"),
+			Zone:         getenv("CF_ZONE"),
+			TunnelSecret: getenv("CF_TUNNEL_SECRET"),
 		},
 		Hetzner: &runtime.HetznerInputs{
 			Token: getenv("HCLOUD_TOKEN"),

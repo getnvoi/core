@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"text/template"
 
+	"github.com/getnvoi/core/pkg/providers/cloudflare"
 	nvoiRuntime "github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -32,16 +33,21 @@ func emitBackend(rt *nvoiRuntime.Runtime) ([]byte, error) {
 	}
 	reqs := append([]ProviderRequirement(nil), infra.Providers()...)
 
-	if rt.Cfg.Providers.DNS != "" {
-		dns, err := ResolveDNS(rt.Cfg.Providers.DNS)
-		if err != nil {
-			return nil, err
-		}
-		reqs = append(reqs, dns.Providers()...)
+	// Cloudflare DNS+tunnel provider is added unconditionally when
+	// domains: is set — the only DNS path (no provider abstraction).
+	// Without domains, no cloudflare provider block is needed (state
+	// backend uses the s3-compatible R2 endpoint via raw HTTP creds,
+	// not the cloudflare provider).
+	if len(rt.Cfg.Domains) > 0 {
+		reqs = append(reqs, ProviderRequirement{
+			Alias:   cloudflare.TerraformProviderAlias,
+			Source:  cloudflare.TerraformProviderSource,
+			Version: cloudflare.TerraformProviderVersion,
+		})
 	}
 
 	// Dedupe by alias — emitters may declare the same provider
-	// (e.g. CF DNS + a future CF resource both want cloudflare). Last
+	// (e.g. infra + a future CF resource both want cloudflare). Last
 	// declaration wins; the slice is small so a linear scan is fine.
 	deduped := reqs[:0]
 	seen := make(map[string]bool, len(reqs))

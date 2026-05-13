@@ -9,7 +9,6 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/cloudinit"
 	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/naming"
@@ -69,7 +68,6 @@ func (emitter) ServerResourceType() string { return "hcloud_server" }
 // without importing this package.
 var hetznerReservedServerNames = map[string]bool{
 	"default": true, // hcloud_network.default, hcloud_firewall.default, hcloud_network_subnet.default
-	"cp":      true, // hcloud_load_balancer.cp + lb_network/target/service
 }
 
 // Providers declares the terraform providers this emitter's HCL
@@ -85,6 +83,12 @@ func (emitter) Providers() []compile.ProviderRequirement {
 
 // templateData is the shape the template consumes. Built from rt.Cfg
 // + rt.SSHPubKey; pure transformation.
+//
+// All-tunnel topology: no public HTTP firewall rules. Apiserver HA is
+// opt-in via cfg.HA — when set, the template emits a private-only
+// hcloud LB on 6443 fronting the master pool, and api_endpoint.private
+// resolves to the LB's private IP. Single-master clusters skip the LB
+// entirely; api_endpoint.private = the lone master's private IP.
 type templateData struct {
 	App           string
 	Env           string
@@ -94,23 +98,7 @@ type templateData struct {
 	NetworkZone   string
 	Servers       []serverData
 	HA            bool
-	PrimaryMaster string // used by outputs in non-HA mode (any master Key works; we pick the first)
-
-	// PublicHTTPIngress opens hcloud_firewall.default for 80/443 from
-	// 0.0.0.0/0 — the single-master path where the master IS the public
-	// face. True iff domains is declared AND HA is false AND ingress
-	// mode is traefik. In tunnel mode there is NO public HTTP path
-	// regardless of domains.
-	PublicHTTPIngress bool
-
-	// LBHTTPIngress opens hcloud_firewall.default for 80/443 from the
-	// private subnet only AND emits 80/443 services on the public LB.
-	// True iff domains is declared AND HA AND ingress mode is traefik.
-	// In tunnel mode the LB still emits (for the 6443 k3s API) but
-	// collapses to private-only — its enable_public_interface flips
-	// false via the existing `{{ if not .LBHTTPIngress }}` template
-	// gate.
-	LBHTTPIngress bool
+	PrimaryMaster string // used by outputs (api_endpoint.public is always primary's public IPv4)
 }
 
 type serverData struct {
@@ -126,9 +114,13 @@ type serverData struct {
 // EmitInfra renders hetzner.tf from templateData. Pure: no disk, no env.
 // SSH public key arrives already-resolved on rt.SSHPubKey.
 //
-// HA is auto-detected: ≥2 servers with role=master triggers the
-// hcloud_load_balancer block. Targets enroll via label selector so
-// scaling masters up or down is just a YAML edit + redeploy.
+// HA mode is opt-in via top-level `ha: true` (validator enforces
+// odd master count ≥3). When set, the template emits a private-only
+// hcloud LB on :6443 fronting the master pool, and api_endpoint.private
+// resolves to the LB private IP. Scaling masters up/down or toggling
+// `ha:` is a YAML edit + redeploy; the substrate detaches doomed
+// nodes (drain + etcd member remove) before tofu destroys the
+// corresponding servers in the same apply.
 func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 	cfg := rt.Cfg
 	pubKey := strings.TrimSpace(string(rt.SSHPubKey))
@@ -177,27 +169,19 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 		return nil, fmt.Errorf("no masters in servers (validator should have rejected)")
 	}
 
-	ha := len(masters) >= 2
-	hasDomains := len(cfg.Domains) > 0
-	// Tunnel mode (providers.ingress: cloudflare) suppresses ALL
-	// public HTTP/S exposure on Hetzner: firewall drops 80/443,
-	// LB drops its public interface (via the existing
-	// `{{ if not .LBHTTPIngress }}` template gate) and drops its
-	// 80/443 service blocks. The tunnel terminates externally at
-	// Cloudflare's edge — no inbound surface on the nodes.
-	tunnel := cfg.Providers.IngressMode() == config.IngressCloudflare
+	// All-tunnel: no public HTTP firewall openings. Apiserver HA
+	// triggers a private-only hcloud LB on 6443 (template-gated on
+	// .HA). Single-master clusters skip the LB.
 	data := templateData{
-		App:               cfg.App,
-		Env:               cfg.Env,
-		Prefix:            naming.Prefix(cfg.App, cfg.Env),
-		NetworkCIDR:       networkCIDR,
-		NetworkSubnet:     networkSubnet,
-		NetworkZone:       zone,
-		Servers:           servers,
-		HA:                ha,
-		PrimaryMaster:     masters[0], // alphabetically first by sort above
-		PublicHTTPIngress: hasDomains && !ha && !tunnel,
-		LBHTTPIngress:     hasDomains && ha && !tunnel,
+		App:           cfg.App,
+		Env:           cfg.Env,
+		Prefix:        naming.Prefix(cfg.App, cfg.Env),
+		NetworkCIDR:   networkCIDR,
+		NetworkSubnet: networkSubnet,
+		NetworkZone:   zone,
+		Servers:       servers,
+		HA:            cfg.HA,
+		PrimaryMaster: masters[0], // alphabetically first by sort above
 	}
 
 	var buf bytes.Buffer
@@ -206,3 +190,4 @@ func (emitter) EmitInfra(rt *runtime.Runtime) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
+

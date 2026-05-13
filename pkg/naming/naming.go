@@ -39,17 +39,6 @@ func Server(app, env, name string) string { return Prefix(app, env) + "-" + name
 // re-promote remote state.
 func StateBucket(app, env string) string { return Prefix(app, env) + "-tfstate" }
 
-// ObservabilityLogsBucket returns the object-storage bucket Loki ships
-// chunks to. One per (app, env) — mirrors the StateBucket pattern.
-// Lifecycle: created on first `nvoi deploy` with monitor: set; deleted
-// only on `nvoi destroy`.
-func ObservabilityLogsBucket(app, env string) string { return Prefix(app, env) + "-logs" }
-
-// ObservabilityMetricsBucket returns the object-storage bucket Thanos
-// ships Prometheus blocks to. One per (app, env). Same lifecycle as
-// the logs bucket.
-func ObservabilityMetricsBucket(app, env string) string { return Prefix(app, env) + "-metrics" }
-
 // WorkDir returns the per-(app, env) tofu working directory under
 // the operator's cwd: `.tf/{app}-{env}/`. Bundle files + `terraform.tfstate`
 // (filename retained by OpenTofu for state-format compat) land here.
@@ -58,6 +47,13 @@ func WorkDir(app, env string) string { return filepath.Join(workDirRoot, app+"-"
 // ProviderHCL returns the .tf filename a provider's emitter writes into
 // the bundle: `<provider>.tf`. One file per registered provider.
 func ProviderHCL(providerName string) string { return providerName + ".tf" }
+
+// TraefikInClusterURL is the cluster-internal HTTP URL of the Traefik
+// Service k3s installs under kube-system. cloudflared upstream points
+// here in tunnel mode; Traefik then routes by Host header to each
+// workload's Ingress backend. The address is part of the k3s contract,
+// not nvoi's to vary.
+const TraefikInClusterURL = "http://traefik.kube-system.svc.cluster.local:80"
 
 const workDirRoot = ".tf"
 

@@ -1,10 +1,7 @@
-# Tunnel-mode emission for providers.ingress: cloudflare.
-#
-# This file REPLACES dns.tf.tmpl when the cloudflare DNS emitter runs
-# under tunnel mode — both shapes write to the same cloudflare-dns.tf
-# bundle entry. The provider-config block lives here too (compile
-# writes exactly one file per DNS emitter); required_providers + the
-# version pin still live in the consolidated backend.tf rendered by
+# Cloudflare DNS + tunnel emission. Renders into the
+# cloudflare-dns.tf bundle entry whenever cfg.Domains is non-empty.
+# The provider-config block lives here; required_providers + the
+# version pin live in the consolidated backend.tf rendered by
 # internal/compile.
 provider "cloudflare" {}
 
@@ -14,22 +11,20 @@ locals {
   tunnel_name           = {{ .TunnelName | hcl }}
 }
 
-# ── Tunnel secret (32 random bytes, base64) ────────────────────────────
-# Stored in tofu state; rotates only on explicit taint. cloudflared
-# authenticates against CF edge using this secret (wrapped into the
-# token output below).
-resource "random_id" "tunnel_secret" {
-  byte_length = 32
-}
-
 # ── The tunnel itself ──────────────────────────────────────────────────
 # Named after app+env so re-running `nvoi deploy` is idempotent — the
 # same name on a second deploy adopts the existing tunnel (CF tunnel
 # names are unique per account).
+#
+# `secret` is operator-supplied (CF_TUNNEL_SECRET), baked as a literal
+# at compile time. cloudflare provider 4.x marks `secret` Required;
+# we don't mint it via random_id — keeps the trust surface explicit,
+# avoids hashicorp/random in state, makes secret rotation an operator
+# decision (regenerate, swap env, redeploy) rather than a state taint.
 resource "cloudflare_zero_trust_tunnel_cloudflared" "main" {
-  account_id    = local.cloudflare_account_id
-  name          = local.tunnel_name
-  tunnel_secret = random_id.tunnel_secret.b64_std
+  account_id = local.cloudflare_account_id
+  name       = local.tunnel_name
+  secret     = {{ .TunnelSecret | hcl }}
 }
 
 # ── Tunnel ingress configuration ───────────────────────────────────────

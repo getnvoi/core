@@ -22,30 +22,20 @@ func emitFor(t *testing.T, rt *runtime.Runtime) []byte {
 	return src
 }
 
-// rtFor builds a minimal runtime for the hetzner emitter under a
-// given ingress mode + server set. Domains: + Services: are populated
-// when ingress=cloudflare (validator prerequisites), but the emitter
-// only consumes them indirectly via the templateData flags.
-func rtFor(t *testing.T, ingressMode string, servers map[string]config.ServerSpec) *runtime.Runtime {
+// rtFor builds a minimal runtime for the hetzner emitter. `ha` toggles
+// the new top-level `ha:` flag; servers must satisfy whatever count
+// rules the test asserts. All-tunnel: no ingress mode toggle; per-test
+// assertions cover firewall posture and LB emission.
+func rtFor(t *testing.T, ha bool, servers map[string]config.ServerSpec) *runtime.Runtime {
 	t.Helper()
 	cfg := &config.Config{
 		App:       "hello",
 		Env:       "dev",
 		Providers: config.Providers{Infra: "hetzner"},
 		Servers:   servers,
-	}
-	switch ingressMode {
-	case config.IngressCloudflare:
-		cfg.Providers.DNS = "cloudflare"
-		cfg.Providers.Ingress = config.IngressCloudflare
-		cfg.Services = map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}}
-		cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
-	case config.IngressTraefik:
-		// Traefik mode WITH domains — the regression baseline for
-		// public 80/443 emission.
-		cfg.Providers.DNS = "cloudflare"
-		cfg.Services = map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}}
-		cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
+		Services:  map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}},
+		Domains:   config.Domains{"web": {"www.nvoi.to"}},
+		HA:        ha,
 	}
 	return &runtime.Runtime{
 		Cfg:       cfg,
@@ -54,69 +44,81 @@ func rtFor(t *testing.T, ingressMode string, servers map[string]config.ServerSpe
 	}
 }
 
-// TunnelMode_NoPublic80443 — the InfraEmitter contract requires
-// that no rule in `hcloud_firewall.default` opens 80 or 443 to the
-// public internet when ingress mode is cloudflare. Other implementers
-// adopting the contract on new providers must produce the equivalent
-// posture for their own firewall HCL.
-func TestEmitInfra_TunnelMode_SingleMaster_NoPublic80443(t *testing.T) {
-	src := emitFor(t, rtFor(t, config.IngressCloudflare, map[string]config.ServerSpec{
+// All-tunnel: SSH (22) is the only public ingress. No firewall rule
+// opens 80 or 443 to the internet, regardless of master count or HA.
+func TestEmitInfra_NoPublic80443(t *testing.T) {
+	src := emitFor(t, rtFor(t, false, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}))
 	hcl := string(src)
-	// The Traefik-mode public-HTTP rule pattern would render as
-	// `port = "80"` / `"443"`. Absence is the strongest assertion.
 	for _, port := range []string{`port       = "80"`, `port       = "443"`} {
 		if strings.Contains(hcl, port) {
-			t.Errorf("tunnel mode: firewall contains port rule %q\n--- output ---\n%s", port, hcl)
+			t.Errorf("all-tunnel: firewall contains port rule %q\n--- output ---\n%s", port, hcl)
 		}
 	}
 }
 
-// TunnelMode_HA_PrivateOnlyLB — HA + tunnel keeps the LB (6443 for
-// k3s API joins) but collapses to private-only: no public IPv4, no
-// 80/443 services. The InfraEmitter contract leaves the cluster-
-// internal join surface intact regardless of ingress mode.
-func TestEmitInfra_TunnelMode_HA_PrivateOnlyLB(t *testing.T) {
-	src := emitFor(t, rtFor(t, config.IngressCloudflare, map[string]config.ServerSpec{
+// ha: true → emit a private-only hcloud LB on 6443 fronting the master
+// pool. api_endpoint.private resolves to the LB's private IP, NOT a
+// master's private IP — workers + secondary masters join via the LB,
+// which steers around dead masters in ~10s.
+func TestEmitInfra_HA_EmitsPrivateLB(t *testing.T) {
+	src := emitFor(t, rtFor(t, true, map[string]config.ServerSpec{
 		"m1": {Type: "cax21", Region: "nbg1", Role: "master", Primary: true},
 		"m2": {Type: "cax21", Region: "nbg1", Role: "master"},
+		"m3": {Type: "cax21", Region: "nbg1", Role: "master"},
 	}))
 	body := hcltest.ParseValid(t, src, "hetzner.tf")
 
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer", "cp") == nil {
-		t.Fatal("HA + tunnel: hcloud_load_balancer.cp still required for 6443")
-	}
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer_service", "http") != nil {
-		t.Error("HA + tunnel: hcloud_load_balancer_service.http should NOT exist")
-	}
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer_service", "https") != nil {
-		t.Error("HA + tunnel: hcloud_load_balancer_service.https should NOT exist")
+	// LB resources MUST be emitted.
+	for _, name := range []string{
+		"hcloud_load_balancer",
+		"hcloud_load_balancer_network",
+		"hcloud_load_balancer_target",
+		"hcloud_load_balancer_service",
+	} {
+		if hcltest.FindBlock(body, "resource", name, "cp") == nil {
+			t.Errorf("HA: missing resource %s.cp", name)
+		}
 	}
 
 	hcl := string(src)
+	// Public interface MUST be disabled — the LB is reachable only
+	// from the private subnet. All-tunnel guarantee.
 	if !strings.Contains(hcl, "enable_public_interface = false") {
-		t.Errorf("HA + tunnel: LB should have enable_public_interface=false\n--- output ---\n%s", hcl)
+		t.Errorf("HA: LB must disable public interface\n--- output ---\n%s", hcl)
 	}
-	for _, port := range []string{`port       = "80"`, `port       = "443"`} {
-		if strings.Contains(hcl, port) {
-			t.Errorf("HA + tunnel: firewall contains %q (expected suppressed)\n--- output ---\n%s", port, hcl)
-		}
+	// Only port 6443. No 80/443 services (cloudflared handles app ingress).
+	if strings.Contains(hcl, "listen_port      = 80") || strings.Contains(hcl, "listen_port      = 443") {
+		t.Errorf("HA: LB must not expose 80/443\n--- output ---\n%s", hcl)
+	}
+	// api_endpoint.private references the LB.
+	if !strings.Contains(hcl, "private = hcloud_load_balancer_network.cp.ip") {
+		t.Errorf("HA: api_endpoint.private must reference the LB private IP\n--- output ---\n%s", hcl)
 	}
 }
 
-// TraefikMode_StillEmitsPublicHTTP — regression. The tunnel-mode
-// suppression must not leak into the Traefik path: with
-// ingress unset / explicitly traefik and domains: declared, public
-// 80/443 rules still emit.
-func TestEmitInfra_TraefikMode_StillEmitsPublicHTTP(t *testing.T) {
-	src := emitFor(t, rtFor(t, config.IngressTraefik, map[string]config.ServerSpec{
+// ha: false (or unset) → no LB emitted; api_endpoint.private is the
+// lone master's private IP via hcloud_server_network.
+func TestEmitInfra_NoHA_NoLB(t *testing.T) {
+	src := emitFor(t, rtFor(t, false, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}))
-	hcl := string(src)
-	for _, want := range []string{`port       = "80"`, `port       = "443"`} {
-		if !strings.Contains(hcl, want) {
-			t.Errorf("Traefik mode with domains: expected %q\n--- output ---\n%s", want, hcl)
+	body := hcltest.ParseValid(t, src, "hetzner.tf")
+
+	for _, name := range []string{
+		"hcloud_load_balancer",
+		"hcloud_load_balancer_network",
+		"hcloud_load_balancer_target",
+		"hcloud_load_balancer_service",
+	} {
+		if hcltest.FindBlock(body, "resource", name, "cp") != nil {
+			t.Errorf("non-HA: %s.cp should not be emitted", name)
 		}
+	}
+
+	hcl := string(src)
+	if !strings.Contains(hcl, "private = hcloud_server_network.master.ip") {
+		t.Errorf("non-HA: api_endpoint.private must reference the master's hcloud_server_network\n--- output ---\n%s", hcl)
 	}
 }
