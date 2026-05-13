@@ -110,6 +110,8 @@ type DatabaseProvider interface {
 // optional handles populated per call site.
 type DatabaseRequest struct {
 	// Identity (all from pkg/naming)
+	App                   string // cfg.App — carried so naming helpers stay callable in branch/snapshot ops
+	Env                   string // cfg.Env
 	Name                  string // YAML key — e.g. "app"
 	FullName              string // naming.Database(app, env, name)
 	Namespace             string
@@ -146,6 +148,15 @@ type DatabaseRequest struct {
 	// for SaaS engines and for callers that don't need host-level
 	// access (tests, list/download ops).
 	NodeSSH ssh.Shell
+
+	// MasterSSH is the cluster-master shell. Postgres branch /
+	// snapshot ops use it to kubectl-apply VolumeSnapshot kinds
+	// (snapshot.storage.k8s.io/v1) which aren't in core client-go
+	// — same kubectl-on-master pattern EnsureZFSCSI uses for the
+	// CSI manifest. nil for SaaS engines (which hit their vendor
+	// API instead) and for tests that don't exercise the
+	// snapshotting path.
+	MasterSSH ssh.Shell
 
 	// Log is the kind-scoped logger. Provider methods emit
 	// info/success/warning events through it; the deploy pipeline

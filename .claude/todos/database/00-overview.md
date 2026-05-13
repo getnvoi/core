@@ -225,6 +225,19 @@ internal/cli/             MODIFY. ResolveProviderInputs grows
 
 ## Out of scope for this branch
 
+- **`backup: { mode: zfs-send }` for postgres**. ZFS send is genuinely
+  better than logical dump on every axis where they overlap (block-
+  level speed, filesystem-atomic consistency, incremental streams,
+  zero CPU on the live DB). It loses on: uniformity (postgres-only —
+  PlanetScale/Turso/RDS can't produce or consume it), portability (a
+  `.sql.gz` restores into any postgres 17; a zfs stream needs the
+  matching pool layout), major-version upgrades (pg_dump|psql is the
+  canonical path), and off-cluster restore (no psql laptop story).
+  Right architecture is BOTH — logical dump as the default uniform
+  path, opt-in `mode: zfs-send` adds a second CronJob shipping streams
+  to a separate bucket prefix with a dedicated `--from-zfs` restore
+  path. v1.1 — design the opt-in semantics with operator feedback
+  rather than guess.
 - **MySQL selfhosted** (`engine: mysql` running in-cluster).
   PlanetScale covers the managed-MySQL ask; we're not in the
   selfhosted-MySQL business.
