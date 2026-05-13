@@ -6,16 +6,16 @@
 // clean operator-facing message ("engine X doesn't support Y").
 //
 // Postgres is the reference implementation — full coverage via
-// OpenEBS ZFS-LocalPV. Other engines (planetscale, turso, rds-postgres,
-// neon) live as sibling packages under pkg/providers/<engine>/ with
-// the same two-layer shape:
+// OpenEBS ZFS-LocalPV. Future engines (managed Postgres/MySQL,
+// edge-replicated SQLite, etc.) live as sibling packages under
+// pkg/providers/<engine>/ with the same two-layer shape:
 //
 //   - Layer A: HCL emitter (compile.RegisterInfra) — provisioning.
 //   - Layer B: Runtime adapter (providers.RegisterDatabase) — ops.
 //
 // We never shell out to vendor CLIs. Runtime ops go through Go HTTP/SDK
-// clients owned in-package by us — pscale/turso/aws CLIs are not in
-// our trust boundary.
+// clients owned in-package — vendor CLIs are not in our trust
+// boundary.
 //
 // Secrets normalization (NON-NEGOTIABLE): every provider's
 // EnsureCredentials writes the same key shape into the credentials
@@ -168,7 +168,7 @@ type DatabaseRequest struct {
 // what it cares about. Validator gates which fields are valid for
 // which engine.
 type DatabaseSpec struct {
-	Engine   string              // postgres | planetscale | turso | rds-postgres | neon | …
+	Engine   string              // postgres (v1); SaaS engines land as siblings under pkg/providers/<engine>/
 	Version  string              // postgres: e.g. "17"
 	Server   string              // postgres only — DB-node YAML key
 	Size     int                 // postgres only — GiB, ZFS quota

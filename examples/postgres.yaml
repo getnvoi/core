@@ -51,7 +51,6 @@ env: production
 providers:
   infra: hetzner
   storage: cloudflare       # required for databases.app.backup
-  dns: cloudflare
 
 ssh_key: ~/.ssh/id_rsa.pub
 

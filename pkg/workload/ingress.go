@@ -7,7 +7,6 @@ import (
 
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/kube"
-	"github.com/getnvoi/core/pkg/naming"
 )
 
 const ingressClassName = "traefik"
@@ -51,7 +50,7 @@ func buildIngress(name string, svc config.ServiceSpec, domains []string) *networ
 	return &networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: naming.Namespace,
+			Namespace: namespace,
 			Labels: map[string]string{
 				kube.LabelOwner: kube.OwnerIngress,
 			},

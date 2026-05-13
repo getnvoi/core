@@ -3,14 +3,13 @@
 # Every DatabaseProvider's backup CronJob runs this image in MODE=backup
 # (default). `nvoi database restore` and `nvoi database migrate` launch
 # one-shot Jobs with MODE=restore. Same image, two pipelines —
-# dispatches on ENGINE to pick between pg_dump/psql (postgres) and
-# mysqldump/mysql (mysql/planetscale); gzips dumps going out, gunzips
-# coming back; uses the nvoi SigV4 client for S3-compatible I/O (no
-# aws-cli dep).
+# dispatches on ENGINE to pick the dump/restore tool (pg_dump/psql for
+# postgres today); gzips dumps going out, gunzips coming back; uses the
+# nvoi SigV4 client for S3-compatible I/O (no aws-cli dep).
 #
 # Multi-stage because the Go binary's compile-time deps are far heavier
 # than the runtime image needs. Alpine for runtime keeps the image
-# under 150 MB even with both postgres-client + mysql-client installed.
+# under 100 MB with postgresql-client installed.
 #
 # Tag discipline: published on every `v*` git tag by
 # .github/workflows/release.yml; the nvoi CLI pins
@@ -33,8 +32,7 @@ FROM alpine:3.21
 # Bump in lockstep when nvoi starts supporting a newer postgres major.
 RUN apk add --no-cache \
       ca-certificates \
-      postgresql17-client \
-      mysql-client
+      postgresql17-client
 COPY --from=build /out/nvoi-db /usr/local/bin/nvoi-db
 # No shell entrypoint — the Go binary handles env validation, dispatch,
 # dump, restore, and upload. Direct exec means failures propagate as

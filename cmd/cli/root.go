@@ -9,7 +9,6 @@ import (
 
 	_ "github.com/getnvoi/core/pkg/providers/cloudflare"
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
-	_ "github.com/getnvoi/core/pkg/providers/planetscale"
 	_ "github.com/getnvoi/core/pkg/providers/postgres"
 )
 

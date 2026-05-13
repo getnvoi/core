@@ -8,6 +8,11 @@ import (
 	"github.com/getnvoi/core/pkg/providers"
 )
 
+// reservedAliasNames are command names an alias must not shadow.
+// Every built-in cobra verb plus cobra's own help/completion
+// subcommands. Any alias matching one of these is a hard error so
+// operators can't silently break `nvoi deploy` by writing
+// `aliases.deploy: ...`.
 var reservedAliasNames = map[string]bool{
 	"deploy":     true,
 	"plan":       true,
@@ -21,6 +26,16 @@ var reservedAliasNames = map[string]bool{
 	"completion": true,
 }
 
+// Validate enforces YAML shape invariants and verifies that any
+// referenced provider is actually registered. Pure — no disk, no env.
+// File existence / tilde expansion / credential resolution happen at
+// the cmd/ boundary AFTER Validate has succeeded.
+//
+// Note on import: this file imports pkg/providers. By the time
+// Validate is called from cmd/cli, the blank imports there
+// have triggered each provider package's init() and populated the
+// registries. So `providers.IsRegisteredBucket(...)` returns true for
+// every provider linked into the binary.
 func (c *Config) Validate() error {
 	if c.App == "" {
 		return fmt.Errorf("app: required")
@@ -41,6 +56,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("servers: at least one required")
 	}
 
+	// Reserved-name set is per-provider — each infra emitter declares
+	// its own collisions with non-server HCL resources via
+	// providers.RegisterReservedServerNames in its init(). Provider
+	// blank-imports in cmd/cli have already populated the registry
+	// by the time Validate runs. nil = no reservations for this
+	// provider, treated as a permissive empty set.
 	reservedServerNames := providers.ReservedServerNames(c.Providers.Infra)
 
 	masters, primaries := 0, 0
@@ -95,13 +116,34 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// validateHA enforces the master-count rules implied by the top-level
+// `ha:` flag.
+//
+//   ha unset / false:
+//     exactly 1 master. Multiple masters without ha: true is rejected
+//     — it would suggest the operator wants HA but hasn't asked for
+//     the LB primitive, leaving the cluster with no apiserver failover.
+//
+//   ha: true:
+//     odd master count ≥3. Etcd quorum needs majority; odd counts use
+//     every node optimally (4 has the same failure tolerance as 3 but
+//     wastes a node, hence rejected). Exactly one master must carry
+//     `primary: true` for cold-start `--cluster-init`.
+//
+// The LB primitive (private hcloud LB on 6443) is emitted by the
+// infra emitter under the same `cfg.HA` gate. Single-master path
+// skips the LB entirely.
 func validateHA(c *Config, masters, primaries int) error {
 	if !c.HA {
 		if masters != 1 {
 			return fmt.Errorf("servers: %d masters declared but `ha:` is unset — set `ha: true` and use an odd master count ≥3, or scale down to exactly 1 master", masters)
 		}
+		// Single-master case: primary field is implicit. Setting it
+		// explicitly is allowed (forward-compat for flipping ha: true
+		// later) but redundant.
 		return nil
 	}
+	// ha: true
 	if masters < 3 {
 		return fmt.Errorf("ha: true requires an odd master count ≥3 (got %d) — etcd quorum + LB failover both need at least 3 masters", masters)
 	}
@@ -268,6 +310,15 @@ func parseDatabaseBinding(entry string) (prefix, dbName string, err error) {
 	return prefix, dbName, nil
 }
 
+// validateDomains enforces:
+//   - every key in Domains must be a declared service
+//   - every hostname is DNS-1123-shaped (lowercase letters / digits /
+//     dashes / dots; labels ≤63 chars; total ≤253 chars)
+//
+// CF DNS+tunnel is the only path: presence of Domains activates the
+// tunnel implicitly. CF env vars (CF_ZONE_ID, CF_ZONE, CF_ACCOUNT_ID,
+// CF_API_TOKEN, CF_TUNNEL_SECRET) are validated at the cmd/cli
+// boundary (load.go), keeping config.Validate env-free.
 func validateDomains(c *Config) error {
 	if len(c.Domains) == 0 {
 		return nil
@@ -288,13 +339,16 @@ func validateDomains(c *Config) error {
 	return nil
 }
 
+// isValidHostname accepts DNS-1123-shaped hostnames: lowercase letters,
+// digits, dashes, separated by dots; each label 1-63 chars, no
+// leading/trailing dash; total ≤253 chars. No wildcards in v1.
 func isValidHostname(h string) bool {
 	if h == "" || len(h) > 253 {
 		return false
 	}
 	labels := strings.Split(h, ".")
 	if len(labels) < 2 {
-		return false
+		return false // must be FQDN-ish (at least one dot)
 	}
 	for _, label := range labels {
 		if label == "" || len(label) > 63 {
@@ -316,6 +370,15 @@ func isValidHostname(h string) bool {
 	return true
 }
 
+// validateAliases enforces:
+//   - name shape: lowercase letters / digits / dashes / underscores;
+//     must start with a letter (matches cobra-friendly verb names)
+//   - name must not collide with a built-in verb (deploy, exec, etc.)
+//   - body must be non-empty after trim
+//   - body must tokenize (balanced quotes)
+//
+// Tokenization happens here too so misconfigured aliases fail fast at
+// load time, not at the moment an operator types `nvoi <alias>`.
 func validateAliases(c *Config) error {
 	for name, body := range c.Aliases {
 		if !isValidAliasName(name) {
@@ -350,6 +413,14 @@ func isValidAliasName(s string) bool {
 	return true
 }
 
+// validateSecrets enforces the top-level `secrets:` shape:
+//   - non-empty entries
+//   - each entry is a valid POSIX env var name (matches what
+//     `os.Getenv` and a k8s Secret key both accept without ceremony)
+//   - no duplicates
+//
+// Resolution against the operator's environment happens at the cmd/
+// boundary, NOT here. Validate is pure.
 func validateSecrets(c *Config) error {
 	seen := map[string]bool{}
 	for i, name := range c.Secrets {
@@ -367,6 +438,10 @@ func validateSecrets(c *Config) error {
 	return nil
 }
 
+// isValidEnvVarName mirrors the POSIX env var rule: leading letter or
+// underscore, followed by letters/digits/underscores. Tight enough
+// that the same string flows safely into both os.Getenv and a k8s
+// Secret data key.
 func isValidEnvVarName(s string) bool {
 	if s == "" {
 		return false
@@ -384,6 +459,20 @@ func isValidEnvVarName(s string) bool {
 	return true
 }
 
+// validateServices enforces the YAML shape for services + registry:
+//
+//   - every service requires `image`
+//   - every service requires `port`
+//   - if `build:` is set: image must be fully qualified (host/...) OR
+//     the registry: block must declare exactly one host (which we infer)
+//   - replicas, when set, must be >= 1
+//   - storage, when set, requires size + mountPath
+//   - servers, when set, must reference declared servers; len > 1 +
+//     storage = error (a hostPath PV can't span nodes)
+//   - secrets refs must exist in the top-level secrets: list
+//
+// Push-side auth (operator's ~/.docker/config.json) is checked at the
+// cmd/ boundary, not here — that's I/O.
 func validateServices(c *Config) error {
 	declaredSecrets := make(map[string]bool, len(c.Secrets))
 	for _, name := range c.Secrets {
@@ -407,6 +496,9 @@ func validateServices(c *Config) error {
 					return fmt.Errorf("services.%s: build pushes to %s, but no registry: entry for that host", name, host)
 				}
 			} else {
+				// No host in image — try inference from a single
+				// registry: entry. With multiple registries this is
+				// ambiguous; with none it's broken.
 				if !strings.Contains(svc.Image, "/") {
 					return fmt.Errorf("services.%s: build set but image %q is a bare shortname; use `<org>/<name>` or a fully qualified tag", name, svc.Image)
 				}
@@ -426,14 +518,18 @@ func validateServices(c *Config) error {
 				return fmt.Errorf("services.%s.storage.mountPath: required", name)
 			}
 		}
+		// Server placement
 		for _, s := range svc.Servers {
 			if _, ok := c.Servers[s]; !ok {
 				return fmt.Errorf("services.%s.servers: %q is not a defined server", name, s)
 			}
 		}
+		// Multi-server + storage is impossible — a hostPath PV is
+		// pinned to one node, can't span.
 		if len(svc.Servers) > 1 && svc.Storage != nil {
 			return fmt.Errorf("services.%s: multiple servers with storage — a single PV can't span nodes; pick one server", name)
 		}
+		// Secret refs
 		for _, ref := range svc.Secrets {
 			if !declaredSecrets[ref] {
 				return fmt.Errorf("services.%s.secrets: %q is not declared in top-level secrets:", name, ref)

@@ -5,7 +5,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/getnvoi/core/pkg/internal/kube"
-	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -31,7 +30,7 @@ func buildAppSecret(rt *runtime.Runtime) *corev1.Secret {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      appSecretName,
-			Namespace: naming.Namespace,
+			Namespace: namespace,
 			Labels: map[string]string{
 				kube.LabelOwner: kube.OwnerAppSecrets,
 			},

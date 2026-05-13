@@ -355,14 +355,14 @@ func mapUnsupported(err error, verb, engine string) error {
 		"snapshot":        {"postgres"},
 		"snapshots":       {"postgres"},
 		"snapshot-delete": {"postgres"},
-		"branch":          {"postgres", "planetscale"},
-		"branches":        {"postgres", "planetscale"},
-		"branch-delete":   {"postgres", "planetscale"},
+		"branch":          {"postgres"},
+		"branches":        {"postgres"},
+		"branch-delete":   {"postgres"},
 		"migrate":         {"postgres"},
 		"rollback":        {"postgres"},
 		"sql":             {"postgres"},
-		"backup":          {"postgres", "planetscale"},
-		"restore":         {"postgres", "planetscale"},
+		"backup":          {"postgres"},
+		"restore":         {"postgres"},
 	}
 	list, ok := supported[verb]
 	if !ok || len(list) == 0 {

@@ -7,7 +7,7 @@
 //	ENV (injected by the CronJob — see providers.BuildBackupCronJob —
 //	     or the Job — see providers.BuildRestoreJob):
 //	  MODE                backup (default) | restore
-//	  ENGINE              postgres | mysql | planetscale
+//	  ENGINE              postgres
 //	  DATABASE_NAME       logical name (the YAML key, e.g. "app")
 //	  DATABASE_FULL_NAME  nvoi-{app}-{env}-db-{name}
 //	  DB_HOST             hostname / Service name
@@ -17,8 +17,6 @@
 //	  DB_DATABASE         logical SQL database name
 //	  DB_SSLMODE          (optional) postgres-style sslmode value;
 //	                      passed to PGSSLMODE for pg_dump/psql.
-//	                      mysql/planetscale ignore this — they always
-//	                      enforce TLS via --ssl-mode=REQUIRED.
 //	  BUCKET_ENDPOINT     S3-compatible base URL
 //	  BUCKET_NAME         target bucket (one-per-database)
 //	  BACKUP_KEY          (restore mode only) S3 object key to replay
@@ -32,14 +30,12 @@
 // uses lowercase keys for Go-side reads.
 //
 // No DSN handling here. The Secret carries every field separately, so
-// we read each directly and pass them straight to pg_dump / mysqldump
-// / psql / mysql.
+// we read each directly and pass them straight to pg_dump / psql.
 //
 // Pipelines:
 //
 //	MODE=backup (default):
-//	  1. Pick dump tool (pg_dump for postgres; mysqldump for
-//	     mysql/planetscale).
+//	  1. Pick dump tool (pg_dump for postgres).
 //	  2. Stream dump → gzip → temp file at /tmp/backup.sql.gz.
 //	  3. Stat the file for content-length.
 //	  4. PUT to s3://$BUCKET_NAME/<YYYYMMDDTHHMMSSZ>.sql.gz via sigv4.
@@ -48,9 +44,8 @@
 //	MODE=restore:
 //	  1. s3.GetStream(BUCKET_NAME, BACKUP_KEY) → io.ReadCloser.
 //	  2. Pipe through gzip.NewReader (decompression).
-//	  3. Pipe into engine's restore tool (psql / mysql) connected to
-//	     the same host the dump came from (or whatever DB_HOST points
-//	     at).
+//	  3. Pipe into engine's restore tool (psql) connected to the same
+//	     host the dump came from (or whatever DB_HOST points at).
 //	  4. Exit 0 on success, non-zero + stderr on failure.
 //
 // Uniformity is load-bearing — same image handles both directions,
@@ -186,9 +181,9 @@ func runBackup() error {
 // not inferred from a DSN.
 //
 // Exit discipline: the restore tool's exit code is the Job's exit
-// code. ON_ERROR_STOP=1 (psql) / mysql's default abort-on-error
-// means the first SQL error stops the replay, so a partial restore
-// fails loudly rather than leaving a half-populated database.
+// code. ON_ERROR_STOP=1 (psql) means the first SQL error stops the
+// replay, so a partial restore fails loudly rather than leaving a
+// half-populated database.
 func runRestore() error {
 	engine := mustEnv("ENGINE")
 	creds := loadDBCreds()
@@ -236,10 +231,8 @@ func runRestore() error {
 //	ON_ERROR_STOP=1 aborts the replay on the first SQL error
 //	rather than leaving a half-populated DB.
 //
-// mysql / planetscale → `mysql -h/-P/-u/--password= db`,
-//
-//	--ssl-mode=REQUIRED (planetscale enforces it; vanilla
-//	mysql connects with TLS when offered, errors when not).
+// Additional engines land here when they ship — same shape
+// (build *exec.Cmd that reads SQL on stdin).
 func restoreCommand(engine string, creds dbCreds) (*exec.Cmd, error) {
 	switch engine {
 	case "postgres":
@@ -252,18 +245,8 @@ func restoreCommand(engine string, creds dbCreds) (*exec.Cmd, error) {
 		)
 		cmd.Env = pgEnv(creds)
 		return cmd, nil
-	case "mysql", "planetscale":
-		args := []string{
-			"--ssl-mode=REQUIRED",
-			"-h", creds.host,
-			"-P", creds.port,
-			"-u", creds.user,
-			"--password=" + creds.password,
-			creds.database,
-		}
-		return exec.Command("mysql", args...), nil
 	default:
-		return nil, fmt.Errorf("unknown ENGINE %q (expected: postgres | mysql | planetscale)", engine)
+		return nil, fmt.Errorf("unknown ENGINE %q (expected: postgres)", engine)
 	}
 }
 
@@ -283,13 +266,8 @@ func restoreCommand(engine string, creds dbCreds) (*exec.Cmd, error) {
 //	the surface are "replay this snapshot", which only works
 //	if the dump is idempotent.
 //
-// mysql / planetscale → `mysqldump --ssl-mode=REQUIRED ...`.
-//
-//	--single-transaction = consistent snapshot without
-//	locking. --set-gtid-purged=OFF avoids GTID metadata
-//	planetscale doesn't accept on import. --add-drop-table
-//	(default true, set explicit for symmetry with pg) so
-//	`restore` is idempotent against an existing DB.
+// Additional engines land here when they ship — same shape
+// (build *exec.Cmd that writes a SQL dump on stdout).
 func dumpCommand(engine string, creds dbCreds) (*exec.Cmd, error) {
 	switch engine {
 	case "postgres":
@@ -303,21 +281,8 @@ func dumpCommand(engine string, creds dbCreds) (*exec.Cmd, error) {
 		)
 		cmd.Env = pgEnv(creds)
 		return cmd, nil
-	case "mysql", "planetscale":
-		args := []string{
-			"--ssl-mode=REQUIRED",
-			"--single-transaction",
-			"--set-gtid-purged=OFF",
-			"--add-drop-table",
-			"-h", creds.host,
-			"-P", creds.port,
-			"-u", creds.user,
-			"--password=" + creds.password,
-			creds.database,
-		}
-		return exec.Command("mysqldump", args...), nil
 	default:
-		return nil, fmt.Errorf("unknown ENGINE %q (expected: postgres | mysql | planetscale)", engine)
+		return nil, fmt.Errorf("unknown ENGINE %q (expected: postgres)", engine)
 	}
 }
 

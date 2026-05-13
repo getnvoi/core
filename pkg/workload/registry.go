@@ -11,7 +11,6 @@ import (
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
-	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -57,7 +56,7 @@ func buildRegistrySecret(rt *runtime.Runtime) (*corev1.Secret, error) {
 	return &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      registrySecretName,
-			Namespace: naming.Namespace,
+			Namespace: namespace,
 			Labels: map[string]string{
 				kube.LabelOwner: kube.OwnerRegistry,
 			},

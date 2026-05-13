@@ -98,16 +98,13 @@ type RegistryDef struct {
 // purpose — each engine reads the fields it cares about and the
 // validator rejects fields that don't apply to the declared engine.
 //
-//	postgres (selfhosted, ZFS-LocalPV — reference impl):
+//	postgres (selfhosted, ZFS-LocalPV — reference impl, v1):
 //	  engine: postgres, version, server, size, credentials, backup
-//	planetscale (managed MySQL):
-//	  engine: planetscale, region, backup
-//	turso (libsql, edge-replicated SQLite):
-//	  engine: turso, region, backup
-//	rds-postgres (AWS RDS):
-//	  engine: rds-postgres, region, instance_class, version, backup
-//	neon (managed Postgres):
-//	  engine: neon, region, backup
+//
+// Future SaaS engines (managed MySQL/Postgres, edge-replicated SQLite,
+// etc.) ride the same shape — `region`, `instance_class`, and `backup`
+// fields are reserved for them. Each engine lands as its own provider
+// under pkg/providers/<engine>/ when there's demand.
 //
 // `backup:` is universal — when set, the reconciler provisions the
 // per-DB backup bucket on providers.storage and emits the shared
@@ -143,9 +140,9 @@ type DatabaseCredsSpec struct {
 // is days, applied as a bucket-lifecycle policy by BucketProvider.
 //
 // Backups are gzipped logical dumps in the bucket (key shape:
-// YYYYMMDDTHHMMSSZ.sql.gz). The cmd/db image dumps via pg_dump /
-// mysqldump and restores by piping the inverse — uniform across
-// every engine.
+// YYYYMMDDTHHMMSSZ.sql.gz). The cmd/db image dumps via pg_dump (or
+// the engine's equivalent when more engines land) and restores by
+// piping the inverse — uniform across every engine.
 type DatabaseBackupSpec struct {
 	Schedule  string `yaml:"schedule"`
 	Retention int    `yaml:"retention"`
