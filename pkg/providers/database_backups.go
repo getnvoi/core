@@ -23,13 +23,11 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/utils/s3"
 )
 
@@ -287,107 +285,6 @@ func BuildBackupCronJob(req DatabaseRequest) *batchv1.CronJob {
 			},
 		},
 	}
-}
-
-// BuildRestoreJob returns a one-shot Job that replays a bucket-resident
-// backup artifact into the database. Mirrors BuildBackupCronJob's pod
-// spec — same image, same envFrom Secrets — with two additions:
-//
-//   - MODE=restore flips the image's dispatch to the restore pipeline.
-//   - BACKUP_KEY names the bucket object to pull.
-//
-// Used by RunRestoreJob below, which is what every DatabaseProvider's
-// Restore method calls. Single source of truth for the restore Job's
-// shape; engine-specificity (psql vs mysql) lives in the image's
-// dispatch.
-//
-// The Job is named deterministically with a unix timestamp suffix so
-// concurrent restores from different operators don't collide. The
-// caller (RunRestoreJob) waits for the Job to succeed before
-// returning.
-func BuildRestoreJob(req DatabaseRequest, backupKey string) *batchv1.Job {
-	labels := map[string]string{
-		"nvoi/restore-of": req.Name,
-	}
-	for k, v := range req.Labels {
-		if _, exists := labels[k]; !exists {
-			labels[k] = v
-		}
-	}
-
-	// Restores don't auto-retry — a failed restore leaves the DB in
-	// an unknown state; the operator decides what to do.
-	backoff := int32(0)
-
-	// Job name embeds a unix timestamp so concurrent restore calls
-	// (or a retry after a crash) don't collide on the same name.
-	jobName := fmt.Sprintf("%s-restore-%d", req.FullName, time.Now().Unix())
-
-	return &batchv1.Job{
-		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: req.Namespace,
-			Labels:    labels,
-		},
-		Spec: batchv1.JobSpec{
-			BackoffLimit: &backoff,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{{
-						Name:  "restore",
-						Image: dbImageFor(req),
-						Env: append(
-							[]corev1.EnvVar{
-								{Name: "MODE", Value: "restore"},
-								{Name: "BACKUP_KEY", Value: backupKey},
-								{Name: "ENGINE", Value: req.Spec.Engine},
-								{Name: "DATABASE_NAME", Value: req.Name},
-								{Name: "DATABASE_FULL_NAME", Value: req.FullName},
-							},
-							dbCredsEnv(req.CredentialsSecretName)...,
-						),
-						EnvFrom: []corev1.EnvFromSource{
-							{
-								SecretRef: &corev1.SecretEnvSource{
-									LocalObjectReference: corev1.LocalObjectReference{Name: req.BackupCredsSecretName},
-								},
-							},
-						},
-					}},
-				},
-			},
-		},
-	}
-}
-
-// RunRestoreJob applies the restore Job and blocks until it completes.
-// Shared across every DatabaseProvider — each provider's Restore
-// method is a one-liner calling this helper. On Job failure,
-// WaitForJob returns an error with the pod's recent logs attached,
-// which is what the operator sees on the CLI.
-func RunRestoreJob(ctx context.Context, req DatabaseRequest, backupKey string) error {
-	if req.Kube == nil {
-		return fmt.Errorf("restore requires kube client (req.Kube is nil)")
-	}
-	if req.BackupCredsSecretName == "" || req.Bucket == nil {
-		return fmt.Errorf("restore requires providers.storage + a backup bucket (did providers.storage get unset between backup and restore?)")
-	}
-	job := BuildRestoreJob(req, backupKey)
-	scope := kube.Scope{Namespace: req.Namespace, Owner: kube.OwnerDatabases}
-	if err := req.Kube.ApplyOwned(ctx, scope, job); err != nil {
-		return fmt.Errorf("apply restore job %s: %w", job.Name, err)
-	}
-	var emitter kube.ProgressEmitter
-	if req.Log != nil {
-		emitter = logEmitter{log: req.Log}
-	}
-	if err := req.Kube.WaitForJob(ctx, req.Namespace, job.Name, emitter); err != nil {
-		return fmt.Errorf("restore job %s: %w", job.Name, err)
-	}
-	return nil
 }
 
 // logEmitter adapts log.Log to kube.ProgressEmitter — kube/ doesn't

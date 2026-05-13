@@ -1,11 +1,10 @@
-# docker.io/nvoi/db — the uniform database backup AND restore runner.
+# docker.io/nvoi/db — the uniform database backup runner.
 #
 # Every DatabaseProvider's backup CronJob runs this image in MODE=backup
-# (default). `nvoi database restore` and `nvoi database migrate` launch
-# one-shot Jobs with MODE=restore. Same image, two pipelines —
-# dispatches on ENGINE to pick the dump/restore tool (pg_dump/psql for
-# postgres today); gzips dumps going out, gunzips coming back; uses the
-# nvoi SigV4 client for S3-compatible I/O (no aws-cli dep).
+# (default). Restore lands when the destructive verbs (restore /
+# rollback / migrate) ship in a follow-up PR. Dispatches on ENGINE to
+# pick the dump tool (pg_dump for postgres today); gzips dumps; uses
+# the nvoi SigV4 client for S3-compatible I/O (no aws-cli dep).
 #
 # Multi-stage because the Go binary's compile-time deps are far heavier
 # than the runtime image needs. Alpine for runtime keeps the image

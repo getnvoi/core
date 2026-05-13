@@ -29,18 +29,21 @@ func databaseCmd(r *rt) *cobra.Command {
 		Use:   "database",
 		Short: "Operate the databases declared in nvoi.yaml",
 	}
+	// Verb scope for v1 is intentionally non-destructive against the
+	// primary's live data: sql / snapshot* / branch* / backup* only.
+	// restore / rollback / migrate land in a follow-up PR with proper
+	// hardening — they replace the primary's volume, need
+	// interactive confirmation, mid-flight failure runbooks, and a
+	// dry-run mode before they're operator-safe.
 	cmd.AddCommand(
 		dbSQLCmd(r),
 		dbBackupCmd(r),
-		dbRestoreCmd(r),
-		dbMigrateCmd(r),
 		dbSnapshotCmd(r),
 		dbSnapshotsCmd(r),
 		dbSnapshotDeleteCmd(r),
 		dbBranchCmd(r),
 		dbBranchesCmd(r),
 		dbBranchDeleteCmd(r),
-		dbRollbackCmd(r),
 	)
 	return cmd
 }
@@ -134,69 +137,6 @@ func buildBackupDownload(r *rt) *cobra.Command {
 	}
 	cmd.Flags().StringP("output", "o", "", "write backup to file instead of stdout")
 	return cmd
-}
-
-// ── restore ──────────────────────────────────────────────────────────
-
-func dbRestoreCmd(r *rt) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "restore <name>",
-		Short: "Replay a backup into the database (destructive)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			backupID, _ := cmd.Flags().GetString("from-backup")
-			latest, _ := cmd.Flags().GetBool("latest")
-			yes, _ := cmd.Flags().GetBool("yes")
-
-			if backupID == "" && !latest {
-				return fmt.Errorf("either --from-backup <id> or --latest is required")
-			}
-			if backupID != "" && latest {
-				return fmt.Errorf("--from-backup and --latest are mutually exclusive")
-			}
-			if !yes {
-				if latest {
-					return fmt.Errorf("about to replay the most-recent backup into databases.%s — pass --yes to proceed (destructive)", args[0])
-				}
-				return fmt.Errorf("about to replay %q into databases.%s — pass --yes to proceed (destructive)", backupID, args[0])
-			}
-
-			if latest {
-				picked, err := deploy.DatabaseRestoreLatest(cmd.Context(), r.runtime, args[0])
-				if err != nil {
-					return mapUnsupported(err, "restore", engineOf(r, args[0]))
-				}
-				fmt.Printf("restored databases.%s from %s\n", args[0], picked)
-				return nil
-			}
-			if err := deploy.DatabaseRestore(cmd.Context(), r.runtime, args[0], backupID); err != nil {
-				return mapUnsupported(err, "restore", engineOf(r, args[0]))
-			}
-			fmt.Printf("restored databases.%s from %s\n", args[0], backupID)
-			return nil
-		},
-	}
-	cmd.Flags().String("from-backup", "", "backup object key to replay (mutually exclusive with --latest)")
-	cmd.Flags().Bool("latest", false, "replay the most recent backup")
-	cmd.Flags().Bool("yes", false, "skip the destructive-action confirmation")
-	return cmd
-}
-
-// ── migrate ──────────────────────────────────────────────────────────
-
-func dbMigrateCmd(r *rt) *cobra.Command {
-	return &cobra.Command{
-		Use:   "migrate <name>",
-		Short: "Move a database to the node declared in nvoi.yaml (destructive)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := deploy.DatabaseMigrate(cmd.Context(), r.runtime, args[0]); err != nil {
-				return mapUnsupported(err, "migrate", engineOf(r, args[0]))
-			}
-			fmt.Printf("migrated databases.%s\n", args[0])
-			return nil
-		},
-	}
 }
 
 // ── snapshot ─────────────────────────────────────────────────────────
@@ -302,34 +242,6 @@ func dbBranchDeleteCmd(r *rt) *cobra.Command {
 	}
 }
 
-// ── rollback ─────────────────────────────────────────────────────────
-
-func dbRollbackCmd(r *rt) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "rollback <name>",
-		Short: "Replace the primary's data with a prior snapshot (destructive)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			snap, _ := cmd.Flags().GetString("to")
-			yes, _ := cmd.Flags().GetBool("yes")
-			if snap == "" {
-				return fmt.Errorf("--to <snapshot-name> is required (use `nvoi database snapshots %s` to list)", args[0])
-			}
-			if !yes {
-				return fmt.Errorf("about to replace databases.%s with snapshot %s — pass --yes to proceed (destructive)", args[0], snap)
-			}
-			if err := deploy.DatabaseRollback(cmd.Context(), r.runtime, args[0], snap); err != nil {
-				return mapUnsupported(err, "rollback", engineOf(r, args[0]))
-			}
-			fmt.Printf("rolled databases.%s back to %s\n", args[0], snap)
-			return nil
-		},
-	}
-	cmd.Flags().String("to", "", "snapshot name to roll back to")
-	cmd.Flags().Bool("yes", false, "skip the destructive-action confirmation")
-	return cmd
-}
-
 // engineOf is a small lookup for mapUnsupported's error message —
 // the verb knows the db name; we read the engine from cfg.
 func engineOf(r *rt, dbName string) string {
@@ -358,11 +270,8 @@ func mapUnsupported(err error, verb, engine string) error {
 		"branch":          {"postgres"},
 		"branches":        {"postgres"},
 		"branch-delete":   {"postgres"},
-		"migrate":         {"postgres"},
-		"rollback":        {"postgres"},
 		"sql":             {"postgres"},
 		"backup":          {"postgres"},
-		"restore":         {"postgres"},
 	}
 	list, ok := supported[verb]
 	if !ok || len(list) == 0 {

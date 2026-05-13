@@ -1,20 +1,25 @@
 // Package postgres is the reference implementation of
 // providers.DatabaseProvider — selfhosted PostgreSQL running in the
-// cluster on OpenEBS ZFS-LocalPV. Every method of the interface lands
-// on real work here; postgres earns every capability the interface
-// exposes (Snapshot / Branch / Migrate / Rollback).
+// cluster on OpenEBS ZFS-LocalPV.
+//
+// V1 scope is intentionally non-destructive against the primary's
+// live volume: provisioning, credentials, ExecSQL, BackupNow,
+// ListBackups, DownloadBackup, Snapshot, Branch. The destructive
+// verbs (Restore replaying a dump into the primary, Migrate moving
+// data across nodes, Rollback swapping the primary's PVC for a
+// snapshot clone) land in a follow-up PR — they share a known
+// Terminating-PVC race that took down nvoi.to during dogfood and
+// need real interactive confirmation + mid-flight failure runbooks
+// before they're operator-safe.
 //
 // File layout inside the package:
 //
 //	postgres.go    Provider, Reconcile, EnsureCredentials, ExecSQL,
-//	               BackupNow, ListBackups, DownloadBackup, Restore.
+//	               BackupNow, ListBackups, DownloadBackup.
 //	zfs.go         ZFS-LocalPV CSI install + per-node zpool prep +
 //	               StorageClass builder.
 //	branching.go   Snapshot/Branch primitives backed by VolumeSnapshot
 //	               + clone-PVC.
-//	migrate.go     Cross-node move via dump→teardown→apply→restore.
-//	rollback.go    In-place PVC swap from a snapshot (same Service,
-//	               same DSN).
 //	register.go    providers.RegisterDatabase("postgres", …).
 package postgres
 
@@ -197,10 +202,12 @@ func (p *Provider) BackupNow(ctx context.Context, req providers.DatabaseRequest)
 	}, nil
 }
 
-// ListBackups / DownloadBackup / Restore delegate to the shared bucket
+// ListBackups / DownloadBackup delegate to the shared bucket
 // substrate. Postgres is engine-agnostic here — the same helpers
 // serve every DatabaseProvider via the same gzipped-dump bucket
-// layout.
+// layout. Restore-from-backup is intentionally NOT exposed via the
+// CLI in v1 (destructive against the primary's live data — see the
+// comment above databaseCmd in cmd/cli/database.go).
 func (p *Provider) ListBackups(ctx context.Context, req providers.DatabaseRequest) ([]providers.BackupRef, error) {
 	return providers.BucketListBackups(ctx, req)
 }
@@ -209,15 +216,12 @@ func (p *Provider) DownloadBackup(ctx context.Context, req providers.DatabaseReq
 	return providers.BucketDownloadBackup(ctx, req, id, w)
 }
 
-func (p *Provider) Restore(ctx context.Context, req providers.DatabaseRequest, backupKey string) error {
-	return providers.RunRestoreJob(ctx, req, backupKey)
-}
-
-// ── DatabaseProvider: Snapshot / Branch / Migrate / Rollback ─────────
+// ── DatabaseProvider: Snapshot / Branch ──────────────────────────────
 //
-// Postgres implements all four — these are the methods that make the
-// engine the reference implementation. Other engines either delegate
-// to vendor APIs or return ErrUnsupported.
+// Snapshot and Branch are non-destructive to the primary — they
+// create sibling objects (snapshots, branch StatefulSets) without
+// touching the live volume. Migrate and Rollback are deferred to a
+// follow-up PR.
 
 func (p *Provider) Snapshot(ctx context.Context, req providers.DatabaseRequest, label string) (providers.SnapshotRef, error) {
 	if req.MasterSSH == nil {
@@ -263,14 +267,6 @@ func (p *Provider) DeleteBranch(ctx context.Context, req providers.DatabaseReque
 		return fmt.Errorf("postgres.DeleteBranch: kube client required")
 	}
 	return DeleteBranch(ctx, req.Kube, req.MasterSSH, req.App, req.Env, req.Name, branchName)
-}
-
-func (p *Provider) Migrate(ctx context.Context, req providers.DatabaseRequest) error {
-	return Migrate(ctx, req)
-}
-
-func (p *Provider) Rollback(ctx context.Context, req providers.DatabaseRequest, snapshotID string) error {
-	return Rollback(ctx, req, snapshotID)
 }
 
 // credentials builds the DSN + decomposed fields from the operator-

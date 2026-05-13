@@ -3,11 +3,41 @@ package kube
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/getnvoi/core/pkg/internal/utils"
 )
+
+// pvcDeletionPollInterval is how often DeletePVC re-checks whether
+// the API server has finished finalizing the PVC. Short enough to
+// feel responsive on a typical CSI delete (a few seconds), long
+// enough not to hammer the apiserver.
+var pvcDeletionPollInterval = 1 * time.Second
+
+// pvcDeletionTimeout caps how long DeletePVC waits for the PVC to
+// actually disappear. OpenEBS ZFS-LocalPV typically destroys the
+// dataset in well under a minute; 2 minutes is generous headroom
+// for slow disks or backed-up CSI controllers.
+var pvcDeletionTimeout = 2 * time.Minute
+
+// SetPVCDeletionTiming overrides the polling intervals for tests so
+// the suite doesn't depend on wall-clock seconds.
+func SetPVCDeletionTiming(poll, max time.Duration) {
+	pvcDeletionPollInterval = poll
+	pvcDeletionTimeout = max
+}
+
+// PVCDeletionTimingForTest returns the current intervals so tests
+// can save + restore the global values around an override. Keeps
+// individual tests from leaking timing changes into the rest of the
+// suite.
+func PVCDeletionTimingForTest() (poll, max time.Duration) {
+	return pvcDeletionPollInterval, pvcDeletionTimeout
+}
 
 // GetStatefulSet returns the StatefulSet named `name` in `ns`, or
 // (nil, nil) when it doesn't exist. The "exists-or-not" shape is
@@ -32,20 +62,53 @@ func (c *Client) GetStatefulSet(ctx context.Context, ns, name string) (*appsv1.S
 	return ss, nil
 }
 
-// DeletePVC removes a PersistentVolumeClaim. Idempotent — NotFound is
-// treated as already-gone. Used by `nvoi database migrate` to clear
-// the old node's data volume after the backup has been captured; the
-// underlying PV (ZFS dataset under OpenEBS ZFS-LocalPV) is reclaimed
-// by the CSI driver when the claim goes away.
+// DeletePVC removes a PersistentVolumeClaim AND waits for the API
+// server to finalize it (finalizers cleared, object gone). Idempotent —
+// NotFound on the initial Delete OR during the wait is treated as
+// already-gone.
+//
+// The wait is non-negotiable because k8s PVC deletion is async by
+// design: `kubernetes.io/pvc-protection` keeps the object alive
+// while any pod still references it, then the CSI driver runs its
+// own finalizer to destroy the underlying volume. The PVC sits in
+// Terminating state with a `deletionTimestamp` set during that
+// window, which can be many seconds.
+//
+// Without this wait, a caller that does Delete → Apply (e.g.
+// `nvoi database rollback` swapping in a snapshot-sourced PVC) sees
+// the Terminating PVC on Get, treats it as "already exists", skips
+// the Create, and ends up with a pod that can't schedule because
+// the PVC was destined to vanish anyway. We saw exactly that in
+// production: rollback returned success while the cluster served
+// 500s for ~90 seconds.
+//
+// Used by `nvoi database migrate` to clear the old node's data
+// volume after the backup has been captured, and by `nvoi database
+// rollback` to swap the live volume for a snapshot clone.
 func (c *Client) DeletePVC(ctx context.Context, ns, name string) error {
-	err := c.CS.CoreV1().PersistentVolumeClaims(ns).Delete(ctx, name, metav1.DeleteOptions{})
+	api := c.CS.CoreV1().PersistentVolumeClaims(ns)
+	err := api.Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("delete pvc %s/%s: %w", ns, name, err)
 	}
-	return nil
+
+	return utils.Poll(ctx, pvcDeletionPollInterval, pvcDeletionTimeout, func() (bool, error) {
+		_, err := api.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			// Transient errors keep polling; non-transient errors
+			// shouldn't surface here because Get on a deleted PVC
+			// returns NotFound, anything else is an apiserver hiccup
+			// worth retrying.
+			return false, nil
+		}
+		return false, nil
+	})
 }
 
 // DeleteByName removes the Deployment, StatefulSet, and Service named

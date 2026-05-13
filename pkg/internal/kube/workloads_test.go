@@ -2,14 +2,19 @@ package kube_test
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeobj "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	testingk8s "k8s.io/client-go/testing"
 
 	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/internal/utils"
 )
 
 func TestGetStatefulSet_Exists(t *testing.T) {
@@ -150,5 +155,73 @@ func TestDeletePVC_Idempotent(t *testing.T) {
 	// Second delete on the now-absent PVC must succeed.
 	if err := c.DeletePVC(context.Background(), "ns", "pg-data"); err != nil {
 		t.Errorf("idempotent re-delete failed: %v", err)
+	}
+}
+
+// TestDeletePVC_BlocksUntilGone locks the contract that broke
+// rollback in production: DeletePVC must NOT return until the API
+// server confirms the PVC is gone. The fake clientset's Delete is
+// synchronous (no finalizers in play), so this test exercises the
+// happy path: Delete → Get NotFound → return nil.
+//
+// The pathological case (PVC stuck Terminating) is structurally
+// covered by TestDeletePVC_TimeoutWhenStuck below.
+func TestDeletePVC_BlocksUntilGone(t *testing.T) {
+	cs := fake.NewSimpleClientset(
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "pg-data", Namespace: "ns"}},
+	)
+	c := kube.NewForTest(cs)
+	if err := c.DeletePVC(context.Background(), "ns", "pg-data"); err != nil {
+		t.Fatalf("DeletePVC: %v", err)
+	}
+	_, err := cs.CoreV1().PersistentVolumeClaims("ns").Get(context.Background(), "pg-data", metav1.GetOptions{})
+	if err == nil {
+		t.Fatalf("PVC still present after DeletePVC returned — wait was a no-op")
+	}
+}
+
+// TestDeletePVC_TimeoutWhenStuck locks the timeout behavior: a PVC
+// that never finalizes (Get keeps returning the object after Delete)
+// makes DeletePVC return ErrTimeout rather than hang forever.
+// Reproduces the failure mode rollback hit in production — except
+// this time it surfaces as a clean error instead of a silent zombie
+// PVC.
+//
+// The fake clientset's Delete normally removes the object outright
+// (no finalizer-respecting semantics), so we install a "delete"
+// reactor that intercepts the Delete and returns success without
+// actually removing the object. After that, subsequent Get calls
+// keep returning the PVC — exactly the Terminating state real
+// Kubernetes leaves behind with active finalizers.
+//
+// Short timing knobs (20ms / 200ms) so the test runs in under a
+// second.
+func TestDeletePVC_TimeoutWhenStuck(t *testing.T) {
+	prevPoll, prevMax := kube.PVCDeletionTimingForTest()
+	kube.SetPVCDeletionTiming(20*time.Millisecond, 200*time.Millisecond)
+	defer kube.SetPVCDeletionTiming(prevPoll, prevMax)
+
+	cs := fake.NewSimpleClientset(
+		&corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "stuck",
+				Namespace:  "ns",
+				Finalizers: []string{"example.com/stuck"},
+			},
+		},
+	)
+	// Intercept Delete so the object stays in the tracker — mimics
+	// real k8s behavior where Delete on an object with finalizers
+	// only sets deletionTimestamp.
+	cs.PrependReactor("delete", "persistentvolumeclaims", func(action testingk8s.Action) (bool, runtimeobj.Object, error) {
+		return true, nil, nil
+	})
+	c := kube.NewForTest(cs)
+	err := c.DeletePVC(context.Background(), "ns", "stuck")
+	if err == nil {
+		t.Fatalf("expected ErrTimeout on stuck PVC, got nil")
+	}
+	if !errors.Is(err, utils.ErrTimeout) {
+		t.Errorf("expected ErrTimeout, got %v", err)
 	}
 }

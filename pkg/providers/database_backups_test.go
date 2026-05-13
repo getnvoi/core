@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -73,45 +72,6 @@ func TestBuildBackupCronJob_DBCredsEnvBinding(t *testing.T) {
 	// envFrom must reference the backup-creds Secret (BUCKET_* + AWS_*).
 	if got := cj.Spec.JobTemplate.Spec.Template.Spec.Containers[0].EnvFrom; len(got) != 1 || got[0].SecretRef.Name != req.BackupCredsSecretName {
 		t.Errorf("envFrom = %v, want one entry pointing at %q", got, req.BackupCredsSecretName)
-	}
-}
-
-// TestBuildRestoreJob_FlipsMode locks the only delta from BuildBackupCronJob:
-// MODE=restore + BACKUP_KEY=<key>. Everything else (DB_* SecretKeyRef,
-// EnvFrom shape, image ref) is identical — drift here would mean
-// the backup pipeline works but restore silently fails.
-func TestBuildRestoreJob_FlipsMode(t *testing.T) {
-	req := DatabaseRequest{
-		Name:                  "app",
-		FullName:              "nvoi-myapp-prod-db-app",
-		Namespace:             "nvoi-myapp-prod",
-		CredentialsSecretName: "nvoi-myapp-prod-db-app-credentials",
-		BackupCredsSecretName: "nvoi-myapp-prod-db-app-backup-creds",
-		Spec:                  DatabaseSpec{Engine: "postgres"},
-	}
-	job := BuildRestoreJob(req, "20260101T030000Z.sql.gz")
-	if !strings.HasPrefix(job.Name, "nvoi-myapp-prod-db-app-restore-") {
-		t.Errorf("name = %q, want prefix nvoi-myapp-prod-db-app-restore-", job.Name)
-	}
-
-	envs := job.Spec.Template.Spec.Containers[0].Env
-	got := map[string]string{}
-	for _, e := range envs {
-		if e.Value != "" {
-			got[e.Name] = e.Value
-		}
-	}
-	if got["MODE"] != "restore" {
-		t.Errorf("MODE = %q, want restore", got["MODE"])
-	}
-	if got["BACKUP_KEY"] != "20260101T030000Z.sql.gz" {
-		t.Errorf("BACKUP_KEY = %q", got["BACKUP_KEY"])
-	}
-
-	// Labels include the restore-of marker so the Job is traceable
-	// back to the source DB in `kubectl get -L`.
-	if job.Labels["nvoi/restore-of"] != "app" {
-		t.Errorf("restore-of label = %q, want app", job.Labels["nvoi/restore-of"])
 	}
 }
 

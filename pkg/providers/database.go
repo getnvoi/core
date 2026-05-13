@@ -84,12 +84,15 @@ type DatabaseProvider interface {
 	BackupNow(ctx context.Context, req DatabaseRequest) (*BackupRef, error)
 	ListBackups(ctx context.Context, req DatabaseRequest) ([]BackupRef, error)
 	DownloadBackup(ctx context.Context, req DatabaseRequest, id string, w io.Writer) error
-	Restore(ctx context.Context, req DatabaseRequest, backupKey string) error
 
-	// ── Snapshot / Branch / Migrate / Rollback — best-effort ─────
-	// Each method does real work where the vendor API supports it
-	// and returns ErrUnsupported otherwise. Hand-written CLI-side
-	// messages tell the operator what to do instead.
+	// ── Snapshot / Branch — best-effort, non-destructive ─────────
+	// Snapshots and branches create sibling objects; the primary's
+	// live volume is never touched. Each method does real work where
+	// the vendor API supports it and returns ErrUnsupported otherwise.
+	//
+	// Destructive ops (Restore, Migrate, Rollback) land in a follow-up
+	// PR — they replace the primary's volume and need real hardening
+	// before they're on the interface.
 	Snapshot(ctx context.Context, req DatabaseRequest, label string) (SnapshotRef, error)
 	ListSnapshots(ctx context.Context, req DatabaseRequest) ([]SnapshotRef, error)
 	DeleteSnapshot(ctx context.Context, req DatabaseRequest, id string) error
@@ -97,9 +100,6 @@ type DatabaseProvider interface {
 	Branch(ctx context.Context, req DatabaseRequest, branchName string) (BranchRef, error)
 	ListBranches(ctx context.Context, req DatabaseRequest) ([]BranchRef, error)
 	DeleteBranch(ctx context.Context, req DatabaseRequest, branchName string) error
-
-	Migrate(ctx context.Context, req DatabaseRequest) error
-	Rollback(ctx context.Context, req DatabaseRequest, snapshotID string) error
 
 	Close() error
 }

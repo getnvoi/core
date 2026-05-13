@@ -67,53 +67,6 @@ func DatabaseDownloadBackup(ctx context.Context, rt *runtime.Runtime, dbName, ba
 	})
 }
 
-// DatabaseRestore replays a backup artifact into the database.
-// Destructive — every write since the artifact's timestamp is lost.
-// Caller must confirm intent (CLI requires --yes).
-func DatabaseRestore(ctx context.Context, rt *runtime.Runtime, dbName, backupID string) error {
-	return withDB(ctx, rt, dbName, func(ctx context.Context, dc *dbCtx) error {
-		if dc.req.Bucket == nil {
-			return fmt.Errorf("databases.%s: restore requires backup: config (providers.storage + bucket)", dbName)
-		}
-		return dc.prov.Restore(ctx, dc.req, backupID)
-	})
-}
-
-// DatabaseRestoreLatest resolves the most-recent backup key (ISO
-// timestamps sort lexicographically) and replays it. Convenience
-// shortcut on top of DatabaseListBackups + DatabaseRestore.
-func DatabaseRestoreLatest(ctx context.Context, rt *runtime.Runtime, dbName string) (string, error) {
-	var picked string
-	err := withDB(ctx, rt, dbName, func(ctx context.Context, dc *dbCtx) error {
-		if dc.req.Bucket == nil {
-			return fmt.Errorf("databases.%s: restore requires backup: config (providers.storage + bucket)", dbName)
-		}
-		refs, err := dc.prov.ListBackups(ctx, dc.req)
-		if err != nil {
-			return fmt.Errorf("list backups: %w", err)
-		}
-		if len(refs) == 0 {
-			return fmt.Errorf("no backups available for databases.%s", dbName)
-		}
-		picked = refs[0].ID
-		for _, r := range refs[1:] {
-			if r.ID > picked {
-				picked = r.ID
-			}
-		}
-		return dc.prov.Restore(ctx, dc.req, picked)
-	})
-	return picked, err
-}
-
-// DatabaseMigrate moves the named DB to the node declared in cfg.
-// Composes backup → teardown → apply → restore.
-func DatabaseMigrate(ctx context.Context, rt *runtime.Runtime, dbName string) error {
-	return withDB(ctx, rt, dbName, func(ctx context.Context, dc *dbCtx) error {
-		return dc.prov.Migrate(ctx, dc.req)
-	})
-}
-
 // DatabaseSnapshot creates an addressable snapshot of the DB's data.
 // label is empty → defaults to a UTC timestamp.
 func DatabaseSnapshot(ctx context.Context, rt *runtime.Runtime, dbName, label string) (providers.SnapshotRef, error) {
@@ -171,15 +124,6 @@ func DatabaseListBranches(ctx context.Context, rt *runtime.Runtime, dbName strin
 func DatabaseDeleteBranch(ctx context.Context, rt *runtime.Runtime, dbName, branchName string) error {
 	return withDB(ctx, rt, dbName, func(ctx context.Context, dc *dbCtx) error {
 		return dc.prov.DeleteBranch(ctx, dc.req, branchName)
-	})
-}
-
-// DatabaseRollback replaces the primary DB's data with a prior
-// snapshot. Same Service, same DSN — clients don't reconfigure.
-// Destructive.
-func DatabaseRollback(ctx context.Context, rt *runtime.Runtime, dbName, snapID string) error {
-	return withDB(ctx, rt, dbName, func(ctx context.Context, dc *dbCtx) error {
-		return dc.prov.Rollback(ctx, dc.req, snapID)
 	})
 }
 
