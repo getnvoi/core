@@ -1,10 +1,7 @@
-# Tunnel-mode emission for providers.ingress: cloudflare.
-#
-# This file REPLACES dns.tf.tmpl when the cloudflare DNS emitter runs
-# under tunnel mode — both shapes write to the same cloudflare-dns.tf
-# bundle entry. The provider-config block lives here too (compile
-# writes exactly one file per DNS emitter); required_providers + the
-# version pin still live in the consolidated backend.tf rendered by
+# Cloudflare DNS + tunnel emission. Renders into the
+# cloudflare-dns.tf bundle entry whenever cfg.Domains is non-empty.
+# The provider-config block lives here; required_providers + the
+# version pin live in the consolidated backend.tf rendered by
 # internal/compile.
 provider "cloudflare" {}
 

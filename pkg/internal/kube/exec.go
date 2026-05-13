@@ -31,8 +31,8 @@ type ExecRequest struct {
 //
 // Tests inject c.ExecFunc to capture the request and return canned
 // output without a real apiserver. The hook bypasses SPDY entirely
-// and is the only way to test Caddy admin reload / cert wait probes
-// without standing up a kind cluster.
+// and is the only way to test in-cluster command probes without
+// standing up a kind cluster.
 func (c *Client) Exec(ctx context.Context, req ExecRequest) error {
 	if c.ExecFunc != nil {
 		return c.ExecFunc(ctx, req)
@@ -75,9 +75,7 @@ func (c *Client) Exec(ctx context.Context, req ExecRequest) error {
 
 // FirstPod returns the name of the first pod in `ns` carrying
 // `app.kubernetes.io/name=<service>`. Errors when no pod exists yet —
-// the caller can decide whether that's a hard error (Caddy reload
-// requires a running pod) or a soft signal (`describe` falling back
-// to "no routes loaded").
+// the caller decides whether that's a hard error or a soft signal.
 func (c *Client) FirstPod(ctx context.Context, ns, service string) (string, error) {
 	pods, err := c.CS.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=" + service,
@@ -91,9 +89,9 @@ func (c *Client) FirstPod(ctx context.Context, ns, service string) (string, erro
 	return pods.Items[0].Name, nil
 }
 
-// GetServicePort returns the first port of a Service. Used by the
-// ingress reconcile to resolve the backend port for Caddy's
-// reverse_proxy upstream.
+// GetServicePort returns the first port of a Service. Used by
+// downstream callers that need to resolve a Service's backend port
+// programmatically.
 func (c *Client) GetServicePort(ctx context.Context, ns, name string) (int, error) {
 	svc, err := c.CS.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

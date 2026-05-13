@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/getnvoi/core/pkg/install"
-	"github.com/getnvoi/core/pkg/internal/kube"
-	"github.com/getnvoi/core/pkg/internal/kubevip"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/naming"
 )
@@ -15,8 +13,13 @@ import (
 //  1. ensure swap on every node
 //  2. discover any existing k3s cluster (idempotency)
 //  3. cold start: install --cluster-init on the primary master
-//  4. join secondary masters via --server <primary>:6443
-//  5. join workers via the LB private IP (or primary's private IP if N=1)
+//  4. join secondary masters via --server <api-endpoint-private>:6443
+//  5. join workers via --server <api-endpoint-private>:6443
+//
+// `eps.APIEndpoint.Private` resolves at tofu-emit time:
+//   - HA mode (cfg.HA): hcloud LB private IP (LB health-checks each
+//     master and routes around dead ones).
+//   - non-HA: lone master's private IP.
 //
 // Reads s.shells (pre-opened by Run); the same connections stay alive
 // through the workloads phase.
@@ -54,17 +57,13 @@ func (s *Session) installCluster(ctx context.Context) error {
 		}
 	}
 
-	// LB IPs go in every master's --tls-san list so kubectl-via-LB
-	// (HA case) and worker-join-via-LB validate cleanly. In KubeVIP
-	// mode (tunnel + HA) the same SAN list covers the VIP literal
-	// instead of the LB private IP — eps.APIEndpoint.Private is the
-	// VIP there, so this code is mode-agnostic.
+	// LB private IP + the primary's public IPv4 land in every master's
+	// --tls-san list so kubectl-via-LB AND kubectl-via-SSH-tunnel both
+	// validate against the apiserver cert.
 	var extraSANs []string
-	if eps.HA {
+	if cfg.HA {
 		extraSANs = []string{eps.APIEndpoint.Private, eps.APIEndpoint.Public}
 	}
-
-	mode := cfg.DeployMode()
 
 	// 3. Discovery — does a cluster already exist?
 	s.Lg.Step("k3s-discover")
@@ -78,30 +77,9 @@ func (s *Session) installCluster(ctx context.Context) error {
 
 	// 4. Cold start: install primary if no cluster yet.
 	if !found {
-		// kube-vip static-pod manifest must land BEFORE k3s starts —
-		// k3s auto-applies /var/lib/rancher/k3s/server/manifests/*.yaml
-		// during its boot sequence, and we need kube-vip to claim the
-		// VIP via ARP before any worker / secondary master tries to
-		// dial it.
-		if mode.KubeVIP() {
-			s.Lg.Step("kube-vip-manifest")
-			if err := install.WriteKubeVIPManifest(ctx, primaryNode, eps.APIEndpoint.Private); err != nil {
-				return err
-			}
-		}
 		s.Lg.Step("k3s-primary")
 		if err := install.InstallPrimaryMaster(ctx, primaryNode, extraSANs); err != nil {
 			return err
-		}
-		// kube-vip RBAC: applied via kubectl on the primary once the
-		// apiserver is reachable (InstallPrimaryMaster blocks until
-		// the node is Ready). Idempotent — re-apply on subsequent
-		// deploys is a no-op.
-		if mode.KubeVIP() {
-			s.Lg.Step("kube-vip-rbac")
-			if err := kube.ApplyYAML(ctx, primaryNode.Shell, kubevip.RBAC()); err != nil {
-				return fmt.Errorf("apply kube-vip RBAC: %w", err)
-			}
 		}
 		// Re-discover to get the freshly-written token.
 		token, found, err = install.DiscoverToken(ctx, masterShells)
@@ -120,14 +98,6 @@ func (s *Session) installCluster(ctx context.Context) error {
 	for _, name := range eps.Masters() {
 		if name == primaryName {
 			continue
-		}
-		// Same pre-install manifest drop on every secondary — each
-		// master runs its own kube-vip pod, all elect via the same
-		// Lease, one wins the VIP at a time.
-		if mode.KubeVIP() {
-			if err := install.WriteKubeVIPManifest(ctx, nodes[name], eps.APIEndpoint.Private); err != nil {
-				return err
-			}
 		}
 		if err := install.JoinSecondaryMaster(ctx, install.SecondaryJoinSpec{
 			Self:      nodes[name],

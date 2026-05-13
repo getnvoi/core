@@ -7,7 +7,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -84,6 +83,26 @@ func TestApplyOwned_UnsupportedKind_Errors(t *testing.T) {
 	}
 }
 
+// Namespace is applied (the tunnel pipeline creates nvoi-tunnel) but
+// not swept — no Kind entry, no List/Delete dispatch. Asymmetric on
+// purpose: empty namespaces are cheap and serve as debugging
+// breadcrumbs.
+func TestApplyOwned_Namespace(t *testing.T) {
+	cs := fake.NewSimpleClientset()
+	c := kube.NewForTest(cs)
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "nvoi-tunnel"}}
+	if err := c.ApplyOwned(context.Background(), kube.Scope{Owner: kube.OwnerTunnel}, ns); err != nil {
+		t.Fatalf("ApplyOwned Namespace: %v", err)
+	}
+	got, err := cs.CoreV1().Namespaces().Get(context.Background(), "nvoi-tunnel", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Labels[kube.LabelOwner] != kube.OwnerTunnel {
+		t.Errorf("owner label missing: %v", got.Labels)
+	}
+}
+
 // ── SweepOwned ────────────────────────────────────────────────────
 
 func TestSweepOwned_DeletesOrphan_KeepsDesired(t *testing.T) {
@@ -109,28 +128,22 @@ func TestSweepOwned_DeletesOrphan_KeepsDesired(t *testing.T) {
 // for one-time migrations or full removal of an owner's footprint.
 func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 	cs := fake.NewSimpleClientset(
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
-		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
-		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "caddy-data", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
-		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "caddy-config", Namespace: "kube-system", Labels: labeled(kube.OwnerIngress)}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "cloudflared", Namespace: "nvoi-tunnel", Labels: labeled(kube.OwnerTunnel)}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "cloudflared-token", Namespace: "nvoi-tunnel", Labels: labeled(kube.OwnerTunnel)}},
 	)
 	c := kube.NewForTest(cs)
 
-	for _, kind := range []kube.Kind{kube.KindDeployment, kube.KindService, kube.KindPVC, kube.KindConfigMap} {
-		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "kube-system", Owner: kube.OwnerIngress}, kind, nil); err != nil {
+	for _, kind := range []kube.Kind{kube.KindDeployment, kube.KindSecret} {
+		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "nvoi-tunnel", Owner: kube.OwnerTunnel}, kind, nil); err != nil {
 			t.Fatalf("SweepOwned %s: %v", kind, err)
 		}
 	}
 
-	// Everything caddy-owned is gone.
-	if _, err := cs.AppsV1().Deployments("kube-system").Get(context.Background(), "caddy", metav1.GetOptions{}); err == nil {
-		t.Error("caddy Deployment should have been purged")
+	if _, err := cs.AppsV1().Deployments("nvoi-tunnel").Get(context.Background(), "cloudflared", metav1.GetOptions{}); err == nil {
+		t.Error("cloudflared Deployment should have been purged")
 	}
-	if _, err := cs.CoreV1().Services("kube-system").Get(context.Background(), "caddy", metav1.GetOptions{}); err == nil {
-		t.Error("caddy Service should have been purged")
-	}
-	if _, err := cs.CoreV1().PersistentVolumeClaims("kube-system").Get(context.Background(), "caddy-data", metav1.GetOptions{}); err == nil {
-		t.Error("caddy PVC should have been purged")
+	if _, err := cs.CoreV1().Secrets("nvoi-tunnel").Get(context.Background(), "cloudflared-token", metav1.GetOptions{}); err == nil {
+		t.Error("cloudflared-token Secret should have been purged")
 	}
 }
 
@@ -139,19 +152,19 @@ func TestSweepOwned_NilDesired_PurgesAll(t *testing.T) {
 func TestSweepOwned_NeverCrossesOwnerBoundaries(t *testing.T) {
 	cs := fake.NewSimpleClientset(
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "caddy", Namespace: "ns", Labels: labeled(kube.OwnerIngress)}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "cloudflared", Namespace: "ns", Labels: labeled(kube.OwnerTunnel)}},
 		// Unmanaged — no owner label.
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "external", Namespace: "ns"}},
 	)
 	c := kube.NewForTest(cs)
 
-	// Sweep all services-owned. Caddy Deployment + external Deployment
+	// Sweep all services-owned. Tunnel Deployment + external Deployment
 	// must remain untouched.
 	if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, kube.KindDeployment, nil); err != nil {
 		t.Fatalf("SweepOwned: %v", err)
 	}
-	if _, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "caddy", metav1.GetOptions{}); err != nil {
-		t.Errorf("caddy-owned Deployment must survive a services sweep: %v", err)
+	if _, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "cloudflared", metav1.GetOptions{}); err != nil {
+		t.Errorf("tunnel-owned Deployment must survive a services sweep: %v", err)
 	}
 	if _, err := cs.AppsV1().Deployments("ns").Get(context.Background(), "external", metav1.GetOptions{}); err != nil {
 		t.Errorf("unmanaged Deployment must survive a services sweep: %v", err)
@@ -203,8 +216,6 @@ func TestListOwned_AcrossKinds(t *testing.T) {
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "s", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "svc", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "sec", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
-		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "cm", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
-		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "pvc", Namespace: "ns", Labels: labeled(kube.OwnerServices)}},
 	)
 	c := kube.NewForTest(cs)
 
@@ -216,8 +227,6 @@ func TestListOwned_AcrossKinds(t *testing.T) {
 		{kube.KindStatefulSet, "s"},
 		{kube.KindService, "svc"},
 		{kube.KindSecret, "sec"},
-		{kube.KindConfigMap, "cm"},
-		{kube.KindPVC, "pvc"},
 	} {
 		got, err := c.ListOwned(context.Background(), kube.Scope{Namespace: "ns", Owner: kube.OwnerServices}, tc.kind)
 		if err != nil {
@@ -227,100 +236,5 @@ func TestListOwned_AcrossKinds(t *testing.T) {
 		if len(got) != 1 || got[0] != tc.want {
 			t.Errorf("ListOwned %s: got %v want [%s]", tc.kind, got, tc.want)
 		}
-	}
-}
-
-// ── New kinds for observability (DaemonSet, Namespace, ServiceAccount,
-//    ClusterRole, ClusterRoleBinding) ──────────────────────────────────
-
-func TestApplyOwned_DaemonSet(t *testing.T) {
-	cs := fake.NewSimpleClientset()
-	c := kube.NewForTest(cs)
-	ds := &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "promtail"},
-		Spec:       appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"k": "v"}}},
-	}
-	if err := c.ApplyOwned(context.Background(), kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}, ds); err != nil {
-		t.Fatalf("ApplyOwned DaemonSet: %v", err)
-	}
-	got, err := cs.AppsV1().DaemonSets("obs").Get(context.Background(), "promtail", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Labels[kube.LabelOwner] != kube.OwnerObservability {
-		t.Errorf("owner label missing: %v", got.Labels)
-	}
-}
-
-func TestApplyOwned_Namespace(t *testing.T) {
-	cs := fake.NewSimpleClientset()
-	c := kube.NewForTest(cs)
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "nvoi-observability"}}
-	if err := c.ApplyOwned(context.Background(), kube.Scope{Owner: kube.OwnerObservability}, ns); err != nil {
-		t.Fatalf("ApplyOwned Namespace: %v", err)
-	}
-	got, err := cs.CoreV1().Namespaces().Get(context.Background(), "nvoi-observability", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Labels[kube.LabelOwner] != kube.OwnerObservability {
-		t.Errorf("owner label missing: %v", got.Labels)
-	}
-}
-
-func TestApplyOwned_ServiceAccount_ClusterRole_Binding(t *testing.T) {
-	cs := fake.NewSimpleClientset()
-	c := kube.NewForTest(cs)
-	scope := kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}
-
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
-	if err := c.ApplyOwned(context.Background(), scope, sa); err != nil {
-		t.Fatalf("ApplyOwned ServiceAccount: %v", err)
-	}
-	cr := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
-	if err := c.ApplyOwned(context.Background(), scope, cr); err != nil {
-		t.Fatalf("ApplyOwned ClusterRole: %v", err)
-	}
-	crb := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "promtail"}}
-	if err := c.ApplyOwned(context.Background(), scope, crb); err != nil {
-		t.Fatalf("ApplyOwned ClusterRoleBinding: %v", err)
-	}
-
-	// Every new kind should be discoverable via ListOwned.
-	for _, k := range []kube.Kind{kube.KindServiceAccount, kube.KindClusterRole, kube.KindClusterRoleBinding} {
-		got, err := c.ListOwned(context.Background(), scope, k)
-		if err != nil {
-			t.Errorf("ListOwned %s: %v", k, err)
-			continue
-		}
-		if len(got) != 1 || got[0] != "promtail" {
-			t.Errorf("ListOwned %s: got %v want [promtail]", k, got)
-		}
-	}
-}
-
-func TestSweepOwned_DaemonSet_Namespace_RBAC(t *testing.T) {
-	cs := fake.NewSimpleClientset(
-		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "stale-ds", Namespace: "obs", Labels: labeled(kube.OwnerObservability)}},
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "stale-ns", Labels: labeled(kube.OwnerObservability)}},
-		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "stale-sa", Namespace: "obs", Labels: labeled(kube.OwnerObservability)}},
-		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "stale-cr", Labels: labeled(kube.OwnerObservability)}},
-		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "stale-crb", Labels: labeled(kube.OwnerObservability)}},
-	)
-	c := kube.NewForTest(cs)
-
-	for _, k := range []kube.Kind{
-		kube.KindDaemonSet, kube.KindNamespace,
-		kube.KindServiceAccount, kube.KindClusterRole, kube.KindClusterRoleBinding,
-	} {
-		if err := c.SweepOwned(context.Background(), kube.Scope{Namespace: "obs", Owner: kube.OwnerObservability}, k, nil); err != nil {
-			t.Errorf("SweepOwned %s: %v", k, err)
-		}
-	}
-	if _, err := cs.AppsV1().DaemonSets("obs").Get(context.Background(), "stale-ds", metav1.GetOptions{}); err == nil {
-		t.Error("stale DaemonSet should be deleted")
-	}
-	if _, err := cs.CoreV1().Namespaces().Get(context.Background(), "stale-ns", metav1.GetOptions{}); err == nil {
-		t.Error("stale Namespace should be deleted")
 	}
 }

@@ -9,8 +9,6 @@ import (
 
 	_ "github.com/getnvoi/core/pkg/providers/cloudflare"
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
-	_ "github.com/getnvoi/core/pkg/providers/postmark"
-	_ "github.com/getnvoi/core/pkg/providers/twilio"
 )
 
 type rt struct {
@@ -47,7 +45,6 @@ func newRoot(r *rt) *cobra.Command {
 		kubectlCmd(r),
 		execCmd(r),
 		logsCmd(r),
-		monitorCmd(r),
 	)
 	return root
 }

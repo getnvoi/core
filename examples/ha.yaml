@@ -1,19 +1,43 @@
+# HA nvoi example — opt-in apiserver high availability.
+#
+# `ha: true` is the only difference vs single-master. Triggers:
+#   - validator REQUIRES an odd master count ≥3 (etcd quorum)
+#   - hetzner emitter adds a private-only hcloud LB on port 6443
+#     fronting the master pool (≈5€/month, lb11 type)
+#   - workers + secondary masters join via the LB private IP — the
+#     LB health-checks each master and steers around dead ones in
+#     ~10s. Apiserver failover is cloud-router-mediated, no manual
+#     intervention.
+#
+# Public surface: SSH (22) per master. The LB is PRIVATE-ONLY
+# (enable_public_interface = false). HTTP/S still flows exclusively
+# through the cloudflared egress tunnel.
+#
+# Same env vars as examples/minimal.yaml.
+
 app: hello
 env: ha
+
 providers:
   infra: hetzner
-  dns: cloudflare
-acme_email: ops@nvoi.to
+  storage: cloudflare
+
 ssh_key: ~/.ssh/id_rsa.pub
+
+# Opt in to apiserver HA — drives LB emission + master-count
+# validation. Flip to `false` (or remove) for single-master clusters.
+ha: true
+
 servers:
-  master-1: {type: cax21, region: nbg1, role: master, primary: true}
-  master-2: {type: cax21, region: nbg1, role: master}
-  master-3: {type: cax21, region: nbg1, role: master}
-  worker-1: {type: cax11, region: nbg1, role: worker}
-  worker-2: {type: cax11, region: nbg1, role: worker}
+  master-1: { type: cax21, region: nbg1, role: master, primary: true }
+  master-2: { type: cax21, region: nbg1, role: master }
+  master-3: { type: cax21, region: nbg1, role: master }
+  worker-1: { type: cax11, region: nbg1, role: worker }
+
 services:
   whoami:
     image: traefik/whoami
     port: 80
+
 domains:
   whoami: [ha.nvoi.to]

@@ -8,28 +8,29 @@ import (
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-func baseCfg() *config.Config {
+func tunnelCfg() *config.Config {
 	return &config.Config{
 		App:       "hello",
 		Env:       "dev",
-		Providers: config.Providers{Infra: "hetzner", DNS: "cloudflare"},
+		Providers: config.Providers{Infra: "hetzner"},
 		SSHKey:    "/tmp/x.pub",
 		Servers: map[string]config.ServerSpec{
 			"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 		},
 		Services: map[string]config.ServiceSpec{
-			"web": {Image: "nvoi/web", Port: 8080},
+			"app": {Image: "ghcr.io/me/app:latest", Port: 8080},
+			"api": {Image: "ghcr.io/me/api:latest", Port: 3000},
+		},
+		Domains: map[string][]string{
+			"app": {"app.nvoi.to", "www.nvoi.to"},
+			"api": {"api.nvoi.to"},
 		},
 	}
 }
 
-func TestEmitDNS_RequiresZoneID(t *testing.T) {
-	t.Setenv("CF_ZONE_ID", "")
-	t.Setenv("CF_ZONE", "nvoi.to")
-	cfg := baseCfg()
-	cfg.Domains = map[string][]string{"web": {"www.nvoi.to"}}
-
-	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+func TestEmitTunnelDNS_RequiresZoneID(t *testing.T) {
+	cfg := tunnelCfg()
+	_, err := EmitTunnelDNS(&runtime.Runtime{
 		Cfg: cfg,
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{Zone: "nvoi.to"},
@@ -40,13 +41,9 @@ func TestEmitDNS_RequiresZoneID(t *testing.T) {
 	}
 }
 
-func TestEmitDNS_RequiresZone(t *testing.T) {
-	t.Setenv("CF_ZONE_ID", "abc123")
-	t.Setenv("CF_ZONE", "")
-	cfg := baseCfg()
-	cfg.Domains = map[string][]string{"web": {"www.nvoi.to"}}
-
-	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+func TestEmitTunnelDNS_RequiresZone(t *testing.T) {
+	cfg := tunnelCfg()
+	_, err := EmitTunnelDNS(&runtime.Runtime{
 		Cfg: cfg,
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{ZoneID: "abc123"},
@@ -57,95 +54,41 @@ func TestEmitDNS_RequiresZone(t *testing.T) {
 	}
 }
 
-func TestEmitDNS_RecordsForEachDomain(t *testing.T) {
-	t.Setenv("CF_ZONE_ID", "zone123")
-	t.Setenv("CF_ZONE", "nvoi.to")
-	cfg := baseCfg()
-	cfg.Domains = map[string][]string{
-		"web": {"www.nvoi.to", "nvoi.to"}, // www + apex
-	}
-
-	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
-		Cfg: cfg,
-		Providers: runtime.ProviderInputs{
-			Cloudflare: &runtime.CloudflareInputs{ZoneID: "zone123", Zone: "nvoi.to"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("EmitDNS: %v", err)
-	}
-	hcl := string(out)
-
-	for _, want := range []string{
-		// Provider-config block lives here; required_providers +
-		// version pin live in the consolidated backend.tf rendered by
-		// internal/compile.
-		`provider "cloudflare" {}`,
-		`local.cloudflare_zone_id`,
-		`"zone123"`,
-		`resource "cloudflare_record" "web_www_nvoi_to"`,
-		`resource "cloudflare_record" "web_nvoi_to"`,
-		`name    = "www"`,
-		`name    = "@"`,
-		`type    = "A"`,
-		`content = hcloud_server.master.ipv4_address`, // raw HCL ref, NOT quoted
-		`proxied = false`,
-	} {
-		if !strings.Contains(hcl, want) {
-			t.Errorf("HCL missing %q\n--- output ---\n%s", want, hcl)
-		}
-	}
-	// Negative: the meta-block (required_providers / backend) lives
-	// in compile-emitted backend.tf, not in per-provider files.
-	// Match an actual block opener, not the substring (the template's
-	// own comment legitimately mentions the word).
-	if strings.Contains(hcl, "required_providers {") {
-		t.Errorf("required_providers block must NOT live in cloudflare-dns.tf:\n%s", hcl)
-	}
-}
-
-func TestEmitDNS_NoDomains_StillRendersProviderBlock(t *testing.T) {
-	t.Setenv("CF_ZONE_ID", "zone123")
-	t.Setenv("CF_ZONE", "nvoi.to")
-	cfg := baseCfg()
-
-	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
-		Cfg: cfg,
-		Providers: runtime.ProviderInputs{
-			Cloudflare: &runtime.CloudflareInputs{ZoneID: "zone123", Zone: "nvoi.to"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("EmitDNS: %v", err)
-	}
-	hcl := string(out)
-	if !strings.Contains(hcl, `provider "cloudflare" {}`) {
-		t.Errorf("provider block missing: %s", hcl)
-	}
-	if strings.Contains(hcl, `resource "cloudflare_record"`) {
-		t.Errorf("no domains → no records expected: %s", hcl)
-	}
-}
-
-// ── tunnel mode (providers.ingress: cloudflare) ──────────────────────
-
-func tunnelCfg() *config.Config {
-	c := baseCfg()
-	c.Providers.Ingress = config.IngressCloudflare
-	c.Services = map[string]config.ServiceSpec{
-		"app": {Image: "ghcr.io/me/app:latest", Port: 8080},
-		"api": {Image: "ghcr.io/me/api:latest", Port: 3000},
-	}
-	c.Domains = map[string][]string{
-		"app": {"app.nvoi.to", "www.nvoi.to"},
-		"api": {"api.nvoi.to"},
-	}
-	return c
-}
-
-func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
+func TestEmitTunnelDNS_RequiresAccountID(t *testing.T) {
 	cfg := tunnelCfg()
-	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+	_, err := EmitTunnelDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{ZoneID: "zone123", Zone: "nvoi.to"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "account_id required") {
+		t.Errorf("expected account_id error, got %v", err)
+	}
+}
+
+func TestEmitTunnelDNS_RequiresTunnelSecret(t *testing.T) {
+	cfg := tunnelCfg()
+	_, err := EmitTunnelDNS(&runtime.Runtime{
+		Cfg: cfg,
+		Providers: runtime.ProviderInputs{
+			Cloudflare: &runtime.CloudflareInputs{
+				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
+				// TunnelSecret deliberately blank — boundary normally
+				// catches this, but the emitter's defensive check keeps
+				// the failure local rather than letting an empty literal
+				// land in HCL.
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "tunnel_secret required") {
+		t.Errorf("expected tunnel_secret error, got %v", err)
+	}
+}
+
+func TestEmitTunnelDNS_HappyPath(t *testing.T) {
+	cfg := tunnelCfg()
+	out, err := EmitTunnelDNS(&runtime.Runtime{
 		Cfg: cfg,
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{
@@ -155,7 +98,7 @@ func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("EmitDNS: %v", err)
+		t.Fatalf("EmitTunnelDNS: %v", err)
 	}
 	hcl := string(out)
 
@@ -164,7 +107,7 @@ func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
 		`provider "cloudflare" {}`,
 		`cloudflare_account_id = "acc456"`,
 		`cloudflare_zone_id    = "zone123"`,
-		// Tunnel resources (named after app+env from baseCfg = "hello-dev")
+		// Tunnel resources (named after app+env from tunnelCfg = "hello-dev")
 		`tunnel_name           = "nvoi-hello-dev"`,
 		`resource "cloudflare_zero_trust_tunnel_cloudflared" "main"`,
 		`secret     = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="`,
@@ -194,57 +137,19 @@ func TestEmitDNS_TunnelMode_HappyPath(t *testing.T) {
 		}
 	}
 
-	// Traefik-only artifacts must NOT appear in tunnel HCL.
-	for _, banned := range []string{
-		`type    = "A"`,
-		`hcloud_server.master.ipv4_address`,
-		`proxied = false`,
-	} {
-		if strings.Contains(hcl, banned) {
-			t.Errorf("tunnel HCL contains Traefik-only token %q:\n%s", banned, hcl)
-		}
+	// Match an actual block opener, not a substring (the template's
+	// own comment legitimately mentions the word).
+	if strings.Contains(hcl, "required_providers {") {
+		t.Errorf("required_providers block must NOT live in cloudflare-dns.tf:\n%s", hcl)
 	}
 }
 
-func TestEmitDNS_TunnelMode_MissingAccountID(t *testing.T) {
+func TestEmitTunnelDNS_UpstreamIsTraefik(t *testing.T) {
 	cfg := tunnelCfg()
-	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
-		Cfg: cfg,
-		Providers: runtime.ProviderInputs{
-			Cloudflare: &runtime.CloudflareInputs{ZoneID: "zone123", Zone: "nvoi.to"},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "account_id required") {
-		t.Errorf("expected account_id error, got %v", err)
-	}
-}
-
-func TestEmitDNS_TunnelMode_MissingTunnelSecret(t *testing.T) {
-	cfg := tunnelCfg()
-	_, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
-		Cfg: cfg,
-		Providers: runtime.ProviderInputs{
-			Cloudflare: &runtime.CloudflareInputs{
-				ZoneID: "zone123", Zone: "nvoi.to", AccountID: "acc456",
-				// TunnelSecret deliberately blank — boundary normally
-				// catches this, but the emitter's defensive check keeps
-				// the failure local rather than letting an empty literal
-				// land in HCL.
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "tunnel_secret required") {
-		t.Errorf("expected tunnel_secret error, got %v", err)
-	}
-}
-
-func TestEmitDNS_TunnelMode_UpstreamIsTraefik(t *testing.T) {
-	cfg := tunnelCfg()
-	// Per-service ports are irrelevant in tunnel mode now — every
-	// ingress rule points at Traefik. Override one to confirm it
-	// is NOT threaded through.
+	// Per-service ports are irrelevant — every ingress rule points
+	// at Traefik. Override one to confirm it is NOT threaded through.
 	cfg.Services["app"] = config.ServiceSpec{Image: "ghcr.io/me/app:latest", Port: 9999}
-	out, err := DNSEmitter{}.EmitDNS(&runtime.Runtime{
+	out, err := EmitTunnelDNS(&runtime.Runtime{
 		Cfg: cfg,
 		Providers: runtime.ProviderInputs{
 			Cloudflare: &runtime.CloudflareInputs{
@@ -254,7 +159,7 @@ func TestEmitDNS_TunnelMode_UpstreamIsTraefik(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("EmitDNS: %v", err)
+		t.Fatalf("EmitTunnelDNS: %v", err)
 	}
 	hcl := string(out)
 	if !strings.Contains(hcl, `service  = "http://traefik.kube-system.svc.cluster.local:80"`) {

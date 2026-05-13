@@ -1,8 +1,45 @@
+# Canonical nvoi example — single-master, all-tunnel topology.
+#
+# Public network surface: SSH (22) only. HTTP/S ingress enters via
+# Cloudflare's edge, terminates at CF, rides an outbound tunnel into
+# the cluster, lands on the in-cluster Traefik Service, and routes by
+# Host header to the workload's ClusterIP.
+#
+# Required env vars (typically piped into .env from a secret manager):
+#   HCLOUD_TOKEN       — Hetzner API token (provisions servers)
+#   CF_API_KEY         — Cloudflare API token with R2 + DNS edit
+#   CF_ACCOUNT_ID      — Cloudflare account ID
+#   CF_ZONE_ID         — Cloudflare zone ID (the zone holding `domains:`)
+#   CF_ZONE            — Cloudflare zone (e.g. "nvoi.to")
+#   CF_TUNNEL_SECRET   — operator-supplied 32-byte base64 string
+#                        (`openssl rand -base64 32` — keep this in a
+#                        password manager; rotation = regenerate + redeploy)
+
 app: hello
 env: dev
+
 providers:
-  infra: hetzner
-  storage: cloudflare
+  infra: hetzner       # provisions servers (Hetzner Cloud)
+  storage: cloudflare  # state bucket on R2; omit for local .tf state
+
 ssh_key: ~/.ssh/id_rsa.pub
+
+# Single master = no apiserver-HA primitive (LB activates only when
+# top-level `ha: true` is set with ≥3 masters — see examples/ha.yaml).
+# Add `cax11` workers freely to scale workload capacity.
 servers:
-  master: {type: cax11, region: nbg1, role: master}
+  master: { type: cax21, region: nbg1, role: master }
+
+# Optional: replace with your own services. `port` is the in-cluster
+# port the Service exposes — cloudflared upstreams Traefik (:80) and
+# Traefik routes by Host header to the matching Ingress backend.
+services:
+  whoami:
+    image: traefik/whoami
+    port: 80
+
+# Optional: declare public hostnames. Each entry must reference a
+# declared service. Activates the CF tunnel + per-domain CNAME records
+# pointing at <tunnel-id>.cfargotunnel.com (CF terminates TLS at edge).
+domains:
+  whoami: [whoami.nvoi.to]

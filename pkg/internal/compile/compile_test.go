@@ -75,7 +75,10 @@ func TestCompile_MinimalIsValidHCL(t *testing.T) {
 	hcltest.ParseValid(t, src, "hetzner.tf")
 }
 
-func TestCompile_HAEmitsLoadBalancer(t *testing.T) {
+// Without `ha: true` in the YAML, the hetzner template emits no LB.
+// This test asserts the negative path — single-master clusters skip
+// the LB resources entirely (the .HA flag is false by default).
+func TestCompile_NoHA_NoLB(t *testing.T) {
 	src := fileBytes(t, rt(t, map[string]config.ServerSpec{
 		"m1": {Type: "cax21", Region: "nbg1", Role: "master", Primary: true},
 		"m2": {Type: "cax21", Region: "nbg1", Role: "master"},
@@ -83,11 +86,15 @@ func TestCompile_HAEmitsLoadBalancer(t *testing.T) {
 	}, nil))
 	body := hcltest.ParseValid(t, src, "hetzner.tf")
 
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer", "cp") == nil {
-		t.Errorf("HA: missing hcloud_load_balancer.cp")
-	}
-	if hcltest.FindBlock(body, "resource", "hcloud_load_balancer_target", "cp") == nil {
-		t.Errorf("HA: missing hcloud_load_balancer_target.cp")
+	for _, name := range []string{
+		"hcloud_load_balancer",
+		"hcloud_load_balancer_network",
+		"hcloud_load_balancer_target",
+		"hcloud_load_balancer_service",
+	} {
+		if hcltest.FindBlock(body, "resource", name, "cp") != nil {
+			t.Errorf("ha:false: %s should not be emitted (LB is gated on cfg.HA)", name)
+		}
 	}
 	// every master gets its own server resource
 	for _, k := range []string{"m1", "m2", "m3"} {
@@ -97,7 +104,7 @@ func TestCompile_HAEmitsLoadBalancer(t *testing.T) {
 	}
 }
 
-func TestCompile_NonHASkipsLoadBalancer(t *testing.T) {
+func TestCompile_NonHANoLB(t *testing.T) {
 	src := fileBytes(t, rt(t, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}, nil))
@@ -176,8 +183,6 @@ func TestCompile_BackendTF_DoesNotDeclareRandom(t *testing.T) {
 	r := rt(t, map[string]config.ServerSpec{
 		"master": {Type: "cax11", Region: "nbg1", Role: "master"},
 	}, nil)
-	r.Cfg.Providers.DNS = "cloudflare"
-	r.Cfg.Providers.Ingress = config.IngressCloudflare
 	r.Cfg.Services = map[string]config.ServiceSpec{"web": {Image: "nginx", Port: 80}}
 	r.Cfg.Domains = config.Domains{"web": {"www.nvoi.to"}}
 	r.Providers = runtime.ProviderInputs{Cloudflare: &runtime.CloudflareInputs{

@@ -7,8 +7,7 @@ import (
 
 // Tests that require a registered bucket provider live in
 // validate_external_test.go (package config_test) — registering
-// providers/cloudflare here would create a cycle now that
-// cloudflare imports internal/config for the DNSEmitter.
+// providers/cloudflare here would create a cycle.
 
 func TestValidate(t *testing.T) {
 	base := func() *Config {
@@ -43,19 +42,68 @@ func TestValidate(t *testing.T) {
 			},
 			wantErr: "at least one master required",
 		},
+		// Multi-master without `ha: true` is rejected — the operator
+		// would otherwise have a multi-node etcd cluster with no
+		// apiserver failover primitive. Validator demands an explicit
+		// opt-in.
 		{
-			name: "two masters without primary flag",
+			name: "multiple masters without ha flag rejected",
 			mutate: func(c *Config) {
 				c.Servers["master-2"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
 			},
-			wantErr: "exactly one must have primary: true",
+			wantErr: "set `ha: true`",
 		},
+		// `ha: true` requires an odd master count ≥3 — etcd quorum +
+		// LB failover both need at least 3. 2 masters with ha is half
+		// a feature, rejected explicitly.
 		{
-			name: "two masters with single primary",
+			name: "ha: true with 2 masters rejected",
 			mutate: func(c *Config) {
+				c.HA = true
 				c.Servers["master"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master", Primary: true}
 				c.Servers["master-2"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
 			},
+			wantErr: "odd master count ≥3",
+		},
+		{
+			name: "ha: true with 4 masters rejected (even)",
+			mutate: func(c *Config) {
+				c.HA = true
+				c.Servers["master"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master", Primary: true}
+				c.Servers["master-2"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+				c.Servers["master-3"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+				c.Servers["master-4"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+			},
+			wantErr: "must be odd",
+		},
+		// Happy path — 3 masters with primary flag + ha: true.
+		{
+			name: "ha: true with 3 masters and single primary",
+			mutate: func(c *Config) {
+				c.HA = true
+				c.Servers["master"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master", Primary: true}
+				c.Servers["master-2"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+				c.Servers["master-3"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+			},
+		},
+		// Missing primary flag in HA mode still caught.
+		{
+			name: "ha: true with 3 masters but no primary flag rejected",
+			mutate: func(c *Config) {
+				c.HA = true
+				c.Servers["master-2"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+				c.Servers["master-3"] = ServerSpec{Type: "cax11", Region: "nbg1", Role: "master"}
+			},
+			wantErr: "exactly one must have primary: true",
+		},
+		// `ha: true` with just 1 master rejected — gives the operator
+		// a clear "you asked for HA but only declared 1 master".
+		{
+			name: "ha: true with 1 master rejected",
+			mutate: func(c *Config) {
+				c.HA = true
+			},
+			wantErr: "odd master count ≥3",
 		},
 		{
 			name: "primary on worker rejected",
@@ -313,27 +361,17 @@ func TestValidate(t *testing.T) {
 			},
 		},
 
-		// domains
+		// domains — CF tunnel activates implicitly when non-empty
 		{
 			name: "valid domains",
 			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
 				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
 				c.Domains = Domains{"web": {"www.nvoi.to", "nvoi.to"}}
 			},
 		},
 		{
-			name: "domains require providers.dns",
-			mutate: func(c *Config) {
-				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
-				c.Domains = Domains{"web": {"www.nvoi.to"}}
-			},
-			wantErr: "domains: requires providers.dns",
-		},
-		{
 			name: "domain key must be a declared service",
 			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
 				c.Domains = Domains{"ghost": {"www.nvoi.to"}}
 			},
 			wantErr: `"ghost" is not a declared service`,
@@ -341,7 +379,6 @@ func TestValidate(t *testing.T) {
 		{
 			name: "empty hostname list rejected",
 			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
 				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
 				c.Domains = Domains{"web": {}}
 			},
@@ -350,61 +387,10 @@ func TestValidate(t *testing.T) {
 		{
 			name: "invalid hostname rejected",
 			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
 				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
 				c.Domains = Domains{"web": {"NOT_VALID"}}
 			},
 			wantErr: "not a valid DNS hostname",
-		},
-		// ingress mode
-		{
-			name: "ingress unset defaults to traefik",
-			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
-				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
-				c.Domains = Domains{"web": {"www.nvoi.to"}}
-			},
-		},
-		{
-			name: "ingress traefik explicit",
-			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
-				c.Providers.Ingress = IngressTraefik
-				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
-				c.Domains = Domains{"web": {"www.nvoi.to"}}
-			},
-		},
-		{
-			name: "ingress cloudflare happy path",
-			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
-				c.Providers.Ingress = IngressCloudflare
-				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
-				c.Domains = Domains{"web": {"www.nvoi.to"}}
-			},
-		},
-		{
-			name:    "ingress unknown mode rejected",
-			mutate:  func(c *Config) { c.Providers.Ingress = "ngrok" },
-			wantErr: "unknown mode",
-		},
-		{
-			name: "ingress cloudflare requires non-empty domains",
-			mutate: func(c *Config) {
-				c.Providers.DNS = "cloudflare"
-				c.Providers.Ingress = IngressCloudflare
-			},
-			wantErr: "requires non-empty domains:",
-		},
-		{
-			name: "ingress cloudflare requires cloudflare DNS",
-			mutate: func(c *Config) {
-				c.Providers.DNS = ""
-				c.Providers.Ingress = IngressCloudflare
-				c.Services = map[string]ServiceSpec{"web": {Image: "nginx", Port: 80}}
-				c.Domains = Domains{"web": {"www.nvoi.to"}}
-			},
-			wantErr: "requires providers.dns: cloudflare",
 		},
 
 		// aliases
@@ -469,26 +455,6 @@ func TestValidate(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestIngressMode(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "empty defaults to traefik", in: "", want: IngressTraefik},
-		{name: "traefik passthrough", in: IngressTraefik, want: IngressTraefik},
-		{name: "cloudflare passthrough", in: IngressCloudflare, want: IngressCloudflare},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := (Providers{Ingress: tc.in}).IngressMode()
-			if got != tc.want {
-				t.Errorf("got %q want %q", got, tc.want)
 			}
 		})
 	}
