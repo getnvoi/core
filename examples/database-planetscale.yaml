@@ -1,0 +1,69 @@
+# PlanetScale managed MySQL — externally provisioned, driven through
+# the same CLI as managed postgres.
+#
+# Capability matrix vs postgres:
+#   sql      → unsupported (no in-cluster pod; use `pscale shell`)
+#   backup   → supported  (mysqldump → gzipped artifact in bucket)
+#   restore  → supported  (same cmd/db Job, MODE=restore)
+#   branch   → supported  (PlanetScale's native branches via API)
+#   branches → supported
+#   migrate  → unsupported (no node concept)
+#   snapshot → unsupported (PlanetScale uses branches as the unit)
+#   rollback → unsupported (not in-place; branch-promote workflow)
+#
+# v1 status: HCL emitter (`planetscale_database` resource via the
+# planetscale/planetscale tofu provider) is deferred — operators
+# pre-provision the database at the PlanetScale UI or via their own
+# tofu module. nvoi reads the database name and connection material
+# from the PlanetScale API and stamps the canonical credentials
+# Secret (DATABASE_URL / DATABASE_HOST / DATABASE_PORT / DATABASE_USER
+# / DATABASE_PASSWORD — same shape every engine produces).
+#
+# Required env vars:
+#   HCLOUD_TOKEN                          (providers.infra: hetzner)
+#   CF_API_KEY / CF_ACCOUNT_ID            (providers.storage — backup bucket)
+#   PLANETSCALE_SERVICE_TOKEN             (databases.events.provider creds)
+#   PLANETSCALE_ORG                       (your PlanetScale org slug)
+#   DOCKERHUB_USERNAME / DOCKERHUB_TOKEN  (registry — pulls the api image)
+#
+# Optional:
+#   PLANETSCALE_BASE_URL                  (override default https://api.planetscale.com/v1)
+
+app: myapp
+env: prod
+
+providers:
+  infra: hetzner
+  storage: cloudflare           # required for databases.events.backup
+
+ssh_key: ~/.ssh/id_ed25519.pub
+
+servers:
+  master:
+    type: cax11
+    region: nbg1
+    role: master                # no db-worker needed — PlanetScale is offsite
+
+databases:
+  events:
+    engine: planetscale
+    region: eu-west             # PlanetScale region (not an nvoi server name)
+    backup:
+      schedule: "0 3 * * *"
+      retention: 14
+
+registry:
+  docker.io:
+    username: $DOCKERHUB_USERNAME
+    password: $DOCKERHUB_TOKEN
+
+services:
+  api:
+    image: myorg/api
+    build:
+      context: ./
+      dockerfile: ./cmd/api/Dockerfile
+    port: 8080
+    databases:
+      - DATABASE=events         # → DATABASE_URL/HOST/PORT/USER/PASSWORD
+                                #   (mysql://… DSN, host = events.psdb.cloud, port = 3306)

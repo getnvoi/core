@@ -1,0 +1,92 @@
+# Managed Postgres on the operator's cluster, ZFS-LocalPV-backed.
+#
+# This is the headline configuration: Heroku-style managed Postgres
+# on your own hardware, with full capability matrix — snapshot,
+# branch (sub-second CoW clones), migrate (cross-node move),
+# rollback (in-place snapshot restore).
+#
+# How it works under the hood:
+#  - A dedicated worker node (db-worker below) hosts the DB.
+#  - nvoi installs the OpenEBS ZFS-LocalPV CSI driver on first
+#    deploy. apt-installs zfsutils-linux on the DB node and creates
+#    a file-backed zpool sized 2x size: (clamped to leave 8GiB root
+#    free).
+#  - postgres pod binds to a PVC on the ZFS StorageClass. size:
+#    becomes a refquota — writes past it ENOSPC at the pod, the
+#    node stays healthy.
+#  - Backups: a CronJob runs the nvoi/db image which dumps + gzips
+#    and PUTs to a per-DB bucket on providers.storage. Retention
+#    flips to a bucket-lifecycle rule.
+#
+# Required env vars:
+#   HCLOUD_TOKEN                       (providers.infra: hetzner)
+#   CF_API_KEY / CF_ACCOUNT_ID         (providers.storage: cloudflare — for backups)
+#   CF_API_KEY / CF_ZONE_ID / DNS_ZONE (providers.dns: cloudflare)
+#   APP_POSTGRES_USER                  (databases.app.credentials.user)
+#   APP_POSTGRES_PASSWORD              (databases.app.credentials.password)
+#   APP_POSTGRES_DB                    (databases.app.credentials.database)
+#   DOCKERHUB_USERNAME / DOCKERHUB_TOKEN (registry — pulls the api image)
+#
+# Operator workflow:
+#   nvoi deploy                                # provisions + reconciles
+#   nvoi database sql app "SELECT count(*) FROM users"
+#   nvoi database backup now app               # one-shot Job
+#   nvoi database backup list app              # bucket-resident artifacts
+#   nvoi database snapshot app --label pre-migration
+#   nvoi database branch app pr-142            # O(100ms) clone
+#   nvoi database branch-delete app pr-142     # reaps StatefulSet + PVC + Snapshot
+#   nvoi database restore app --latest --yes   # destructive — replay newest backup
+#   nvoi database rollback app --to nvoi-myapp-prod-db-app-snap-pre-migration --yes
+
+app: myapp
+env: prod
+
+providers:
+  infra: hetzner
+  dns: cloudflare
+  storage: cloudflare           # required for databases.app.backup
+
+ssh_key: ~/.ssh/id_ed25519.pub
+
+servers:
+  master:
+    type: cax11
+    region: nbg1
+    role: master
+  db-worker:
+    type: cax21                 # headroom for ZFS pool + working set
+    region: nbg1
+    role: worker
+
+databases:
+  app:
+    engine: postgres
+    version: "17"
+    server: db-worker           # validator rejects DB-on-master
+    size: 20                    # GiB, hard ZFS quota (refquota)
+    credentials:
+      user: $APP_POSTGRES_USER
+      password: $APP_POSTGRES_PASSWORD
+      database: $APP_POSTGRES_DB
+    backup:
+      schedule: "0 3 * * *"     # daily at 03:00 UTC
+      retention: 14             # days; lifecycle rule on the bucket
+
+registry:
+  docker.io:
+    username: $DOCKERHUB_USERNAME
+    password: $DOCKERHUB_TOKEN
+
+services:
+  api:
+    image: myorg/api
+    build:
+      context: ./
+      dockerfile: ./cmd/api/Dockerfile
+    port: 8080
+    databases:
+      - DATABASE=app            # → DATABASE_URL / _HOST / _PORT / _USER / _PASSWORD
+
+domains:
+  api:
+    - api.example.com
