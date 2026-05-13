@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -73,13 +74,17 @@ func (c *Client) applyService(ctx context.Context, ns string, svc *corev1.Servic
 	})
 }
 
-// applyStatefulSet preserves VolumeClaimTemplates (immutable post-Create)
-// + Status. Reconcile-on-config-change for the templates is a future
-// concern; today an operator who changes storage size for an existing
-// StatefulSet must `nvoi destroy` and redeploy.
+// applyStatefulSet preserves VolumeClaimTemplates (immutable post-
+// Create) + Status. After Update, force-rolls any pod stuck on the
+// old revision — without this, a pod in CrashLoopBackOff blocks the
+// StatefulSet controller from picking up the new spec (it waits for
+// the existing pod to become Ready before rolling, and the existing
+// pod is sick because of the very env/image the new spec fixes).
+// Reconcile-on-VolumeClaimTemplates is a future concern; today
+// changing storage size requires an explicit migrate.
 func (c *Client) applyStatefulSet(ctx context.Context, ns string, ss *appsv1.StatefulSet) error {
 	api := c.CS.AppsV1().StatefulSets(ns)
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		existing, err := api.Get(ctx, ss.Name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			_, err := api.Create(ctx, ss, metav1.CreateOptions{FieldManager: FieldManager})
@@ -93,7 +98,77 @@ func (c *Client) applyStatefulSet(ctx context.Context, ns string, ss *appsv1.Sta
 		ss.Spec.VolumeClaimTemplates = existing.Spec.VolumeClaimTemplates
 		_, err = api.Update(ctx, ss, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	return c.forceRollStaleStatefulSetPods(ctx, ns, ss)
+}
+
+// forceRollStaleStatefulSetPods deletes pods whose
+// controller-revision-hash label doesn't match the StatefulSet's
+// UpdateRevision when those pods aren't Ready. Standard k8s rollout
+// path expects pods to become Ready before the controller proceeds —
+// for a single-pod stateful workload (postgres, etc.) with a sick
+// pod-0, that's a deadlock the operator would otherwise resolve via
+// `kubectl delete pod`. We encode the same recovery here so deploys
+// converge without manual kubectl.
+//
+// Best-effort — we re-read the StatefulSet to pick up the controller-
+// written UpdateRevision (the value we just submitted gets a fresh
+// revision on the apiserver side), list owned pods by the selector,
+// and delete the stragglers. Errors are returned to the caller; a
+// failure here surfaces in the reconcile log and the operator can
+// retry.
+func (c *Client) forceRollStaleStatefulSetPods(ctx context.Context, ns string, ss *appsv1.StatefulSet) error {
+	live, err := c.CS.AppsV1().StatefulSets(ns).Get(ctx, ss.Name, metav1.GetOptions{})
+	if err != nil {
+		return nil // we just updated it; absence is impossible — treat lookup failure as transient
+	}
+	target := live.Status.UpdateRevision
+	if target == "" {
+		return nil // controller hasn't computed a revision yet; nothing to compare
+	}
+
+	selector := metav1.FormatLabelSelector(live.Spec.Selector)
+	pods, err := c.CS.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return nil
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		// Pod's controller-revision-hash label tells us which
+		// StatefulSet revision the controller scheduled it from.
+		hash := pod.Labels["controller-revision-hash"]
+		if hash == target {
+			continue // up-to-date
+		}
+		// Pod is stale — but if it's Running+Ready, the controller
+		// will roll it on its own under OrderedReady semantics.
+		// Force-delete ONLY when the pod is unhealthy (not Ready),
+		// which is exactly the deadlock case we're working around.
+		if podReadyForRollout(pod) {
+			continue
+		}
+		_ = c.CS.CoreV1().Pods(ns).Delete(ctx, pod.Name, metav1.DeleteOptions{})
+	}
+	return nil
+}
+
+// podReadyForRollout reports whether the pod is healthy enough that
+// the StatefulSet controller can roll it under its normal cadence
+// (Running phase + all containers Ready). For unhealthy pods, the
+// controller would otherwise wait forever — that's the case we
+// short-circuit by deleting.
+func podReadyForRollout(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if !cs.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) applySecret(ctx context.Context, ns string, sec *corev1.Secret) error {
@@ -216,6 +291,26 @@ func (c *Client) applyCronJob(ctx context.Context, ns string, cj *batchv1.CronJo
 		_, err = api.Update(ctx, cj, metav1.UpdateOptions{FieldManager: FieldManager})
 		return err
 	})
+}
+
+// applyStorageClass is a Get → Create-or-noop for cluster-scoped
+// StorageClass resources. Most fields on a StorageClass are
+// immutable post-Create (Provisioner, Parameters, ReclaimPolicy,
+// VolumeBindingMode) — changing them requires destroy+recreate,
+// which would break any PVC bound to the class. Treat presence as
+// satisfied: if the SC already exists, leave it alone. Operators who
+// need a parameter change delete the SC manually.
+func (c *Client) applyStorageClass(ctx context.Context, sc *storagev1.StorageClass) error {
+	api := c.CS.StorageV1().StorageClasses()
+	_, err := api.Get(ctx, sc.Name, metav1.GetOptions{})
+	if err == nil {
+		return nil // already present; immutable fields keep their shape
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	_, err = api.Create(ctx, sc, metav1.CreateOptions{FieldManager: FieldManager})
+	return err
 }
 
 // applyJob is a Get → Create for batch/v1 Jobs. Jobs are

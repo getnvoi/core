@@ -94,7 +94,7 @@ func (s *Session) deployDatabases(ctx context.Context) error {
 func (s *Session) reconcileOneDatabase(ctx context.Context, name string, def config.DatabaseSpec, masterShell ssh.Shell) error {
 	rt := s.Rt
 	kc := s.kc
-	namespace := naming.Prefix(rt.Cfg.App, rt.Cfg.Env)
+	namespace := naming.Namespace
 
 	// Resolve engine provider via registry (postgres + future
 	// engines blank-import in cmd/cli/main.go).
@@ -246,7 +246,7 @@ func (s *Session) sweepDatabases(ctx context.Context, desiredKeys []string) erro
 		return nil
 	}
 	rt := s.Rt
-	namespace := naming.Prefix(rt.Cfg.App, rt.Cfg.Env)
+	namespace := naming.Namespace
 	scope := kube.Scope{Namespace: namespace, Owner: kube.OwnerDatabases}
 
 	// Build the expected-name sets per Kind.

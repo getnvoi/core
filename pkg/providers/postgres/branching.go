@@ -144,7 +144,7 @@ func applyVolumeSnapshot(ctx context.Context, masterSSH ssh.Shell, app, env, dbN
 	if err := EnsureSnapshotClass(ctx, masterSSH); err != nil {
 		return err
 	}
-	namespace := naming.Prefix(app, env)
+	namespace := naming.Namespace
 	pvcName := naming.DatabasePVC(app, env, dbName)
 
 	manifest := fmt.Sprintf(`apiVersion: %s
@@ -173,7 +173,7 @@ func ListSnapshots(ctx context.Context, masterSSH ssh.Shell, app, env, dbName st
 	if masterSSH == nil {
 		return nil, fmt.Errorf("postgres.ListSnapshots: master ssh required")
 	}
-	namespace := naming.Prefix(app, env)
+	namespace := naming.Namespace
 	pvcName := naming.DatabasePVC(app, env, dbName)
 	cmd := fmt.Sprintf(
 		`sudo k3s kubectl -n %s get volumesnapshot -l %s=%s -o name 2>/dev/null || true`,
@@ -274,7 +274,7 @@ func Branch(ctx context.Context, kc *kube.Client, masterSSH ssh.Shell, src Branc
 	if err := validateName("branch composite name", branchWorkload); err != nil {
 		return providers.BranchRef{}, fmt.Errorf("%w — shorten app / env / database / branch names", err)
 	}
-	namespace := naming.Prefix(src.App, src.Env)
+	namespace := naming.Namespace
 
 	// 1. Snapshot the source PVC. naming.DatabaseBranchSnapshot
 	// encodes the branch lineage in the snapshot's name so
@@ -322,7 +322,7 @@ func DeleteBranch(ctx context.Context, kc *kube.Client, masterSSH ssh.Shell, app
 	if err := validateName("branch", branchName); err != nil {
 		return err
 	}
-	namespace := naming.Prefix(app, env)
+	namespace := naming.Namespace
 	branchWorkload := naming.DatabaseBranch(app, env, dbName, branchName)
 
 	// StatefulSet + Service first — evicts the pod before its PVC
@@ -352,7 +352,7 @@ func ListBranches(ctx context.Context, kc *kube.Client, app, env, dbName string)
 	if kc == nil {
 		return nil, fmt.Errorf("postgres.ListBranches: kube client required")
 	}
-	namespace := naming.Prefix(app, env)
+	namespace := naming.Namespace
 	scope := kube.Scope{Namespace: namespace, Owner: kube.OwnerDatabaseBranches}
 	names, err := kc.ListOwned(ctx, scope, kube.KindStatefulSet)
 	if err != nil {
@@ -386,7 +386,7 @@ func buildBranchPVC(src BranchSource, name, snapshotName string) *corev1.Persist
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: naming.Prefix(src.App, src.Env),
+			Namespace: naming.Namespace,
 			Labels:    branchLabels(src),
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
@@ -411,7 +411,7 @@ func buildBranchService(src BranchSource, name string) *corev1.Service {
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: naming.Prefix(src.App, src.Env),
+			Namespace: naming.Namespace,
 			Labels:    branchLabels(src),
 		},
 		Spec: corev1.ServiceSpec{
@@ -444,7 +444,7 @@ func buildBranchStatefulSet(src BranchSource, name string) *appsv1.StatefulSet {
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: naming.Prefix(src.App, src.Env),
+			Namespace: naming.Namespace,
 			Labels:    branchLabels(src),
 		},
 		Spec: appsv1.StatefulSetSpec{

@@ -10,6 +10,7 @@ import (
 	"github.com/getnvoi/core/pkg/internal/kube"
 	"github.com/getnvoi/core/pkg/internal/utils"
 	"github.com/getnvoi/core/pkg/log"
+	"github.com/getnvoi/core/pkg/naming"
 	rt2 "github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -30,10 +31,10 @@ import (
 // retry-on-conflict. Re-running on an unchanged cluster is a string
 // of read-then-no-op API calls.
 func ApplyAll(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg log.Log) error {
-	registryScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerRegistry}
-	appSecretsScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}
-	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
-	ingressScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerIngress}
+	registryScope := kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerRegistry}
+	appSecretsScope := kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerAppSecrets}
+	servicesScope := kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerServices}
+	ingressScope := kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerIngress}
 
 	// Tunnel mode (providers.ingress: cloudflare): cloudflared routes
 	// hostnames at the tunnel layer (tofu-managed config); per-service
@@ -139,7 +140,7 @@ func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 		}
 	}
 
-	servicesScope := kube.Scope{Namespace: namespace, Owner: kube.OwnerServices}
+	servicesScope := kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerServices}
 	if err := kc.SweepOwned(ctx, servicesScope, kube.KindDeployment, declaredStateless); err != nil {
 		return fmt.Errorf("sweep stale deployments: %w", err)
 	}
@@ -155,7 +156,7 @@ func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	if len(r.RegistryCreds) > 0 {
 		registryDesired = []string{registrySecretName}
 	}
-	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerRegistry}, kube.KindSecret, registryDesired); err != nil {
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerRegistry}, kube.KindSecret, registryDesired); err != nil {
 		return fmt.Errorf("sweep stale registry secret: %w", err)
 	}
 
@@ -164,13 +165,13 @@ func reconcileRemoval(ctx context.Context, r *rt2.Runtime, kc *kube.Client, lg l
 	if len(r.Cfg.Secrets) > 0 {
 		appSecretDesired = []string{appSecretName}
 	}
-	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerAppSecrets}, kube.KindSecret, appSecretDesired); err != nil {
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerAppSecrets}, kube.KindSecret, appSecretDesired); err != nil {
 		return fmt.Errorf("sweep stale app secret: %w", err)
 	}
 
 	// Ingress: keep only services with non-empty domains. Drop a
 	// service from cfg.Domains and the orphan Ingress purges next deploy.
-	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: namespace, Owner: kube.OwnerIngress}, kube.KindIngress, declaredIngress); err != nil {
+	if err := kc.SweepOwned(ctx, kube.Scope{Namespace: naming.Namespace, Owner: kube.OwnerIngress}, kube.KindIngress, declaredIngress); err != nil {
 		return fmt.Errorf("sweep stale ingresses: %w", err)
 	}
 

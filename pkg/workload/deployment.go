@@ -13,6 +13,7 @@ import (
 
 	"github.com/getnvoi/core/pkg/config"
 	"github.com/getnvoi/core/pkg/internal/kube"
+	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
@@ -144,7 +145,7 @@ func buildDeployment(rt *runtime.Runtime, name string, svc config.ServiceSpec) (
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: naming.Namespace,
 			Labels:    objectLabels(rt, name),
 		},
 		Spec: appsv1.DeploymentSpec{

@@ -1,10 +1,5 @@
 package workload
 
-// namespace is where every nvoi-managed workload lands today. Single
-// namespace keeps the substrate simple; per-app namespaces lift in
-// when we need isolation.
-const namespace = "default"
-
 // appSecretName is the single Opaque Secret in the app namespace that
 // holds resolved values for every entry in cfg.Secrets. Per-service
 // `secrets:` whitelists drive secretKeyRef-based env injection from

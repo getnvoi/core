@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -70,6 +71,7 @@ const (
 	KindClusterRoleBinding Kind = "ClusterRoleBinding" // Promtail SA → ClusterRole binding
 	KindCronJob            Kind = "CronJob"            // batch/v1 — scheduled DB backups
 	KindJob                Kind = "Job"                // batch/v1 — one-shot manual backups + restores
+	KindStorageClass       Kind = "StorageClass"       // storage.k8s.io/v1 — cluster-scoped (postgres ZFS-LocalPV)
 )
 
 // Scope is the (namespace, owner) pair every owned-resource operation
@@ -136,6 +138,8 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applyCronJob(ctx, ns, o)
 	case *batchv1.Job:
 		return c.applyJob(ctx, ns, o)
+	case *storagev1.StorageClass:
+		return c.applyStorageClass(ctx, o)
 	default:
 		return fmt.Errorf("ApplyOwned: unsupported kind %T", obj)
 	}
@@ -239,6 +243,8 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.BatchV1().CronJobs(ns).List(ctx, opts)
 	case KindJob:
 		return c.CS.BatchV1().Jobs(ns).List(ctx, opts)
+	case KindStorageClass:
+		return c.CS.StorageV1().StorageClasses().List(ctx, opts)
 	default:
 		return nil, fmt.Errorf("listOwned: unsupported kind %q", kind)
 	}
@@ -285,6 +291,9 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		// foreground deletion so the pods go too.
 		bg := metav1.DeletePropagationBackground
 		return ignoreNotFound(c.CS.BatchV1().Jobs(ns).Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &bg}))
+	case KindStorageClass:
+		// Cluster-scoped — ignore ns.
+		return ignoreNotFound(c.CS.StorageV1().StorageClasses().Delete(ctx, name, opts))
 	default:
 		return fmt.Errorf("deleteByKind: unsupported kind %q", kind)
 	}

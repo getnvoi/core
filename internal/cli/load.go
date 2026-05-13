@@ -42,6 +42,23 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	if err != nil {
 		return nil, err
 	}
+	// Database credentials reference $VARs the operator hasn't
+	// necessarily duplicated under top-level `secrets:`. Resolve them
+	// here at the boundary and merge into the same map so the deploy
+	// reconciler reads ONE secrets source. Hard-error semantics match
+	// ResolveSecrets — every missing var surfaces in one error.
+	dbSecrets, err := ResolveDatabaseSecrets(cfg, os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	if len(dbSecrets) > 0 {
+		if secrets == nil {
+			secrets = map[string]string{}
+		}
+		for k, v := range dbSecrets {
+			secrets[k] = v
+		}
+	}
 	providerInputs := ResolveProviderInputs(os.Getenv)
 	// cfg-file directory is the base for monitor.dashboards /
 	// monitor.alert_rules globs — operator-written paths in the YAML

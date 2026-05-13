@@ -138,17 +138,27 @@ func (p *Provider) Delete(context.Context, providers.DatabaseRequest) error { re
 // kubectl-style pod-exec on the StatefulSet's pod-0. The CSV output
 // parses into a typed SQLResult — operators get tabular rendering
 // in the CLI without nvoi shelling out to psql.
+//
+// The exec runs INSIDE the postgres pod itself, so we target
+// localhost rather than the Service DNS. Service-name resolution
+// works for clients outside the pod, but pods don't always have the
+// service mesh's DNS hooks for their own Service (and shouldn't need
+// it — connecting to the local instance is canonical for pod-exec).
 func (p *Provider) ExecSQL(ctx context.Context, req providers.DatabaseRequest, stmt string) (*providers.SQLResult, error) {
 	if req.Kube == nil {
 		return nil, fmt.Errorf("postgres.ExecSQL requires kube client")
 	}
+	dsn := fmt.Sprintf(
+		"postgres://%s:%s@127.0.0.1:5432/%s?sslmode=disable",
+		req.Spec.User, req.Spec.Password, req.Spec.Database,
+	)
 	var stdout, stderr bytes.Buffer
 	if err := req.Kube.Exec(ctx, kube.ExecRequest{
 		Namespace: req.Namespace,
 		Pod:       req.PodName,
 		Command: []string{
 			"psql",
-			credentials(req).URL,
+			dsn,
 			"--csv",
 			"-c",
 			stmt,

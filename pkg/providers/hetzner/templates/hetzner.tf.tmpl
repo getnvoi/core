@@ -115,31 +115,33 @@ resource "hcloud_server" {{ .Key | hcl }} {
   user_data    = {{ .UserData | hcl }}
   firewall_ids = [hcloud_firewall.default.id]
 
-  network {
-    network_id = hcloud_network.default.id
-  }
-
   labels = {
     nvoi_app  = local.app
     nvoi_env  = local.env
     nvoi_role = {{ .Role | hcl }}
   }
 
-  depends_on = [hcloud_network_subnet.default]
-
   lifecycle {
     # user_data: ForceNew + the hcloud provider's stored hash isn't always
-    #   stable across reads. Without this, every plan that produces a slightly
-    #   different bytewise user_data would trigger a server replacement —
-    #   destroying the running cluster on a no-op cosmetic change. Cloud-init
-    #   only runs at first boot anyway, so changing user_data has no semantic
-    #   effect on a running server.
-    # network: hcloud provider has a Set-hashing quirk on the inline `network`
-    #   block — state stores computed fields (ip, mac_address) that config
-    #   doesn't have, and terraform reports drift on every plan. The actual
-    #   attachment is stable; ignoring drift keeps applies idempotent.
-    ignore_changes = [user_data, network]
+    # stable across reads. Without this, every plan that produces a slightly
+    # different bytewise user_data would trigger a server replacement —
+    # destroying the running cluster on a no-op cosmetic change. Cloud-init
+    # only runs at first boot anyway, so changing user_data has no semantic
+    # effect on a running server.
+    ignore_changes = [user_data]
   }
+}
+
+# Network attachment as a dedicated resource. The inline `network {}` block
+# inside hcloud_server is incompatible with current hcloud provider releases
+# (state carries both network_id and subnet_id internally; the provider's
+# apply-time validator rejects the combination even on a no-op apply
+# inherited from older state). Separate resource decouples the attachment's
+# lifecycle from the server's and uses subnet_id exclusively — the form
+# the provider recommends since v1.46.
+resource "hcloud_server_network" {{ .Key | hcl }} {
+  server_id = hcloud_server.{{ .Key }}.id
+  subnet_id = hcloud_network_subnet.default.id
 }
 {{ end }}
 {{ if .HA }}

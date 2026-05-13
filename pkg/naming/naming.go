@@ -22,6 +22,15 @@ const CacheDirSegment = "nvoi"
 // `nvoi-{app}-{env}`.
 func Prefix(app, env string) string { return fmt.Sprintf("nvoi-%s-%s", app, env) }
 
+// Namespace is the single Kubernetes namespace every nvoi-managed
+// workload (services, databases, registry/app Secrets, ingresses)
+// lands in. Today: `default` — same convention pkg/workload uses.
+// Per-(app, env) namespacing is a future concern; until then,
+// single namespace keeps the substrate simple AND keeps the
+// databases reconcile path simple (no `kc.applyNamespace` dance
+// before the credentials Secret can land).
+const Namespace = "default"
+
 // Server returns the provider-side server name for the given short name.
 func Server(app, env, name string) string { return Prefix(app, env) + "-" + name }
 
