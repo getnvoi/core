@@ -7,7 +7,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,35 +26,25 @@ const LabelOwner = "nvoi/owner"
 // Adding a new step = one new const. No exclusion lists, no per-step
 // grep filters, no name allowlists.
 const (
-	OwnerServices      = "services"      // Deployment + StatefulSet + Service per cfg.Services entry
-	OwnerRegistry      = "registry"      // dockerconfigjson Secret for imagePullSecrets
-	OwnerAppSecrets    = "app-secrets"   // Opaque Secret holding cfg.Secrets values
-	OwnerIngress       = "ingress"       // per-service Ingress resources (Traefik consumes them)
-	OwnerTunnel        = "tunnel"        // cloudflared Deployment + token Secret (ingress=cloudflare)
-	OwnerAddons        = "addons"        // cluster-level prerequisites (metrics-server, future addons)
-	OwnerObservability = "observability" // Prom + Thanos + Loki + Grafana stack
+	OwnerServices   = "services"    // Deployment + StatefulSet + Service per cfg.Services entry
+	OwnerRegistry   = "registry"    // dockerconfigjson Secret for imagePullSecrets
+	OwnerAppSecrets = "app-secrets" // Opaque Secret holding cfg.Secrets values
+	OwnerIngress    = "ingress"     // per-service Ingress resources (Traefik consumes them)
+	OwnerTunnel     = "tunnel"      // cloudflared Deployment + token Secret
 )
 
-// Kind names a typed resource kind ApplyOwned / SweepOwned / ListOwned
-// support. Closed allowlist — every entry maps to one dispatch case;
-// unknown kinds error explicitly.
+// Kind names a typed resource kind List / Sweep dispatch supports.
+// Closed allowlist — every entry maps to one case; unknown kinds
+// error explicitly. Kinds we apply but never sweep (e.g. Namespace)
+// don't appear here — they're handled only in the ApplyOwned switch.
 type Kind string
 
 const (
-	KindDeployment         Kind = "Deployment"
-	KindStatefulSet        Kind = "StatefulSet"
-	KindService            Kind = "Service"
-	KindSecret             Kind = "Secret"
-	KindConfigMap          Kind = "ConfigMap"
-	KindPVC                Kind = "PersistentVolumeClaim"
-	KindIngress            Kind = "Ingress"
-	KindDaemonSet          Kind = "DaemonSet"          // Promtail pod-log shipper
-	KindNamespace          Kind = "Namespace"          // nvoi-observability + future per-app namespaces
-	KindServiceAccount     Kind = "ServiceAccount"     // Promtail node-discovery identity
-	KindRole               Kind = "Role"               // namespaced: Grafana sidecar configmap-watch
-	KindRoleBinding        Kind = "RoleBinding"        // namespaced: Grafana SA → Role binding
-	KindClusterRole        Kind = "ClusterRole"        // Promtail pod-list permission
-	KindClusterRoleBinding Kind = "ClusterRoleBinding" // Promtail SA → ClusterRole binding
+	KindDeployment  Kind = "Deployment"
+	KindStatefulSet Kind = "StatefulSet"
+	KindService     Kind = "Service"
+	KindSecret      Kind = "Secret"
+	KindIngress     Kind = "Ingress"
 )
 
 // Scope is the (namespace, owner) pair every owned-resource operation
@@ -73,6 +62,10 @@ type Scope struct {
 //
 // Every nvoi-managed write goes through this path — no other surface
 // stamps the owner label.
+//
+// Apply supports a superset of the List/Sweep Kinds: Namespace is
+// applied (the tunnel scope creates nvoi-tunnel) but never swept
+// (empty namespaces are cheap; we leave them as debugging breadcrumbs).
 func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object) error {
 	if scope.Owner == "" {
 		return fmt.Errorf("ApplyOwned: owner required")
@@ -94,30 +87,14 @@ func (c *Client) ApplyOwned(ctx context.Context, scope Scope, obj runtime.Object
 		return c.applyDeployment(ctx, ns, o)
 	case *appsv1.StatefulSet:
 		return c.applyStatefulSet(ctx, ns, o)
-	case *appsv1.DaemonSet:
-		return c.applyDaemonSet(ctx, ns, o)
 	case *corev1.Service:
 		return c.applyService(ctx, ns, o)
 	case *corev1.Secret:
 		return c.applySecret(ctx, ns, o)
-	case *corev1.ConfigMap:
-		return c.applyConfigMap(ctx, ns, o)
-	case *corev1.PersistentVolumeClaim:
-		return c.applyPVC(ctx, ns, o)
 	case *corev1.Namespace:
 		return c.applyNamespace(ctx, o)
-	case *corev1.ServiceAccount:
-		return c.applyServiceAccount(ctx, ns, o)
 	case *networkingv1.Ingress:
 		return c.applyIngress(ctx, ns, o)
-	case *rbacv1.Role:
-		return c.applyRole(ctx, ns, o)
-	case *rbacv1.RoleBinding:
-		return c.applyRoleBinding(ctx, ns, o)
-	case *rbacv1.ClusterRole:
-		return c.applyClusterRole(ctx, o)
-	case *rbacv1.ClusterRoleBinding:
-		return c.applyClusterRoleBinding(ctx, o)
 	default:
 		return fmt.Errorf("ApplyOwned: unsupported kind %T", obj)
 	}
@@ -193,30 +170,12 @@ func (c *Client) listOwned(ctx context.Context, ns, owner string, kind Kind) (ru
 		return c.CS.AppsV1().Deployments(ns).List(ctx, opts)
 	case KindStatefulSet:
 		return c.CS.AppsV1().StatefulSets(ns).List(ctx, opts)
-	case KindDaemonSet:
-		return c.CS.AppsV1().DaemonSets(ns).List(ctx, opts)
 	case KindService:
 		return c.CS.CoreV1().Services(ns).List(ctx, opts)
 	case KindSecret:
 		return c.CS.CoreV1().Secrets(ns).List(ctx, opts)
-	case KindConfigMap:
-		return c.CS.CoreV1().ConfigMaps(ns).List(ctx, opts)
-	case KindPVC:
-		return c.CS.CoreV1().PersistentVolumeClaims(ns).List(ctx, opts)
 	case KindIngress:
 		return c.CS.NetworkingV1().Ingresses(ns).List(ctx, opts)
-	case KindNamespace:
-		return c.CS.CoreV1().Namespaces().List(ctx, opts)
-	case KindServiceAccount:
-		return c.CS.CoreV1().ServiceAccounts(ns).List(ctx, opts)
-	case KindRole:
-		return c.CS.RbacV1().Roles(ns).List(ctx, opts)
-	case KindRoleBinding:
-		return c.CS.RbacV1().RoleBindings(ns).List(ctx, opts)
-	case KindClusterRole:
-		return c.CS.RbacV1().ClusterRoles().List(ctx, opts)
-	case KindClusterRoleBinding:
-		return c.CS.RbacV1().ClusterRoleBindings().List(ctx, opts)
 	default:
 		return nil, fmt.Errorf("listOwned: unsupported kind %q", kind)
 	}
@@ -232,30 +191,12 @@ func (c *Client) deleteByKind(ctx context.Context, ns string, kind Kind, name st
 		return ignoreNotFound(c.CS.AppsV1().Deployments(ns).Delete(ctx, name, opts))
 	case KindStatefulSet:
 		return ignoreNotFound(c.CS.AppsV1().StatefulSets(ns).Delete(ctx, name, opts))
-	case KindDaemonSet:
-		return ignoreNotFound(c.CS.AppsV1().DaemonSets(ns).Delete(ctx, name, opts))
 	case KindService:
 		return ignoreNotFound(c.CS.CoreV1().Services(ns).Delete(ctx, name, opts))
 	case KindSecret:
 		return ignoreNotFound(c.CS.CoreV1().Secrets(ns).Delete(ctx, name, opts))
-	case KindConfigMap:
-		return ignoreNotFound(c.CS.CoreV1().ConfigMaps(ns).Delete(ctx, name, opts))
-	case KindPVC:
-		return ignoreNotFound(c.CS.CoreV1().PersistentVolumeClaims(ns).Delete(ctx, name, opts))
 	case KindIngress:
 		return ignoreNotFound(c.CS.NetworkingV1().Ingresses(ns).Delete(ctx, name, opts))
-	case KindNamespace:
-		return ignoreNotFound(c.CS.CoreV1().Namespaces().Delete(ctx, name, opts))
-	case KindServiceAccount:
-		return ignoreNotFound(c.CS.CoreV1().ServiceAccounts(ns).Delete(ctx, name, opts))
-	case KindRole:
-		return ignoreNotFound(c.CS.RbacV1().Roles(ns).Delete(ctx, name, opts))
-	case KindRoleBinding:
-		return ignoreNotFound(c.CS.RbacV1().RoleBindings(ns).Delete(ctx, name, opts))
-	case KindClusterRole:
-		return ignoreNotFound(c.CS.RbacV1().ClusterRoles().Delete(ctx, name, opts))
-	case KindClusterRoleBinding:
-		return ignoreNotFound(c.CS.RbacV1().ClusterRoleBindings().Delete(ctx, name, opts))
 	default:
 		return fmt.Errorf("deleteByKind: unsupported kind %q", kind)
 	}

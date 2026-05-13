@@ -33,14 +33,13 @@ import (
 //     endpoints read, node detach.
 //   - KindBuild: docker login + buildx build/push.
 //   - KindCluster: k3s install + node prep, kube tunnel + apply +
-//     sweep, caddy admin.
+//     sweep, cloudflared tunnel deployment.
 type Kind string
 
 const (
 	KindInfra   Kind = "infra"
 	KindBuild   Kind = "build"
 	KindCluster Kind = "cluster"
-	KindMonitor Kind = "monitor" // observability phase: buckets, stack, dashboards, alerts, provisioning
 )
 
 // level is the event's severity / marker — closed enum shared by

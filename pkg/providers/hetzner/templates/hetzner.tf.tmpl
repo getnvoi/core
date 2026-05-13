@@ -25,11 +25,10 @@ resource "hcloud_network_subnet" "default" {
 }
 
 # ── Firewall ───────────────────────────────────────────────────────────
-# Baseline rules: SSH public, k3s control-plane + kubelet + flannel + registry private.
-#
-# In tunnel mode (providers.ingress: cloudflare), PublicHTTPIngress and
-# LBHTTPIngress are both false regardless of domains: — the cluster has
-# no inbound HTTP path; cloudflared egress handles ingress externally.
+# All-tunnel mode: SSH (22) is the only public ingress. HTTP/S ingress
+# enters via Cloudflare's edge, terminates at CF, rides an outbound
+# tunnel into the cluster. Cluster control-plane + kubelet + flannel +
+# registry are private-only.
 
 resource "hcloud_firewall" "default" {
   name = "${local.prefix}-fw"
@@ -68,44 +67,15 @@ resource "hcloud_firewall" "default" {
     port       = "5000"
     source_ips = [{{ .NetworkCIDR | hcl }}]
   }
-{{ if .PublicHTTPIngress }}
-  # Single-master + domains: the master IS the public face for HTTP/S.
-  # Traefik (k3s default ingress controller) holds hostPort 80/443 on
-  # the master via klipper-lb; firewall opens those ports to the world.
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "80"
-    source_ips = ["0.0.0.0/0", "::/0"]
-  }
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "443"
-    source_ips = ["0.0.0.0/0", "::/0"]
-  }
-{{ end }}
-{{ if .LBHTTPIngress }}
-  # HA + domains: public traffic enters the cloud LB (which has a public
-  # IPv4) and is dispatched across masters via private network. Masters
-  # only need 80/443 reachable from the private subnet — no public
-  # exposure beyond SSH.
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "80"
-    source_ips = [{{ .NetworkCIDR | hcl }}]
-  }
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "443"
-    source_ips = [{{ .NetworkCIDR | hcl }}]
-  }
-{{ end }}
 }
 
 # ── Servers ────────────────────────────────────────────────────────────
+# Network attachment uses the dedicated `hcloud_server_network` resource
+# (not the inline `network { }` block on `hcloud_server`). The inline
+# block is deprecated by hetznercloud/hcloud >=1.50 — it leaks both
+# `network_id` and `subnet_id` into state and trips a `ConflictsWith`
+# validator on every subsequent refresh, breaking destroy. The separate
+# resource is the upstream-recommended shape.
 {{ range .Servers }}
 resource "hcloud_server" {{ .Key | hcl }} {
   name         = {{ .Hostname | hcl }}
@@ -115,49 +85,44 @@ resource "hcloud_server" {{ .Key | hcl }} {
   user_data    = {{ .UserData | hcl }}
   firewall_ids = [hcloud_firewall.default.id]
 
-  network {
-    network_id = hcloud_network.default.id
-  }
-
   labels = {
     nvoi_app  = local.app
     nvoi_env  = local.env
     nvoi_role = {{ .Role | hcl }}
   }
 
-  depends_on = [hcloud_network_subnet.default]
-
   lifecycle {
     # user_data: ForceNew + the hcloud provider's stored hash isn't always
-    #   stable across reads. Without this, every plan that produces a slightly
-    #   different bytewise user_data would trigger a server replacement —
-    #   destroying the running cluster on a no-op cosmetic change. Cloud-init
-    #   only runs at first boot anyway, so changing user_data has no semantic
-    #   effect on a running server.
-    # network: hcloud provider has a Set-hashing quirk on the inline `network`
-    #   block — state stores computed fields (ip, mac_address) that config
-    #   doesn't have, and terraform reports drift on every plan. The actual
-    #   attachment is stable; ignoring drift keeps applies idempotent.
-    ignore_changes = [user_data, network]
+    # stable across reads. Without this, every plan that produces a slightly
+    # different bytewise user_data would trigger a server replacement —
+    # destroying the running cluster on a no-op cosmetic change. Cloud-init
+    # only runs at first boot anyway, so changing user_data has no semantic
+    # effect on a running server.
+    ignore_changes = [user_data]
   }
+}
+
+resource "hcloud_server_network" {{ .Key | hcl }} {
+  server_id = hcloud_server.{{ .Key }}.id
+  subnet_id = hcloud_network_subnet.default.id
 }
 {{ end }}
 {{ if .HA }}
-# ── HA load balancer ───────────────────────────────────────────────────
-# Auto-emitted because Servers has ≥2 masters.
+# ── Apiserver HA load balancer ─────────────────────────────────────────
+# Private-only hcloud LB on 6443 fronting the master pool. Only emitted
+# when `ha: true` in YAML; single-master clusters skip this entirely.
 #
-# Two faces:
-#   - 6443 (always): k3s API for cluster-internal joins. Workers and
-#     secondary masters point at the LB private IP. Stays reachable
-#     even after the originally-primary master dies.
-#   - 80 + 443 (only when LBHTTPIngress, i.e. domains set): public
-#     HTTPS ingress, TCP pass-through. Traefik on each master answers
-#     via klipper-lb hostPort. cert-manager-issued certs come from a
-#     k8s Secret each Traefik replica reads — no replication issue.
+# Why an LB on Hetzner (not kube-vip ARP): Hetzner Cloud private
+# networks are software-defined and L3-routed — the cloud router only
+# forwards packets to IPs registered to specific server NICs via the
+# Hetzner API. A self-assigned VIP via ARP is silently black-holed by
+# the routing fabric. The LB is a first-class Hetzner resource that
+# the router knows how to route, so traffic from workers / secondary
+# masters reliably reaches whichever healthy master the LB picks.
 #
-# Without domains: LB has no public IPv4 (disable_public_interface =
-# true). The cluster still has zero public ingress beyond SSH on
-# masters.
+# Public interface is DISABLED — the LB is reachable ONLY from the
+# private subnet. Public-internet HTTP/S ingress still flows exclusively
+# through the cloudflared egress tunnel.
 
 resource "hcloud_load_balancer" "cp" {
   name               = "${local.prefix}-cp"
@@ -172,9 +137,7 @@ resource "hcloud_load_balancer" "cp" {
 resource "hcloud_load_balancer_network" "cp" {
   load_balancer_id        = hcloud_load_balancer.cp.id
   subnet_id               = hcloud_network_subnet.default.id
-{{ if not .LBHTTPIngress }}
   enable_public_interface = false
-{{- end }}
 }
 
 resource "hcloud_load_balancer_target" "cp" {
@@ -204,37 +167,6 @@ resource "hcloud_load_balancer_service" "cp" {
     retries  = 2
   }
 }
-{{ if .LBHTTPIngress }}
-resource "hcloud_load_balancer_service" "http" {
-  load_balancer_id = hcloud_load_balancer.cp.id
-  protocol         = "tcp"
-  listen_port      = 80
-  destination_port = 80
-
-  health_check {
-    protocol = "tcp"
-    port     = 80
-    interval = 5
-    timeout  = 4
-    retries  = 2
-  }
-}
-
-resource "hcloud_load_balancer_service" "https" {
-  load_balancer_id = hcloud_load_balancer.cp.id
-  protocol         = "tcp"
-  listen_port      = 443
-  destination_port = 443
-
-  health_check {
-    protocol = "tcp"
-    port     = 443
-    interval = 5
-    timeout  = 4
-    retries  = 2
-  }
-}
-{{ end }}
 {{ end }}
 
 # ── Outputs ────────────────────────────────────────────────────────────
@@ -246,7 +178,7 @@ output "servers" {
     {{ .Key | hcl }} = {
       role    = {{ .Role | hcl }}
       ipv4    = hcloud_server.{{ .Key }}.ipv4_address
-      private = one([for n in hcloud_server.{{ .Key }}.network : n.ip])
+      private = hcloud_server_network.{{ .Key }}.ip
     }
 {{- end }}
   }
@@ -254,8 +186,16 @@ output "servers" {
 
 output "api_endpoint" {
   value = {
-    public  = {{ if .LBHTTPIngress }}hcloud_load_balancer.cp.ipv4{{ else }}hcloud_server.{{ .PrimaryMaster }}.ipv4_address{{ end }}
-    private = {{ if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}one([for n in hcloud_server.{{ .PrimaryMaster }}.network : n.ip]){{ end }}
+    # Public is the primary master's public IPv4 — operators reach the
+    # apiserver via SSH tunnel through this address. Worker / kubelet
+    # traffic never goes through it.
+    public  = hcloud_server.{{ .PrimaryMaster }}.ipv4_address
+    # Private API endpoint:
+    #   .HA   → hcloud LB private IP. Workers + secondary masters dial
+    #           this; the LB health-checks each master and steers
+    #           around dead ones in ~10s.
+    #   else  → primary master's private IP (single master path).
+    private = {{ if .HA }}hcloud_load_balancer_network.cp.ip{{ else }}hcloud_server_network.{{ .PrimaryMaster }}.ip{{ end }}
   }
 }
 

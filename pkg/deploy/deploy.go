@@ -34,10 +34,10 @@ import (
 //   - clusterLg — ssh open + k3s install + workloads + ingress
 func Run(ctx context.Context, rt *runtime.Runtime) error {
 	// Cluster kind is the default scope of the Session — install /
-	// kube / caddy work all live there. Infra-phase steps (tf-init,
-	// tf-plan, endpoints, predrains) re-scope to KindInfra via local
-	// Sub() calls. Build phase gets its own KindBuild scope handed
-	// straight to build.All.
+	// kube / cloudflared work all live there. Infra-phase steps
+	// (tf-init, tf-plan, endpoints, predrains) re-scope to KindInfra
+	// via local Sub() calls. Build phase gets its own KindBuild scope
+	// handed straight to build.All.
 	return RunWithSession(ctx, rt, log.KindCluster, func(ctx context.Context, s *Session) error {
 		infraLg := rt.Log.Sub(log.KindInfra)
 		buildLg := rt.Log.Sub(log.KindBuild)
@@ -95,6 +95,14 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 			if err := s.Run.ApplyPlan(ctx, planPath); err != nil {
 				return err
 			}
+			// Invalidate any cached endpoints — predrain (called
+			// inside detachNode above) goes through s.Endpoints()
+			// which memoizes onto the Session. Without this clear,
+			// the post-apply read below returns the stale pre-apply
+			// endpoint set, and openShells tries to SSH to servers
+			// tofu just destroyed. Cache valid pre-apply; invalid
+			// the moment ApplyPlan succeeds.
+			s.eps = nil
 		} else {
 			infraLg.Info("no tofu changes")
 		}
@@ -121,26 +129,13 @@ func Run(ctx context.Context, rt *runtime.Runtime) error {
 			return err
 		}
 
-		// ── workloads phase: ALWAYS runs when cluster phase has any
-		// reason to engage (services, registry, secrets, domains, OR
-		// monitor). The phase installs cluster-level addons
-		// (metrics-server, kube-state-metrics) + node labels
-		// regardless of whether there are app workloads — observability
-		// needs those addons even on a service-less cluster.
-		//
-		// Short-circuit ONLY when there's literally nothing to do.
-		needCluster := s.workloadsHaveContent() || s.Rt.Cfg.Monitor != nil
-		if !needCluster {
+		// ── workloads phase: runs when YAML has anything that drives
+		// the in-cluster pipeline. Short-circuit when there's
+		// literally nothing to do (provision-only deploys).
+		if !s.workloadsHaveContent() {
 			return nil
 		}
-		if err := s.deployWorkloads(ctx); err != nil {
-			return err
-		}
-
-		// ── observability: monitor: stack (gated). Runs unconditionally
-		// when monitor: was previously set, so flipping it to nil sweeps
-		// the prior stack on the next deploy.
-		return s.deployObservability(ctx)
+		return s.deployWorkloads(ctx)
 	})
 }
 

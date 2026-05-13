@@ -8,235 +8,109 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/getnvoi/core/pkg/config"
-	"github.com/getnvoi/core/pkg/internal/compile"
 	"github.com/getnvoi/core/pkg/internal/utils"
+	"github.com/getnvoi/core/pkg/naming"
 	"github.com/getnvoi/core/pkg/runtime"
 )
 
-//go:embed templates/dns.tf.tmpl templates/tunnel.tf.tmpl
+//go:embed templates/tunnel.tf.tmpl
 var dnsTemplateFS embed.FS
 
-var (
-	dnsTpl = template.Must(template.New("dns.tf.tmpl").
-		Funcs(template.FuncMap{"hcl": strconv.Quote}).
-		ParseFS(dnsTemplateFS, "templates/dns.tf.tmpl"))
+var tunnelTpl = template.Must(template.New("tunnel.tf.tmpl").
+	Funcs(template.FuncMap{"hcl": strconv.Quote}).
+	ParseFS(dnsTemplateFS, "templates/tunnel.tf.tmpl"))
 
-	tunnelTpl = template.Must(template.New("tunnel.tf.tmpl").
-			Funcs(template.FuncMap{"hcl": strconv.Quote}).
-			ParseFS(dnsTemplateFS, "templates/tunnel.tf.tmpl"))
+// TerraformProviderSource is the registry coordinates compile aggregates
+// into backend.tf's required_providers block. Direct call surface — no
+// interface, since cloudflare is the sole DNS+tunnel emitter.
+const (
+	TerraformProviderAlias   = "cloudflare"
+	TerraformProviderSource  = "cloudflare/cloudflare"
+	TerraformProviderVersion = "~> 4"
 )
 
-// DNSEmitter renders Cloudflare DNS records as terraform HCL. One
-// `cloudflare_record` per (service, domain) pair. A records pointing
-// at the master's public IP (terraform-interpolated from
-// hcloud_server.<primary>.ipv4_address).
-//
-// Stateless: reads cfg.Domains + cfg.Servers + the resolved zone ID
-// (from CF_ZONE_ID env var). No I/O at emit time beyond env reads —
-// the produced HCL is a pure transform of the input.
-type DNSEmitter struct{}
-
-// Providers declares every terraform provider this emitter's HCL
-// references. Always includes cloudflare (both Traefik-mode A records
-// and tunnel-mode CNAMEs use it). Adds random when tunnel mode is
-// active — the cloudflare_zero_trust_tunnel_cloudflared resource's
-// tunnel_secret is sourced from a random_id resource.
-//
-// Returning random unconditionally would over-declare in Traefik
-// mode; this method has no rt parameter today, so we always include
-// it. The cost is one extra ~1MB provider download in Traefik mode,
-// which beats a runtime check and an interface change.
-func (DNSEmitter) Providers() []compile.ProviderRequirement {
-	return []compile.ProviderRequirement{
-		{
-			Alias:   "cloudflare",
-			Source:  "cloudflare/cloudflare",
-			Version: "~> 4",
-		},
-		{
-			// hashicorp/random backs the tunnel_secret resource. The
-			// dependency is conditional on tunnel mode but declaring
-			// it unconditionally keeps the Providers() signature
-			// simple. tofu only fetches the provider; resources
-			// referencing it materialize only in tunnel mode.
-			Alias:   "random",
-			Source:  "hashicorp/random",
-			Version: "~> 3",
-		},
-	}
-}
-
-// CertManagerSolver returns the cert-manager DNS-01 solver YAML for
-// Cloudflare. cert-manager reads the CF API token from a k8s Secret
-// nvoi materializes from rt.Providers.Cloudflare.APIToken (resolved at
-// the cmd/cli boundary from CLOUDFLARE_API_TOKEN / CF_API_KEY).
-//
-// The solver YAML is the inner block of a ClusterIssuer's
-// `spec.acme.solvers` list — caller wraps it.
-func (DNSEmitter) CertManagerSolver(rt *runtime.Runtime) (string, []compile.SolverSecret, error) {
-	if rt.Providers.Cloudflare == nil || rt.Providers.Cloudflare.APIToken == "" {
-		return "", nil, fmt.Errorf("cloudflare cert-manager solver: APIToken required")
-	}
-	const solver = `      - dns01:
-          cloudflare:
-            apiTokenSecretRef:
-              name: cloudflare-api-token
-              key: api-token`
-	secrets := []compile.SolverSecret{{
-		Name:  "cloudflare-api-token",
-		Key:   "api-token",
-		Value: rt.Providers.Cloudflare.APIToken,
-	}}
-	return solver, secrets, nil
-}
-
-// recordData drives the per-record block in dns.tf.tmpl. Always emits
-// an A record with Target as the raw HCL expression (typically
-// `hcloud_server.<primary>.ipv4_address`, NOT a quoted string).
+// recordData drives the per-record CNAME block in tunnel.tf.tmpl.
 type recordData struct {
-	ResourceName string // sanitized terraform resource name, unique
+	ResourceName string // sanitized terraform resource name, unique per (service, host)
 	Name         string // record name relative to zone (e.g. "www", "@")
-	Target       string // raw HCL expression for A-record content
 }
 
-type dnsTemplateData struct {
-	ZoneID  string
-	Records []recordData
-}
-
-// EmitDNS renders the cloudflare-dns.tf bytes for cfg.Domains. Two
-// shapes:
-//
-//   - Traefik mode (default / ingress: traefik): A record per
-//     (service, domain) → master public IP (single master) or LB IP
-//     (HA). proxied=false; Traefik holds the cert in-cluster.
-//
-//   - Tunnel mode (ingress: cloudflare): tunnel resource + ingress
-//     config + CNAME records pointing at <tunnel-uuid>.cfargotunnel.com.
-//     proxied=true; CF edge terminates TLS. cert-manager skipped.
-//
-// Both shapes share zone resolution (CF_ZONE / CF_ZONE_ID), the
-// provider-config block, and the cloudflare-dns.tf bundle entry —
-// only the resources differ.
-func (DNSEmitter) EmitDNS(rt *runtime.Runtime) ([]byte, error) {
-	cfg := rt.Cfg
-	if rt.Providers.Cloudflare == nil {
-		return nil, fmt.Errorf("cloudflare dns: provider inputs required")
-	}
-	zoneID := rt.Providers.Cloudflare.ZoneID
-	if zoneID == "" {
-		return nil, fmt.Errorf("cloudflare dns: CF_ZONE_ID required")
-	}
-	zone := rt.Providers.Cloudflare.Zone
-	if zone == "" {
-		return nil, fmt.Errorf("cloudflare dns: CF_ZONE required (e.g. nvoi.to)")
-	}
-
-	if cfg.Providers.IngressMode() == config.IngressCloudflare {
-		return emitTunnelDNS(rt, zoneID, zone)
-	}
-
-	primary := cfg.PrimaryMaster()
-	if primary == "" {
-		return nil, fmt.Errorf("cloudflare dns: no master in servers (validator should have caught)")
-	}
-
-	// HA + domains → DNS A points at the cloud LB's public IP (LB
-	// distributes 80/443 across all masters → real HA HTTP).
-	// Otherwise → primary master's public IP (single-master path).
-	// Provider-specific reference (hcloud_load_balancer.cp.ipv4 /
-	// hcloud_server.<primary>.ipv4_address) is the same coupling we
-	// already accepted between the cloudflare DNS emitter and the
-	// hetzner infra emitter — they share the tofu module and reference
-	// each other's resources.
-	masters := 0
-	for _, s := range cfg.Servers {
-		if s.Role == "master" {
-			masters++
-		}
-	}
-	var aTarget string
-	if masters >= 2 && len(cfg.Domains) > 0 {
-		aTarget = "hcloud_load_balancer.cp.ipv4"
-	} else {
-		aTarget = fmt.Sprintf("hcloud_server.%s.ipv4_address", primary)
-	}
-
-	// Per-deploy uniqueness: combine service + sanitized hostname so
-	// re-running with the same YAML produces a stable resource address.
-	records := make([]recordData, 0)
-	for _, svcName := range utils.SortedKeys(cfg.Domains) {
-		for _, host := range cfg.Domains[svcName] {
-			records = append(records, recordData{
-				ResourceName: sanitizeResourceName(svcName + "_" + host),
-				Name:         recordNameFor(host, zone),
-				Target:       aTarget,
-			})
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := dnsTpl.Execute(&buf, dnsTemplateData{
-		ZoneID:  zoneID,
-		Records: records,
-	}); err != nil {
-		return nil, fmt.Errorf("render cloudflare-dns.tf: %w", err)
-	}
-	return buf.Bytes(), nil
-}
-
-// tunnelRouteData is one cloudflared ingress rule. cloudflared
-// matches Host headers against .Hostname and forwards to .Service.
+// tunnelRouteData is one cloudflared ingress rule. cloudflared matches
+// Host headers against .Hostname and forwards to .Service, preserving
+// the original Host header by default. .Service is uniformly
+// naming.TraefikInClusterURL — Traefik then routes by Host header to
+// the per-workload Service via the matching Ingress, giving per-request
+// L7 load balancing across pod EndpointSlices. We deliberately do NOT
+// upstream cloudflared directly at the workload's ClusterIP: that
+// would be L4 kube-proxy connection-balancing, and cloudflared's
+// long-lived HTTP/2 connections would stick to a single pod.
 type tunnelRouteData struct {
 	Hostname string
 	Service  string
 }
 
-// tunnelTemplateData drives tunnel.tf.tmpl. Records reuse recordData
-// from the Traefik-mode path — same (ResourceName, Name) computation;
-// the template uses a fixed `${...}.cname` reference rather than the
-// per-record Target field, so Target stays unset in tunnel mode.
 type tunnelTemplateData struct {
-	AccountID  string
-	ZoneID     string
-	TunnelName string
-	Routes     []tunnelRouteData
-	Records    []recordData
+	AccountID    string
+	ZoneID       string
+	TunnelName   string
+	TunnelSecret string // operator-supplied (CF_TUNNEL_SECRET); baked as a literal
+	Routes       []tunnelRouteData
+	Records      []recordData
 }
 
-// emitTunnelDNS renders tunnel.tf.tmpl: the cloudflared tunnel
-// resource, its ingress configuration, the per-domain CNAMEs, and the
-// `tunnel` output (id / cname / token). One route per (service,
-// domain) pair, pointing at the workload's ClusterIP Service DNS in
-// the default namespace.
+// EmitTunnelDNS renders the cloudflared tunnel resource, its ingress
+// configuration, the per-domain CNAMEs, and the `tunnel` output
+// (id / cname / token). One route per (service, domain) pair, pointing
+// at the in-cluster Traefik Service so per-request L7 routing applies.
+//
+// All-tunnel mode is the only mode: this function fires whenever
+// cfg.Domains is non-empty. compile.Compile calls it directly — no
+// interface, no registry indirection.
 //
 // The namespace and port references duplicate constants from
 // pkg/workload (default namespace, service.Port). The duplication
 // here is intentional — pkg/providers/cloudflare cannot import
 // pkg/workload without creating a cycle (pkg/workload would import
 // pkg/internal/compile which imports pkg/providers/*).
-func emitTunnelDNS(rt *runtime.Runtime, zoneID, zone string) ([]byte, error) {
+func EmitTunnelDNS(rt *runtime.Runtime) ([]byte, error) {
 	cfg := rt.Cfg
+	if rt.Providers.Cloudflare == nil {
+		return nil, fmt.Errorf("cloudflare tunnel: provider inputs required")
+	}
+	zoneID := rt.Providers.Cloudflare.ZoneID
+	if zoneID == "" {
+		return nil, fmt.Errorf("cloudflare tunnel: CF_ZONE_ID required")
+	}
+	zone := rt.Providers.Cloudflare.Zone
+	if zone == "" {
+		return nil, fmt.Errorf("cloudflare tunnel: CF_ZONE required (e.g. nvoi.to)")
+	}
 	accountID := rt.Providers.Cloudflare.AccountID
 	if accountID == "" {
 		return nil, fmt.Errorf("cloudflare tunnel: account_id required (CF_ACCOUNT_ID)")
 	}
+	tunnelSecret := rt.Providers.Cloudflare.TunnelSecret
+	if tunnelSecret == "" {
+		// Boundary validation should have caught this; defensive.
+		return nil, fmt.Errorf("cloudflare tunnel: tunnel_secret required (CF_TUNNEL_SECRET)")
+	}
 
 	tunnelName := fmt.Sprintf("nvoi-%s-%s", cfg.App, cfg.Env)
 
+	// Every hostname routes to Traefik via the same upstream URL; the
+	// Host header (preserved by cloudflared by default) carries the
+	// hostname through and Traefik's Ingress routing picks the backend.
 	routes := make([]tunnelRouteData, 0)
 	records := make([]recordData, 0)
 	for _, svcName := range utils.SortedKeys(cfg.Domains) {
-		svc, ok := cfg.Services[svcName]
-		if !ok {
+		if _, ok := cfg.Services[svcName]; !ok {
 			// Validator guarantees this — defensive only.
 			return nil, fmt.Errorf("cloudflare tunnel: domain key %q is not a declared service", svcName)
 		}
 		for _, host := range cfg.Domains[svcName] {
 			routes = append(routes, tunnelRouteData{
 				Hostname: host,
-				Service:  fmt.Sprintf("http://%s.default.svc.cluster.local:%d", svcName, svc.Port),
+				Service:  naming.TraefikInClusterURL,
 			})
 			records = append(records, recordData{
 				ResourceName: sanitizeResourceName(svcName + "_" + host),
@@ -247,11 +121,12 @@ func emitTunnelDNS(rt *runtime.Runtime, zoneID, zone string) ([]byte, error) {
 
 	var buf bytes.Buffer
 	if err := tunnelTpl.Execute(&buf, tunnelTemplateData{
-		AccountID:  accountID,
-		ZoneID:     zoneID,
-		TunnelName: tunnelName,
-		Routes:     routes,
-		Records:    records,
+		AccountID:    accountID,
+		ZoneID:       zoneID,
+		TunnelName:   tunnelName,
+		TunnelSecret: tunnelSecret,
+		Routes:       routes,
+		Records:      records,
 	}); err != nil {
 		return nil, fmt.Errorf("render tunnel.tf: %w", err)
 	}

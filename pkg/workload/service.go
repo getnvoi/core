@@ -18,8 +18,8 @@ import (
 //
 // Selector matches the pod template via LabelOwner+labelService
 // (stable across deploys). Port name "http" matches the container
-// port; downstream consumers (Caddy / ingress / sibling services)
-// can target it by name.
+// port; downstream consumers (Traefik ingress / cloudflared / sibling
+// services) can target it by name.
 func buildService(_ *runtime.Runtime, name string, svc config.ServiceSpec) *corev1.Service {
 	labels := map[string]string{
 		kube.LabelOwner: kube.OwnerServices,

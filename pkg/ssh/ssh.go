@@ -148,7 +148,7 @@ func (c *Client) RunStream(ctx context.Context, cmd string, stdout, stderr io.Wr
 // DialTCP opens a TCP connection to remoteAddr through the SSH
 // channel — used by internal/kube to forward apiserver traffic.
 // remoteAddr is host:port relative to the SSH'd box (e.g. the
-// master's private IP:6443, or 127.0.0.1:2019 for Caddy admin).
+// master's private IP:6443 for the k3s apiserver).
 func (c *Client) DialTCP(remoteAddr string) (net.Conn, error) {
 	conn, err := c.conn.Dial("tcp", remoteAddr)
 	if err != nil {

@@ -93,12 +93,9 @@ func (c *Config) Validate() error {
 	if masters < 1 {
 		return fmt.Errorf("servers: at least one master required (got %d)", masters)
 	}
-	if masters > 1 && primaries != 1 {
-		return fmt.Errorf("servers: with %d masters, exactly one must have primary: true (got %d)", masters, primaries)
+	if err := validateHA(c, masters, primaries); err != nil {
+		return err
 	}
-	// Single-master case: primary field is implicit. Setting it
-	// explicitly is allowed (forward-compat for adding masters later)
-	// but redundant.
 
 	if err := validateSecrets(c); err != nil {
 		return err
@@ -112,103 +109,61 @@ func (c *Config) Validate() error {
 	if err := validateDomains(c); err != nil {
 		return err
 	}
-	if err := validateMonitor(c); err != nil {
-		return err
-	}
 	return nil
 }
 
-// validateMonitor enforces the monitor: block invariants. Pure — no
-// env, no disk. Provider registration checks rely on the same
-// blank-import discipline as validateDomains (every notify provider
-// linked into the binary registers itself in init()).
+// validateHA enforces the master-count rules implied by the top-level
+// `ha:` flag.
 //
-// Rules:
-//   - monitor: requires providers.storage (Thanos blocks + Loki
-//     chunks both need object storage; no PVC fallback in this design).
-//   - monitor.domain requires providers.dns (the Ingress reuses
-//     cert-manager + the existing DNS provider for issuance, same
-//     rule as the top-level `domains:`).
-//   - monitor.domain requires monitor.admin_password (public exposure
-//     must have real auth — tunnel-only mode uses anonymous viewer).
-//   - monitor.alerts.email.provider must be a registered EmailProvider.
-//   - monitor.alerts.sms.provider must be a registered SMSProvider.
-func validateMonitor(c *Config) error {
-	if c.Monitor == nil {
+//   ha unset / false:
+//     exactly 1 master. Multiple masters without ha: true is rejected
+//     — it would suggest the operator wants HA but hasn't asked for
+//     the LB primitive, leaving the cluster with no apiserver failover.
+//
+//   ha: true:
+//     odd master count ≥3. Etcd quorum needs majority; odd counts use
+//     every node optimally (4 has the same failure tolerance as 3 but
+//     wastes a node, hence rejected). Exactly one master must carry
+//     `primary: true` for cold-start `--cluster-init`.
+//
+// The LB primitive (private hcloud LB on 6443) is emitted by the
+// infra emitter under the same `cfg.HA` gate. Single-master path
+// skips the LB entirely.
+func validateHA(c *Config, masters, primaries int) error {
+	if !c.HA {
+		if masters != 1 {
+			return fmt.Errorf("servers: %d masters declared but `ha:` is unset — set `ha: true` and use an odd master count ≥3, or scale down to exactly 1 master", masters)
+		}
+		// Single-master case: primary field is implicit. Setting it
+		// explicitly is allowed (forward-compat for flipping ha: true
+		// later) but redundant.
 		return nil
 	}
-	if c.Providers.Storage == "" {
-		return fmt.Errorf("monitor: requires providers.storage (Thanos + Loki are bucket-backed)")
+	// ha: true
+	if masters < 3 {
+		return fmt.Errorf("ha: true requires an odd master count ≥3 (got %d) — etcd quorum + LB failover both need at least 3 masters", masters)
 	}
-	if c.Monitor.Domain != "" {
-		if c.Providers.DNS == "" {
-			return fmt.Errorf("monitor.domain: requires providers.dns")
-		}
-		if !isValidHostname(c.Monitor.Domain) {
-			return fmt.Errorf("monitor.domain: %q is not a valid DNS hostname", c.Monitor.Domain)
-		}
-		if c.Monitor.AdminPassword == "" {
-			return fmt.Errorf("monitor.admin_password: required when monitor.domain is set (public Grafana must have real auth)")
-		}
+	if masters%2 == 0 {
+		return fmt.Errorf("ha: true: master count must be odd (got %d) — even counts have the same failure tolerance as the next-lower odd count and waste a node", masters)
 	}
-	if c.Monitor.Alerts != nil {
-		if e := c.Monitor.Alerts.Email; e != nil {
-			if e.Provider == "" {
-				return fmt.Errorf("monitor.alerts.email.provider: required")
-			}
-			if !providers.IsRegisteredEmail(e.Provider) {
-				return fmt.Errorf("monitor.alerts.email.provider: unknown provider %q", e.Provider)
-			}
-		}
-		if s := c.Monitor.Alerts.SMS; s != nil {
-			if s.Provider == "" {
-				return fmt.Errorf("monitor.alerts.sms.provider: required")
-			}
-			if !providers.IsRegisteredSMS(s.Provider) {
-				return fmt.Errorf("monitor.alerts.sms.provider: unknown provider %q", s.Provider)
-			}
-		}
+	if primaries != 1 {
+		return fmt.Errorf("ha: true with %d masters: exactly one must have primary: true (got %d) — the primary runs --cluster-init on cold start", masters, primaries)
 	}
 	return nil
 }
 
 // validateDomains enforces:
-//   - non-empty Domains requires providers.dns
 //   - every key in Domains must be a declared service
 //   - every hostname is DNS-1123-shaped (lowercase letters / digits /
 //     dashes / dots; labels ≤63 chars; total ≤253 chars)
 //
-// Provider name registration happens inside the compile package
-// (RegisterDNS via blank-imports in cmd/cli/main.go). We don't
-// validate registration here — the validator stays env-free to keep
-// tests pure; unknown providers fail at compile time with a clear
-// "unknown infra provider %q" / "unknown dns provider %q".
+// CF DNS+tunnel is the only path: presence of Domains activates the
+// tunnel implicitly. CF env vars (CF_ZONE_ID, CF_ZONE, CF_ACCOUNT_ID,
+// CF_API_TOKEN, CF_TUNNEL_SECRET) are validated at the cmd/cli
+// boundary (load.go), keeping config.Validate env-free.
 func validateDomains(c *Config) error {
-	// Ingress mode is part of the same constraint surface as
-	// domains: (cloudflare mode requires domains; both modes consume
-	// domains for routing). Closed-enum check runs unconditionally;
-	// the mode-specific prerequisites run only when set to cloudflare.
-	switch c.Providers.Ingress {
-	case "", IngressTraefik, IngressCloudflare:
-		// ok
-	default:
-		return fmt.Errorf("providers.ingress: unknown mode %q (want %q or %q)",
-			c.Providers.Ingress, IngressTraefik, IngressCloudflare)
-	}
-	if c.Providers.Ingress == IngressCloudflare {
-		if len(c.Domains) == 0 {
-			return fmt.Errorf("providers.ingress: cloudflare requires non-empty domains:")
-		}
-		if c.Providers.DNS != "cloudflare" {
-			return fmt.Errorf("providers.ingress: cloudflare requires providers.dns: cloudflare (got %q)", c.Providers.DNS)
-		}
-	}
-
 	if len(c.Domains) == 0 {
 		return nil
-	}
-	if c.Providers.DNS == "" {
-		return fmt.Errorf("domains: requires providers.dns")
 	}
 	for svcName, hosts := range c.Domains {
 		if _, ok := c.Services[svcName]; !ok {
