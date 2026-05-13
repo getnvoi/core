@@ -59,12 +59,13 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 	}
 
 	var backend *state.Backend
+	var bp providers.BucketProvider
 	if cfg.Providers.Storage != "" {
 		bucketCreds, err := ResolveBucketCreds(cfg.Providers.Storage, os.Getenv)
 		if err != nil {
 			return nil, err
 		}
-		bp, err := providers.ResolveBucket(cfg.Providers.Storage, bucketCreds)
+		bp, err = providers.ResolveBucket(cfg.Providers.Storage, bucketCreds)
 		if err != nil {
 			return nil, err
 		}
@@ -88,6 +89,7 @@ func PrepareRuntime(ctx context.Context, flags runtime.Flags, lg log.Log) (*runt
 		},
 		DeployHash:    time.Now().UTC().Format("20060102-150405"),
 		StateBackend:  backend,
+		StorageBucket: bp,
 		Secrets:       secrets,
 		RegistryCreds: registryCreds,
 		Providers:     providerInputs,

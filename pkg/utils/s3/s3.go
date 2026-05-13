@@ -289,6 +289,47 @@ func Sign(req *http.Request, body []byte, accessKey, secretKey, region string) {
 		accessKey, credentialScope, signedHeaders, signature))
 }
 
+// SetLifecycle puts an expiration rule on a bucket. days is the
+// retention in days — every object older than that gets deleted by
+// the storage provider's lifecycle processor (typically once per
+// day, eventually consistent).
+//
+// Used by the database backup substrate: backup.retention: <days>
+// in YAML maps directly to this call against the per-DB backup
+// bucket. AWS S3, Cloudflare R2, and Scaleway Object Storage all
+// honor the PutBucketLifecycleConfiguration shape.
+func SetLifecycle(endpoint, accessKey, secretKey, region, bucket string, days int) error {
+	body := []byte(fmt.Sprintf(`<LifecycleConfiguration>
+  <Rule>
+    <ID>nvoi-expire</ID>
+    <Status>Enabled</Status>
+    <Expiration><Days>%d</Days></Expiration>
+  </Rule>
+</LifecycleConfiguration>`, days))
+
+	url := fmt.Sprintf("%s/%s?lifecycle", strings.TrimRight(endpoint, "/"), bucket)
+	req, err := http.NewRequest("PUT", url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/xml")
+	if region == "" {
+		region = "auto"
+	}
+	Sign(req, body, accessKey, secretKey, region)
+
+	resp, err := s3Client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("s3 set lifecycle %s: %d: %s", bucket, resp.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}
+
 func sha256Hex(data []byte) string {
 	h := sha256.Sum256(data)
 	return hex.EncodeToString(h[:])

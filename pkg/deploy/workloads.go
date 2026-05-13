@@ -105,6 +105,17 @@ func (s *Session) deployWorkloads(ctx context.Context) error {
 		}
 	}
 
+	// Databases reconcile — runs BEFORE workload.ApplyAll so
+	// services that bind `databases: [PREFIX=name]` find the
+	// credentials Secret already in place when their pod
+	// SecretKeyRef resolves. Installs ZFS CSI (once globally) +
+	// per-DB workloads + backup CronJobs. Idempotent — re-deploy
+	// against an existing DB is a no-op save for ZFS prepare-node
+	// guards which short-circuit when the pool already exists.
+	if err := s.deployDatabases(ctx); err != nil {
+		return fmt.Errorf("databases: %w", err)
+	}
+
 	s.Lg.Step("workloads")
 	if err := workload.ApplyAll(ctx, rt, kc, s.Lg); err != nil {
 		return err

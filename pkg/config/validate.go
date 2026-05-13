@@ -277,6 +277,15 @@ func validateDatabases(c *Config) error {
 	return nil
 }
 
+// ParseDatabaseBinding parses one entry from services.X.databases.
+// Exported so pkg/workload (env-var injection) can reuse the same
+// parser the validator runs — drift between validation and apply
+// would mean YAML that passes Validate fails at apply time, or vice
+// versa. One source of truth.
+func ParseDatabaseBinding(entry string) (prefix, dbName string, err error) {
+	return parseDatabaseBinding(entry)
+}
+
 // parseDatabaseBinding parses one entry from services.X.databases.
 // Accepted shapes:
 //

@@ -9,6 +9,7 @@ import (
 
 	_ "github.com/getnvoi/core/pkg/providers/cloudflare"
 	_ "github.com/getnvoi/core/pkg/providers/hetzner"
+	_ "github.com/getnvoi/core/pkg/providers/postgres"
 	_ "github.com/getnvoi/core/pkg/providers/postmark"
 	_ "github.com/getnvoi/core/pkg/providers/twilio"
 )

@@ -33,6 +33,8 @@ func imageRef(rt *runtime.Runtime, svc config.ServiceSpec) string {
 // (for stateful services) the volume mount the StatefulSet's PVC
 // template fronts.
 func containerFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) corev1.Container {
+	env := secretEnvVars(svc.Secrets)
+	env = append(env, databaseEnvVars(rt, svc)...)
 	c := corev1.Container{
 		Name:  name,
 		Image: imageRef(rt, svc),
@@ -46,7 +48,7 @@ func containerFor(rt *runtime.Runtime, name string, svc config.ServiceSpec) core
 				corev1.ResourceMemory: resource.MustParse("64Mi"),
 			},
 		},
-		Env: secretEnvVars(svc.Secrets),
+		Env: env,
 	}
 	if svc.Storage != nil {
 		c.VolumeMounts = []corev1.VolumeMount{{

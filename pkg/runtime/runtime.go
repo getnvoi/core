@@ -82,6 +82,12 @@ type Inputs struct {
 	// Set means tofu's s3 backend points at the bucket.
 	StateBackend *state.Backend
 
+	// StorageBucket is the resolved BucketProvider used to provision
+	// the state bucket AND any database backup buckets. Reused at
+	// reconcile time so each database doesn't re-resolve creds and
+	// rebuild the provider. nil when providers.storage isn't set.
+	StorageBucket providers.BucketProvider
+
 	// Secrets is the resolved name→value map for every entry in
 	// `cfg.Secrets`. Missing or empty values should already have failed
 	// at the boundary before Build runs.
@@ -116,6 +122,7 @@ type Runtime struct {
 	WorkDir       string
 	DeployHash    string
 	Backend       *state.Backend
+	StorageBucket providers.BucketProvider
 	SecretValues  map[string]string
 	RegistryCreds map[string]config.RegistryDef
 	Providers     ProviderInputs
@@ -183,6 +190,7 @@ func Build(ctx context.Context, in Inputs) (*Runtime, error) {
 		WorkDir:       in.Paths.WorkDir,
 		DeployHash:    in.DeployHash,
 		Backend:       in.StateBackend,
+		StorageBucket: in.StorageBucket,
 		SecretValues:  in.Secrets,
 		RegistryCreds: in.RegistryCreds,
 		Providers:     in.Providers,
