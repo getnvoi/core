@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# Turns previews on for a self-hosted nvoi: the preview worker (packages/core/worker/sandboxes) on Cloudflare, its route
+# and the DNS record its names need, then the `previews` file in the secrets' folder, which the server reads
+# (Nvoi.Previews). compose.yml's `previews` service runs it in the `-previews` image:
+#
+#   docker compose --profile previews run --rm previews
+#
+# It reads NVOI_HOST, CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, and the gate secret from SECRETS
+# (default /secrets). NVOI_HOST is a name in a zone of that account: its apex (acme.dev) or a name under it
+# (nvoi.acme.com). The token (My Profile > API Tokens > Create Custom Token) needs:
+#   Account (this account): Workers Scripts Edit
+#   Zone (the zone of NVOI_HOST): Zone Read, DNS Edit, Workers Routes Edit
+#
+# It makes, each found by its name first, so running it again changes nothing but the worker's code:
+#   - the worker nvoi-<NVOI_HOST with dashes>-preview, on the route *<preview suffix>/*, holding the gate secret;
+#   - a proxied record for the zone's wildcard (*.<domain>, AAAA 100::, no origin: the worker answers), when
+#     NVOI_HOST is the zone's apex. A name under a zone would claim the whole zone's wildcard: PREVIEWS=wildcard
+#     asks for it. A wildcard record that exists is left as it is: a proxied one already serves the route.
+# The worker is reached on its route alone (wrangler.toml: workers_dev and preview_urls off), so the account needs
+# no workers.dev subdomain and none is made.
+# Nothing it finds is changed or removed, and no secret is printed. The installation's own names (NVOI_HOST, git,
+# MCP, sandbox) stay as their admin set them, pointed at the server.
+set -euo pipefail
+
+api="https://api.cloudflare.com/client/v4"
+secrets="${SECRETS:-/secrets}"
+worker_dir="${WORKER_DIR:-/previews/worker}"
+# The version the image installs.
+wrangler="${WRANGLER:-wrangler}"
+
+die() { echo "previews: $*" >&2; exit 1; }
+log() { echo "== $*"; }
+say() { echo "  $*"; }
+
+case "${1:-}" in
+  -h | --help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 0 ;;
+  "") ;;
+  *) die "unknown argument $1 (previews -h)" ;;
+esac
+
+for v in NVOI_HOST CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+  [ -n "${!v:-}" ] || die "$v is not set (previews -h)"
+done
+[ -s "$secrets/gate_jwt_secret" ] || die "$secrets/gate_jwt_secret is missing: start the installation first (docker compose up -d)"
+for tool in curl jq "$wrangler"; do command -v "$tool" >/dev/null || die "$tool is needed"; done
+
+# One Cloudflare API call; prints the answer and stops on a failure with Cloudflare's errors alone. The token goes
+# to curl on its standard input, never on its command line.
+cf() { # <method> <path> [json]
+  local args=(-sS -K - -X "$1" "$api$2") body
+  [ $# -gt 2 ] && args+=(-H "Content-Type: application/json" --data "$3")
+  body="$(printf 'header = "Authorization: Bearer %s"\n' "$CLOUDFLARE_API_TOKEN" | curl "${args[@]}")"
+  [ "$(jq -r '.success // false' <<<"$body" 2>/dev/null)" = true ] ||
+    die "$1 $2: $(jq -c '.errors // .' <<<"$body" 2>/dev/null || echo "no answer")"
+  printf '%s' "$body"
+}
+enc() { jq -rn --arg v "$1" '$v | @uri'; }
+
+# The names, by Nvoi.Hosts' rule.
+[[ "$NVOI_HOST" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] ||
+  die "NVOI_HOST must be a lowercase name, without a scheme or a path (acme.dev, nvoi.acme.com)"
+IFS=. read -r -a labels <<<"$NVOI_HOST"
+if [ "${#labels[@]}" -eq 2 ]; then
+  domain="$NVOI_HOST"; apex=1
+  beside() { echo "$1.$NVOI_HOST"; }
+else
+  domain="${NVOI_HOST#*.}"; apex=0
+  beside() { echo "$1-${labels[0]}.$domain"; }
+fi
+sandbox_host="$(beside sandbox)"
+preview_suffix="-$(beside preview)"
+worker="nvoi-${NVOI_HOST//./-}-preview"
+[ "${#worker}" -le 63 ] || die "NVOI_HOST is too long for a worker's name ($worker)"
+route="*$preview_suffix/*"
+wildcard="*.$domain"
+
+# The zone: the longest suffix of the names' domain that is a zone of the account.
+zone_id=""
+candidate="$domain"
+while [[ "$candidate" == *.* ]]; do
+  zone_id="$(cf GET "/zones?name=$(enc "$candidate")&account.id=$(enc "$CLOUDFLARE_ACCOUNT_ID")" | jq -r '.result[0].id // empty')"
+  [ -z "$zone_id" ] || break
+  candidate="${candidate#*.}"
+done
+[ -n "$zone_id" ] || die "no zone of this account holds $domain (or the token lacks Zone Read on it)"
+log "previews on $NVOI_HOST: worker $worker, zone $candidate"
+
+log "route $route"
+owner="$(cf GET "/zones/$zone_id/workers/routes" | jq -r --arg p "$route" '.result[] | select(.pattern == $p) | .script // "(no worker)"' | head -1)"
+if [ -n "$owner" ] && [ "$owner" != "$worker" ]; then
+  die "the route $route belongs to $owner: left as is; remove that route to let the preview worker take it"
+fi
+if [ -n "$owner" ]; then say found; else say free; fi
+
+# Everything is checked before anything is made: a token that cannot deploy the worker leaves the zone as it was.
+log "DNS $wildcard"
+records="$(cf GET "/zones/$zone_id/dns_records?name.exact=$(enc "$wildcard")" | jq -c '.result')"
+make_wildcard=""
+if [ "$(jq length <<<"$records")" != 0 ]; then
+  [ "$(jq 'any(.[]; .proxied == true)' <<<"$records")" = true ] ||
+    die "$wildcard has a record that is not proxied, so previews would not reach the worker: left as is"
+  say "found, proxied"
+elif [ "$apex" = 1 ] || [ "${PREVIEWS:-}" = wildcard ]; then
+  make_wildcard=1
+  say "missing: made after the worker"
+else
+  die "previews (*$preview_suffix) need a proxied record on $wildcard: run again with PREVIEWS=wildcard to make it"
+fi
+
+log "worker $worker"
+(
+  cd "$worker_dir"
+  out="$(mktemp)"
+  trap 'rm -f "$out"' EXIT
+  export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+  run() {
+    "$@" >"$out" 2>&1 && return
+    # Cloudflare's own answer first (wrangler's error: the API path and its message), then what it likely means.
+    sed 's/\x1b\[[0-9;]*m//g' "$out" | grep -m1 -A2 'ERROR' >&2 || tail -20 "$out" >&2
+    if grep -qE "No access to the specified resource|Authentication error" "$out"; then
+      echo "previews: the token cannot deploy Workers on this account: it needs Workers Scripts Edit (previews -h)" >&2
+    fi
+    exit 1
+  }
+  # The worker's wrangler.toml gives its entry and compatibility date; its top level, not nvoi.to's environments.
+  run "$wrangler" deploy --env "" --name "$worker" --route "$route" \
+    --var "RESERVED_HOSTS:$NVOI_HOST,www.$NVOI_HOST,$sandbox_host" \
+    --var "APP_URL:https://$sandbox_host" --var "PARENT_ORIGINS:https://$NVOI_HOST"
+  # After the deploy, always: a secret put on a missing worker makes one of its own.
+  tr -d '\n' <"$secrets/gate_jwt_secret" | run "$wrangler" secret put GATE_JWT_SECRET --env "" --name "$worker"
+) || die "the preview worker did not deploy; no DNS record was made"
+say "deployed, its gate secret put"
+
+if [ -n "$make_wildcard" ]; then
+  log "DNS $wildcard"
+  cf POST "/zones/$zone_id/dns_records" "$(jq -nc --arg n "$wildcard" \
+    '{type: "AAAA", name: $n, content: "100::", proxied: true, comment: "nvoi previews"}')" >/dev/null
+  say "made (AAAA 100::, proxied)"
+fi
+
+# The marker the server reads: previews are on from now.
+umask 077
+printf '%s\n' "$preview_suffix" >"$secrets/previews"
+log "done: previews are on (*$preview_suffix). The server needs $sandbox_host pointed at it, as its other names."

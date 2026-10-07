@@ -1,0 +1,66 @@
+---
+title: Artifacts
+description: Apps an agent made beside a checkout, versioned, shared or published.
+---
+
+## What it is
+
+An artifact is something an agent made beside the code it works on, to show or to use: a small React Router app with its own SQLite database, background jobs and live updates. A static page is the same app with most of it left unused. It has a name and a trail of numbered versions.
+
+The agent opens an artifact with the `open_artifact` tool, which places its source in a folder on the session's machine, outside the checkout. It saves it with `save_artifact`: the app is installed and built, refused if the build fails, kept as the next version, and started again.
+
+## How it behaves
+
+### It runs beside the checkout
+
+An artifact runs on the machine of the session that saved it, next to the repository's own app, on a port of its own. It costs nothing more than that machine: when the machine pauses, the artifact stops with it, and the next visit starts both again behind a wait page. Its database lives on that machine's disk.
+
+The artifact knows who is looking. A member opening it from nvoi is signed in as themselves. A visitor of its public link is anonymous.
+
+### A version is a change
+
+Saving the same files as the newest version makes no new one. Two saves in the same moment take two numbers, never one.
+
+### Shared, public
+
+`shared` lists the artifact for every member of the workspace. `public` opens it on a link with no sign-in, at `/a/<id>`. Archiving closes the public link and stops it; restoring reopens the link.
+
+### The session is remembered
+
+An artifact points at the session that made it, so the artifact and the conversation that produced it are one click apart. When that session's worktree is gone, the artifact keeps its versions and runs again once it is opened in another session.
+
+## In the app
+
+In the session, the turn that saved an artifact ends with its card; the card opens the artifact beside the conversation, running, with its own address bar. The artifacts page lists them all, searchable by name, and an artifact's page runs its newest version with the rename, share and publish controls.
+
+## From the CLI
+
+### List and read
+
+```bash
+nvoi artifact list --table
+nvoi artifact show <artifact-id>
+nvoi artifact-version read <artifact-id> 3 > v3.tar.gz
+```
+
+`version` answers the version's source as a gzipped tarball.
+
+### Rename, share, publish
+
+```bash
+nvoi artifact update <artifact-id> --name "Pricing page"
+nvoi artifact update <artifact-id> --shared true
+nvoi artifact update <artifact-id> --public true
+```
+
+### Archive, restore
+
+```bash
+nvoi artifact archive <artifact-id>
+nvoi artifact restore <artifact-id>
+```
+
+## Related
+
+- [Sessions](/docs/nvoi/sessions): where an artifact is made.
+- [Library](/docs/nvoi/library): the workspace's other files.

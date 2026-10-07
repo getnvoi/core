@@ -1,0 +1,35 @@
+# Rebuild and restart `cmd/web` when its source changes.
+#
+# ONE CONFIG PER SERVICE. `web` and `jobs` are separate processes, started and
+# followed apart, so they are separate air instances — and they must not share
+# `bin`, or each rebuild would overwrite the other's binary underneath it.
+#
+# air is what the agent follows: it stays alive across rebuilds and owns the
+# child it spawned. `go run` does not — it execs a child of its own, so a
+# restart kills a wrapper while the server carries on.
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/web ./cmd/web"
+bin = "./tmp/web"
+
+# TEMPLATES TOO. They are read from disk at request time, but a change to one is
+# still a change to the app and a restart is the honest way to show it.
+include_ext = ["go", "html", "mod", "sum"]
+
+# `public/` is written by the `css` service on every keystroke in a template,
+# and `db/` is SQLite's WAL churning on every insert. Watching either means a
+# rebuild loop that never settles.
+exclude_dir = ["assets", "public", "db", "tmp", "vendor"]
+
+# DO NOT RUN THE OLD BINARY over a broken build. Serving the previous version
+# after a compile error is how you spend ten minutes on a change that never
+# reached the process.
+stop_on_error = true
+
+delay = 200
+
+[misc]
+clean_on_exit = true

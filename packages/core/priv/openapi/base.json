@@ -1,0 +1,132 @@
+{
+ "openapi": "3.2.0",
+ "info": {
+  "title": "nvoi api",
+  "version": "1"
+ },
+ "servers": [
+  {
+   "url": "https://nvoi.to"
+  }
+ ],
+ "components": {
+  "securitySchemes": {
+   "bearer": {
+    "bearerFormat": "JWT",
+    "scheme": "bearer",
+    "type": "http"
+   },
+   "cookie": {
+    "in": "cookie",
+    "name": "session_token",
+    "type": "apiKey"
+   }
+  }
+ },
+ "tags": [
+  {
+   "name": "activity",
+   "x-displayName": "Activity"
+  },
+  {
+   "name": "agent",
+   "x-displayName": "Agents"
+  },
+  {
+   "name": "artifact_version",
+   "x-displayName": "Artifact versions"
+  },
+  {
+   "name": "artifact",
+   "x-displayName": "Artifacts"
+  },
+  {
+   "name": "connector",
+   "x-displayName": "Connectors"
+  },
+  {
+   "name": "env_var",
+   "x-displayName": "Environment variables"
+  },
+  {
+   "name": "environment_command",
+   "x-displayName": "Environment commands"
+  },
+  {
+   "name": "environment",
+   "x-displayName": "Environments"
+  },
+  {
+   "name": "funnel",
+   "x-displayName": "Funnels"
+  },
+  {
+   "name": "github_installation",
+   "x-displayName": "GitHub installations"
+  },
+  {
+   "name": "library_item",
+   "x-displayName": "Library"
+  },
+  {
+   "name": "log",
+   "x-displayName": "Logs"
+  },
+  {
+   "name": "workspace_user",
+   "x-displayName": "Members"
+  },
+  {
+   "name": "llm_config",
+   "x-displayName": "Model credentials"
+  },
+  {
+   "name": "llm_connection",
+   "x-displayName": "Model connections"
+  },
+  {
+   "name": "repo",
+   "x-displayName": "Repositories"
+  },
+  {
+   "name": "agent_session",
+   "x-displayName": "Sessions"
+  },
+  {
+   "name": "session",
+   "x-displayName": "Sign-in"
+  },
+  {
+   "name": "skill_file",
+   "x-displayName": "Skill files"
+  },
+  {
+   "name": "skill",
+   "x-displayName": "Skills"
+  },
+  {
+   "name": "task",
+   "x-displayName": "Tasks"
+  },
+  {
+   "name": "tool_grant",
+   "x-displayName": "Tool grants"
+  },
+  {
+   "name": "user",
+   "x-displayName": "Account"
+  },
+  {
+   "name": "utils",
+   "x-displayName": "Utilities"
+  },
+  {
+   "name": "workflow",
+   "x-displayName": "Workflows"
+  },
+  {
+   "name": "workspace",
+   "x-displayName": "Workspaces"
+  }
+ ]
+}

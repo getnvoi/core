@@ -1,0 +1,41 @@
+# Rails 8, Postgres, Solid Queue and Turbo Streams: a job's progress reaches the page while it runs.
+# Postgres runs as a service of the box, its data outside the checkout.
+detect:
+- Gemfile
+ignore:
+- vendor/bundle/
+- ".bundle/"
+- log/
+- tmp/
+- storage/
+env:
+  PATH: "/usr/lib/postgresql/16/bin:$PATH"
+  PGDATA: "$HOME/.local/pgdata"
+  PGHOST: 127.0.0.1
+  PGUSER: postgres
+  POSTGRES_HOST: 127.0.0.1
+  POSTGRES_PORT: '5432'
+  POSTGRES_USER: postgres
+# The toolchain, installed before setup, even when an environment types its own setup commands.
+tools:
+- mise use -g ruby@$(cat .ruby-version 2>/dev/null || echo 3.4)
+setup:
+- test -x /usr/lib/postgresql/16/bin/initdb || { sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq postgresql-16 libpq-dev && { sudo systemctl disable -q --now postgresql 2>/dev/null; sudo pg_ctlcluster 16 main stop 2>/dev/null; true; }; }
+- gem install --no-document bundler
+- bundle install
+- grep -q tailwindcss-rails Gemfile.lock || exit 0; bin/rails tailwindcss:build
+services:
+- name: postgres
+  command: '{ test -d "$PGDATA" || initdb --username=postgres --auth=trust --encoding=UTF8 --locale=C "$PGDATA"; } && exec postgres -D "$PGDATA" -p $PORT -k /tmp'
+  port: 5432
+- name: css
+  command: grep -q tailwindcss-rails Gemfile.lock || exec sleep infinity; exec bin/rails "tailwindcss:watch[always]"
+- name: jobs
+  before:
+  - bin/rails db:prepare
+  command: test -x bin/jobs || exec sleep infinity; exec bin/jobs
+- name: app
+  before:
+  - bin/rails db:prepare
+  command: exec bin/rails server -p $PORT -b 0.0.0.0
+  port: 3000

@@ -1,0 +1,76 @@
+service: dummy-rails
+image: dummy-rails
+
+servers:
+  web:
+    - 192.0.2.10
+    - 192.0.2.11
+
+registry:
+  server: localhost:5001
+
+proxy:
+  host: abc.host0.dev
+  ssl:
+    certificate_pem: SSL_CERTIFICATE_PEM
+    private_key_pem: SSL_PRIVATE_KEY_PEM
+  forward_headers: true
+  app_port: 80
+  healthcheck:
+    path: /up
+    interval: 3
+    timeout: 5
+
+builder:
+  arch: amd64
+
+env:
+  clear:
+    RAILS_ENV: production
+    RAILS_LOG_TO_STDOUT: "1"
+    SOLID_QUEUE_IN_PUMA: true
+    POSTGRES_HOST: 10.0.0.2
+    POSTGRES_USER: dummy_rails
+    POSTGRES_DB: dummy_rails_production
+    POSTGRES_PORT: 5432
+  secret:
+    - RAILS_MASTER_KEY
+    - POSTGRES_PASSWORD
+
+accessories:
+  db:
+    image: postgres:16
+    host: 192.0.2.10
+    port: "5432:5432"
+    env:
+      clear:
+        POSTGRES_USER: dummy_rails
+        POSTGRES_DB: dummy_rails_production
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      - data:/var/lib/postgresql/data
+  nginx:
+    image: nginx:latest
+    host: 192.0.2.10
+    port: "8080:8080"
+    files:
+      - .kamal/nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    host: 192.0.2.10
+    env:
+      secret:
+        - TUNNEL_TOKEN
+    cmd: tunnel --no-autoupdate run
+
+volumes:
+  - "dummy_rails_storage:/rails/storage"
+
+asset_path: /rails/public/assets
+
+aliases:
+  console: app exec --interactive --reuse "bin/rails console"
+  shell: app exec --interactive --reuse "bash"
+  logs: app logs -f
+  dbc: app exec --interactive --reuse "bin/rails dbconsole"

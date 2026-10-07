@@ -1,0 +1,102 @@
+---
+title: Getting started
+description: From an account to a preview URL.
+---
+
+nvoi runs a coding agent on a machine of its own, one machine per unit of work. You connect a repository, describe what you want, and the agent works on a checkout inside a virtual machine with its own kernel, its own ports and its own package installs. It brings the application up and hands back a URL. Everything it did is an event log you can read back.
+
+The walk below uses the [CLI](/docs/reference/cli). Every step is one operation of the [API](/docs/reference/api/overview), and the app does the same things with buttons.
+
+## Install the CLI
+
+```bash
+curl -fsSL https://cli.nvoi.to/install.sh | sh
+```
+
+## An account and a workspace
+
+Sign up in the app: an account and a workspace are made together. Log in from the shell; the token names the workspace, so nothing after this asks for one. `--workspace` picks one when you belong to several.
+
+```bash
+nvoi login --email you@example.com --password …
+nvoi whoami
+```
+
+A login is kept as a context (one server, one token, one workspace). A second workspace, or a server of your own, is a second login; `nvoi context` lists them. With more than one, every command names its context with `--context <name>`.
+
+```bash
+nvoi login --context acme --workspace acme --email you@example.com --password …
+nvoi context
+nvoi session list --context acme
+```
+
+## A model credential
+
+The agent runs on a model credential the workspace holds: an API key, billed by its provider. `claude_code` takes a `kind`, `api_key` for an Anthropic API key, and the `token`.
+
+```bash
+nvoi provider list
+nvoi llm-config create --provider claude_code --label "Team key" --values '{"kind":"api_key","token":"sk-ant-…"}'
+```
+
+## A repository
+
+Push a project to nvoi's git, or connect GitHub. Pushing makes the repository on the first push (see [Repositories](/docs/nvoi/repositories)):
+
+```bash
+git remote add nvoi https://git.nvoi.to/<workspace>/my-project.git
+git push nvoi main          # any user name, an nvoi token as the password (nvoi token create)
+nvoi repo list --table
+```
+
+Or install nvoi's GitHub App from the repositories page in the app, then import one of the repositories it offers by the id of its cached row:
+
+```bash
+nvoi github-installation list --table
+nvoi repo create --github_repository_id <github-repository-id>
+```
+
+Importing makes the repository's default [environment](/docs/nvoi/environments), on the first tier on offer at size S. Give it what a checkout needs: the setup commands, the variables, and the preview commands with the port the app listens on.
+
+```bash
+nvoi environment list <repository-id> --table
+nvoi environment-command set <environment-id> --kind setup --name deps --command "bundle install"
+nvoi env-var set <environment-id> --key DATABASE_URL --value postgres://… --secret true
+nvoi environment-command set <environment-id> --kind preview --name web --command "bin/rails server -p 3000"
+nvoi environment update <environment-id> --preview_port 3000
+```
+
+## A session
+
+Starting a session on a repository makes a checkout, a branch on a machine of its own forked from the environment's seed, and the conversation in it. The first prompt is queued so the agent begins as soon as the box answers.
+
+```bash
+nvoi session start <repository-id> --prompt "Add a /health endpoint that answers 200 and bring the app up."
+nvoi session follow <session-id>
+```
+
+## A message
+
+A message is a turn. The agent reads the checkout, edits it, runs what it needs to, and answers. A call that needs your approval parks the turn until you answer it.
+
+```bash
+nvoi session-message send <session-id> --prompt "Now add a test for it."
+nvoi session answer <session-id> --tool_use_id <id> --decision approve
+```
+
+## The preview URL
+
+Serving the checkout starts the app on the box and puts it behind a URL of its own. The session's `worktree.hostname` is where.
+
+```bash
+nvoi preview start <worktree-id>
+nvoi session show <session-id>
+```
+
+Open the URL. A machine that went to sleep wakes on the first request and serves the page once the app is up.
+
+## Where next
+
+- [Sessions](/docs/nvoi/sessions): turns, the approval gate, the event log.
+- [Agents](/docs/nvoi/agents): which model, which instructions, which tools.
+- [FAQ](/docs/nvoi/faq): the questions a first week asks.

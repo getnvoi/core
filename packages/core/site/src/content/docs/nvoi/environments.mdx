@@ -1,0 +1,170 @@
+---
+title: Environments
+description: How a machine for a repository is built. Tier, size, branch, database, variables, setup and preview commands, the seed, the dry run.
+---
+
+## What it is
+
+An environment is how a machine for a repository is built and what runs in it. It holds the tier and size of the machine, the branch checkouts are cut from, the variables, the setup commands that run after the clone and the preview commands that start the app. nvoi builds one machine from it, the seed, and forks it for each new checkout, so a first turn does not wait for setup.
+
+Importing a repository makes its first environment, named `development`, on the repository's default branch. A repository can hold several. An environment is written once and every later session inherits it.
+
+## How it behaves
+
+### Where the commands come from
+
+The commands are read from the first of these that applies:
+
+1. An `nvoi.yml` at the root of the branch: its setup, variables and services.
+2. The setup and preview commands typed on the environment, in the app or with the CLI.
+3. The runtime the repository's root files match, such as a `Gemfile` for Rails: nvoi's own setup and services for that stack.
+
+The file is optional. Typed commands do what it does, and take the place of a matched runtime's setup and services, not its toolchain: a Bun repository's typed `bun install` still gets Bun. Any stack that builds on Linux runs. Windows-only and macOS builds do not run.
+
+### A tier is where the machine comes from
+
+Two tiers are offered.
+
+| tier | the machine |
+| --- | --- |
+| Standard | a fork of the seed; the disk comes with the size |
+| Advanced | a fork of the seed that keeps its memory and resumes in seconds; the disk is picked |
+
+The tier, the size, the disk, the branch and the database change only while no checkout runs on the environment, so every checkout matches its environment and runs at the size it is billed at. Saving such a change while checkouts exist lists them; deleting them, with their machines, database copies and sessions, then saves the change. With the API, `nvoi environment update` answers `checkouts` and takes `--purge` to do the same. Variables, commands, the preview port and the name change at any time and apply on the next run.
+
+### A size is what each machine gets
+
+| size | vCPU | memory |
+| --- | --- | --- |
+| S | 2 | 4 GB |
+| M | 4 | 8 GB |
+| L | 8 | 16 GB |
+| XL | 16 | 32 GB |
+
+S is the default. On Standard the disk is fixed by the size: 12 GB for S, 50 GB for M, 125 GB for L, 251 GB for XL. On Advanced the disk starts at 10 GB and is picked in steps of 5 GB, up to the limit the tier allows; it is included whatever you pick. `nvoi tier list` lists the tiers on offer with their sizes, disks and hourly rates.
+
+### A database is outside the machine
+
+An environment can name a managed database: Postgres at a version from 14 to 18, or SQLite. nvoi makes it on the first machine that needs it and gives every checkout its own branch of it, a copy taken when that checkout's machine first starts. A checkout's changes stay in its branch; deleting the checkout deletes the branch.
+
+Its address reaches every command, setup and preview included, and the agent's own:
+
+| engine | variables |
+| --- | --- |
+| Postgres | `DATABASE_URL`, and `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `PGSSLMODE` for an app that reads them, such as a Rails app with several databases |
+| SQLite | `DATABASE_URL` (`libsql://`), `DATABASE_AUTH_TOKEN` |
+
+A variable typed on the environment with the same name wins. A typed value can name one of them, `$PGHOST` or `${PGHOST}`, for an app that reads its own names: `POSTGRES_HOST` set to `$PGHOST` gets each checkout's own host. Every database holds up to 5 GB, and Postgres scales up to 1 vCPU; what it uses is included. Changing the engine or the version replaces the database, data included, and like the size it needs the checkouts deleted first. `nvoi engine list` lists the engines and their versions.
+
+### Commands have a kind
+
+| kind | when it runs |
+| --- | --- |
+| `setup` | once after the clone, in order: `bundle install`, a migration |
+| `preview` | when the preview starts; they start together and stay up: `bin/dev` |
+| `default` | never on its own; a person presses it: `docker compose down` |
+
+A command has a name, unique within the environment, and a failure is reported against it. A setup command's status is its real exit status, and the build stops at the first error with the last lines it printed. The agent of a machine whose setup did not finish is told what failed before its task, and the person sees the same lines. Setup and preview commands keep their order: a new one lands at the end, and the app can reorder them.
+
+Runtimes are installed with mise and come first on the path, and the machine has a compiler for native extensions.
+
+### Variables
+
+A variable is `KEY=value`: an upper-case name of letters, digits and underscores, and a value on one line. It is exported before every command, so the setup commands and the app see it. The agent is told the names, never the values.
+
+A `secret` variable is hidden: the app masks it and the API answers its key with a null value. Variables are not a secret store; a value reaches the app's processes either way.
+
+A name the model credential sets, such as `ANTHROPIC_API_KEY`, is refused, so an environment cannot swap the credential a turn runs under.
+
+### The preview is its commands and one port
+
+The preview commands start the app, and `preview_port` is the port it listens on inside the machine. A port is required once there is a preview command. It is the only port served: the preview link reaches it and nothing else.
+
+A preview command can take a `port` of its own, for a service such as Postgres. It gets that port as `PORT`, and every preview command after it waits until the port answers before it starts. A command without a port gets `preview_port`. These ports stay inside the machine.
+
+A preview command can take `before` commands, such as `bin/rails db:prepare`. They run before it under a lock, so two commands never migrate one database at once, and are retried every 2 seconds, 30 times at most, while a service they need starts.
+
+### The seed
+
+The seed is a machine built once: the branch cloned, the setup commands run and the preview started once, then parked. Every checkout's machine is a fork of it. It is rebuilt when the setup commands, the variables, the database, the size or the branch change, and not otherwise. Its setup runs against the environment's database, so every checkout's branch starts from what setup left there. A fork runs setup again only when its seed did not run that same set.
+
+### A dry run is a session with nobody in it
+
+A dry run does what a new session does, a fresh checkout on a new machine with setup run and the preview served, with the session hidden, so the run shows on the environment's page and nowhere else. The agent is not started. It needs a preview command.
+
+## In the app
+
+A repository's page lists its environments. The new environment form takes the name, the branch, the tier and size, the preview port, the variables and the commands in one submit. An environment's page shows its variables, its commands with when each runs, the preview port, the last dry run with its log, and the tier, size and branch it was created with.
+
+## From the CLI
+
+### See the tiers
+
+```bash
+nvoi tier list
+```
+
+Each tier answers its `name`, which `--provider_name` takes, and its sizes by key (`2x4`, `4x8`, `8x16`, `16x32`), which `--shape` takes.
+
+### Create
+
+```bash
+nvoi environment create <repository-id> --name staging --branch main --provider_name <tier-name> --shape 4x8
+```
+
+Without `--provider_name` and `--shape`, the first tier on offer and its default size are used. `--disk` sets the disk where the tier lets you pick it.
+
+### Set a variable
+
+```bash
+nvoi env-var set <environment-id> --key DATABASE_URL --value postgres://… --secret true
+nvoi env-var delete <environment-id> DATABASE_URL
+```
+
+### Set a command
+
+```bash
+nvoi environment-command set <environment-id> --kind setup --name deps --command "bundle install"
+nvoi environment-command set <environment-id> --kind preview --name db --command 'exec postgres -D "$PGDATA" -p $PORT' --port 5432
+nvoi environment-command set <environment-id> --kind preview --name web --command "bin/rails server -p \$PORT" --before "bin/rails db:prepare"
+nvoi environment-command set <environment-id> --kind default --name down --command "docker compose down"
+nvoi environment-command delete <environment-id> <command-id>
+```
+
+A command is set by its `name`: setting one again replaces it. A new one lands at the end of its kind; to move one, delete it and set it again. A new command without `--kind` is `default`. `--port` and `--before` are for preview commands; `--before` takes several commands separated by commas, and `--port ""` clears the port.
+
+```bash
+nvoi environment show <environment-id> --table
+```
+
+`--table` prints the environment's fields, then its commands and variables as tables.
+
+### Set the preview port, rename
+
+```bash
+nvoi environment update <environment-id> --preview_port 3000
+nvoi environment update <environment-id> --name staging
+```
+
+### A dry run
+
+```bash
+nvoi dry-run start <environment-id>
+```
+
+Accepted with 202; the machine starts in the background.
+
+### Read and delete
+
+```bash
+nvoi environment list <repository-id> --table
+nvoi environment show <environment-id>
+nvoi environment delete <environment-id>
+```
+
+Deleting an environment removes its variables, commands and checkouts, with the sessions that ran on them.
+
+## Related
+
+- [Sessions](/docs/nvoi/sessions): the checkout an environment's seed is forked into.
+- [Repositories](/docs/nvoi/repositories): where an environment hangs.

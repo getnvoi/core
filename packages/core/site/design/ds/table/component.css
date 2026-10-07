@@ -1,0 +1,19 @@
+/* A section: a g7 edge, g6 dividers. Ink is for what is chosen or signed, which a table is not. */
+.ds-table { overflow-x: auto; border: 1px solid var(--ds-g7); }
+.ds-table table { width: 100%; border-collapse: collapse; background: var(--ds-surface); font-size: var(--ds-fs-13); }
+.ds-table th { text-align: left; font: 500 var(--ds-fs-11) var(--ds-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ds-g11); padding: 10px 14px; border-bottom: 1px solid var(--ds-g6); white-space: nowrap; }
+.ds-table td { padding: 10px 14px; border-bottom: 1px solid var(--ds-g6); vertical-align: top; }
+.ds-table tr:last-child td { border-bottom: 0; }
+.ds-table td code { font: var(--ds-fs-12) var(--ds-mono); white-space: nowrap; }
+
+/* Stack: under 560px a row is a block and each cell a line, its column's title then its value. The head
+   leaves the eye, not screen readers. */
+@media (max-width: 560px) {
+  .ds-table.is-stack { overflow-x: visible; }
+  .ds-table.is-stack :is(table, tbody, tr) { display: block; }
+  .ds-table.is-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .ds-table.is-stack tr { padding: 8px 14px; border-bottom: 1px solid var(--ds-g6); }
+  .ds-table.is-stack tbody tr:last-child { border-bottom: 0; }
+  .ds-table.is-stack td { display: grid; grid-template-columns: minmax(0, 6rem) minmax(0, 1fr); gap: 12px; padding: 3px 0; border-bottom: 0; overflow-wrap: anywhere; }
+  .ds-table.is-stack td::before { content: attr(data-title); font: 500 var(--ds-fs-11)/18px var(--ds-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ds-g11); }
+}

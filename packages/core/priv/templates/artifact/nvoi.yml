@@ -1,0 +1,16 @@
+# How nvoi runs this app when it is an app of its own: its dependencies installed once, then the job worker and
+# the web server, the web server on the preview port. Its database is the environment's Postgres: each checkout
+# gets a branch of its own, given in DATABASE_URL and the PG* variables. An artifact ignores this file: it is
+# built static (npm run build:static) and served without a server.
+ignore:
+- node_modules/
+- build/
+- ".react-router/"
+setup:
+- npm ci --no-audit --no-fund
+services:
+- name: jobs
+  command: exec npm run jobs
+- name: app
+  command: exec npm run dev
+  port: 3000

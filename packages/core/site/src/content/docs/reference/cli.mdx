@@ -1,0 +1,85 @@
+---
+title: CLI
+description: nvoi from a shell, every operation of the API as a command.
+---
+
+## Install
+
+```bash
+curl -fsSL https://cli.nvoi.to/install.sh | sh
+```
+
+The script reads your OS and CPU and puts `nvoi` in `/usr/local/bin`, or `$HOME/.local/bin` when that is not writable. `nvoi --version` prints the build.
+
+## Contexts
+
+A context is one server, one token and the workspace that token names. `nvoi login` writes one to `$HOME/.nvoi/config.json`. `nvoi signup` makes an account and its workspace; every new account waits on nvoi's approval, and `nvoi login` works once it is approved. None is "current": several agents on one machine would switch it under each other. With one context on the machine, commands use it; with several, every command names its own with `--context`, and refuses otherwise.
+
+```bash
+nvoi signup --email you@example.com --password … --workspace "Acme"
+nvoi login --email you@example.com --password … --workspace acme
+nvoi login --context dev --endpoint http://localhost:3000 --email … --password …
+nvoi login --endpoint https://<your host> --email … --password …   # a self-hosted server
+nvoi context                       # every context
+nvoi repo list --context dev       # names the context for this command
+```
+
+Every command says on stderr which context it runs against (`nvoi: context acme · workspace acme · https://nvoi.to`). In a repository whose nvoi remote names another workspace than the token's, nvoi refuses the command ("Wrong context"), and so does nvoi's git. `nvoi logout --context <name>` revokes that context's token and forgets it.
+
+A context also keeps its server's mode, which the server tells at login: `selfhosted` for a server you run, `cloud` for nvoi.to. On a `selfhosted` context, help and completion hide what only nvoi.to serves (billing, checkout, funnels). The context is chosen by the usual rules: the only one on the machine, or the one `--context` names. With several contexts and no `--context`, and for a context made before servers told their mode, every command shows. A command the server does not offer says so (`the server at … does not offer nvoi billing show`).
+
+## Environment
+
+| Variable | What it does |
+|---|---|
+| `NVOI_TOKEN` | a token of its own, used instead of any context; with `--context` as well, the command is refused |
+| `NVOI_API_ENDPOINT` | the server for `NVOI_TOKEN` and for `login`; with a context, it must be that context's server, so a token never goes to another one |
+
+Every request says the workspace its context is for (`Nvoi-Workspace`), and nvoi refuses a token of another workspace ("Wrong token").
+
+## How a command reads
+
+```bash
+nvoi <group> <command> [<id> …] [--flag value …]
+```
+
+Path parameters are positional, in the order the path names them. Query parameters and body fields are flags; a list is comma-separated, an object is a JSON string, a file is a path. A required flag missing is refused before any request is made.
+
+Every answer is JSON on stdout, and `--table` renders a list as columns. A command's columns are the fields the API declares for its answer, so they stay the same from one call to the next, even when a value is empty. A refused request prints the API's sentence on stderr and exits 1; the sentence says what to do; a usage error exits 2.
+
+## A session from the shell
+
+Start a session on a repository, follow what the agent does, and answer an approval when it waits on one. `follow` prints each event's kind and text, or the tool it called, and returns when the turn ends.
+
+```bash
+nvoi session start <repository-id> --prompt "Add a /health endpoint that answers 200."
+nvoi session follow <session-id>
+nvoi session answer <session-id> --tool_use_id <call-id> --decision approve
+```
+
+The same three commands run from CI with `NVOI_TOKEN` and `NVOI_API_ENDPOINT` set, and no context on disk.
+
+## Connect an MCP client
+
+`nvoi mcp add` connects Claude Code or Cursor to nvoi's MCP server, as you, in the context's workspace. It makes a personal token and writes it into the client's configuration, so you never copy the secret. It takes `--context` like every command, required when the machine holds several. Inside a repository nvoi hosts, a context of another workspace is refused before anything is written.
+
+```bash
+nvoi mcp add claude --context acme   # runs claude mcp add, scope local: this project folder only
+nvoi mcp add claude --scope user     # every folder on this machine without a local nvoi server
+nvoi mcp add cursor                  # writes ~/.cursor/mcp.json, mode 600: every Cursor project
+nvoi mcp add --print                 # writes nothing; prints the token and both configurations
+```
+
+The token is named after the client and this machine, for example `Cursor (bens-air)`, and lasts 90 days (`--expires-in-days`, 1 to 365). The server is `https://mcp.nvoi.to` for `https://nvoi.to`, and the endpoint followed by `/mcp` for any other; `--url` changes it. An `nvoi` server already in the client is replaced only with `--force`. When `claude` is not on your PATH, the command prints the `claude mcp add` line to run. The configuration also names the workspace (`Nvoi-Workspace`), and the MCP server refuses a token of another one. `--scope project` is refused: it writes the token into the repository's `.mcp.json`, and everyone who clones it would act as you. Revoke the token with `nvoi token delete <id>`.
+
+## Shell completion
+
+```bash
+nvoi completion zsh > "${fpath[1]}/_nvoi"
+```
+
+Also `bash`, `fish` and `powershell`.
+
+## Commands
+
+Every command, its arguments and its flags are on the [commands page](/docs/reference/cli/commands/), generated from the binary.

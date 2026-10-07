@@ -1,0 +1,57 @@
+service: dummy-rails-sandbox
+image: dummy-rails
+
+servers:
+  web:
+    hosts:
+      - 192.0.2.20
+    cmd: bash -c 'while ! pg_isready -h dummy-rails-sandbox-db -q; do sleep 1; done && bin/rails db:prepare && bin/rails server -b 0.0.0.0 -p 3000'
+    options:
+      volume: /opt/dummy-rails:/rails
+
+registry:
+  server: localhost:5001
+
+proxy:
+  ssl: false
+  app_port: 3000
+  healthcheck:
+    path: /up
+    interval: 5
+    timeout: 60
+
+builder:
+  arch: amd64
+
+ssh:
+  user: deploy
+
+env:
+  clear:
+    RAILS_ENV: development
+    RAILS_LOG_TO_STDOUT: "1"
+    SOLID_QUEUE_IN_PUMA: ""
+    POSTGRES_HOST: dummy-rails-sandbox-db
+    POSTGRES_USER: app
+    POSTGRES_DB: app_sandbox
+    POSTGRES_PORT: "5432"
+  secret:
+    - RAILS_MASTER_KEY
+    - POSTGRES_PASSWORD
+
+volumes:
+  - dummy_rails_sandbox_storage:/rails/storage
+
+accessories:
+  db:
+    image: postgres:17
+    host: 192.0.2.20
+    port: 5432:5432
+    env:
+      clear:
+        POSTGRES_USER: app
+        POSTGRES_DB: app_sandbox
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      - sandbox_data:/var/lib/postgresql/data

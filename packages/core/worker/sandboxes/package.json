@@ -1,0 +1,15 @@
+{
+  "name": "nvoi-preview-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "jose": "^6.2.10"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "wrangler": "^4"
+  }
+}

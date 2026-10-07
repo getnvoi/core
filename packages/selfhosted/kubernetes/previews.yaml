@@ -1,0 +1,38 @@
+# Previews on Kubernetes, once, when the admin turns them on: the previews script (packages/selfhosted/previews)
+# deploys the preview worker on Cloudflare, then the `previews` key is added to nvoi-secrets, which the server reads
+# without a restart. First `kubectl -n nvoi create secret generic nvoi-previews
+# --from-literal=CLOUDFLARE_API_TOKEN=… --from-literal=CLOUDFLARE_ACCOUNT_ID=…`, then
+# `kubectl -n nvoi apply -f kubernetes/previews.yaml`. Run again: delete the Job, apply.
+apiVersion: batch/v1
+kind: Job
+metadata: { name: previews }
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: nvoi-secrets
+      restartPolicy: OnFailure
+      initContainers:
+        - name: deploy
+          image: ghcr.io/getnvoi/core-previews:latest
+          command:
+            - sh
+            - -ec
+            - |
+              cp /in/gate_jwt_secret /work/
+              SECRETS=/work previews
+              printf 'data:\n  previews: %s\n' "$(base64 -w0 </work/previews)" >/work/patch.yaml
+          env:
+            - { name: NVOI_HOST, valueFrom: { secretKeyRef: { name: nvoi, key: NVOI_HOST } } }
+          envFrom: [{ secretRef: { name: nvoi-previews } }]
+          volumeMounts:
+            - { name: in, mountPath: /in, readOnly: true }
+            - { name: work, mountPath: /work }
+      containers:
+        - name: patch
+          image: registry.k8s.io/kubectl:v1.34.1
+          args: [patch, secret, nvoi-secrets, --type, merge, --patch-file, /work/patch.yaml]
+          volumeMounts: [{ name: work, mountPath: /work }]
+      volumes:
+        - { name: in, secret: { secretName: nvoi-secrets, items: [{ key: gate_jwt_secret, path: gate_jwt_secret }] } }
+        - { name: work, emptyDir: { medium: Memory } }

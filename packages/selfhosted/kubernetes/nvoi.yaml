@@ -1,0 +1,203 @@
+# A self-hosted nvoi on Kubernetes: the same services as compose.yml, with an Ingress in front. In the namespace
+# nvoi: `kubectl -n nvoi create secret generic nvoi --from-env-file=.env` (the three lines), then
+# `kubectl -n nvoi apply -f kubernetes/nvoi.yaml`. The Job `secrets` makes the other secrets once, into the Secret
+# nvoi-secrets, which every pod mounts at /secrets; the pods wait for it. Set the image's tag below to upgrade; the
+# server migrates before it starts. Previews: kubernetes/previews.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: nvoi-secrets }
+---
+# What the Jobs need: write the Secret nvoi-secrets (create cannot be limited to a name).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: nvoi-secrets }
+rules:
+  - { apiGroups: [""], resources: [secrets], verbs: [create] }
+  - { apiGroups: [""], resources: [secrets], resourceNames: [nvoi-secrets], verbs: [get, patch] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: nvoi-secrets }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: nvoi-secrets }
+subjects: [{ kind: ServiceAccount, name: nvoi-secrets }]
+---
+# bin/secrets over what nvoi-secrets already holds: a value that exists is kept, a missing one is made, and the
+# whole is applied. Run again (delete the Job, apply), it changes nothing.
+apiVersion: batch/v1
+kind: Job
+metadata: { name: secrets }
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      serviceAccountName: nvoi-secrets
+      restartPolicy: OnFailure
+      initContainers:
+        - name: make
+          image: ghcr.io/getnvoi/core:latest
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /out/secrets
+              for f in /existing/*; do [ -f "$f" ] && cp "$f" /out/secrets/; done
+              /app/bin/secrets /out/secrets
+              {
+                printf 'apiVersion: v1\nkind: Secret\nmetadata:\n  name: nvoi-secrets\ndata:\n'
+                for f in /out/secrets/*; do printf '  %s: %s\n' "$(basename "$f")" "$(base64 -w0 <"$f")"; done
+              } >/out/secret.yaml
+          volumeMounts:
+            - { name: out, mountPath: /out }
+            - { name: existing, mountPath: /existing, readOnly: true }
+      containers:
+        - name: apply
+          image: registry.k8s.io/kubectl:v1.34.1
+          args: [apply, -f, /out/secret.yaml]
+          volumeMounts: [{ name: out, mountPath: /out }]
+      volumes:
+        - { name: out, emptyDir: { medium: Memory } }
+        - { name: existing, secret: { secretName: nvoi-secrets, optional: true } }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: db }
+spec:
+  serviceName: db
+  replicas: 1
+  selector: { matchLabels: { app: db } }
+  template:
+    metadata: { labels: { app: db } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18
+          env:
+            - { name: POSTGRES_PASSWORD_FILE, value: /secrets/postgres_password }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: ["pg_isready", "-U", "postgres"] }, periodSeconds: 3 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql }
+            - { name: secrets, mountPath: /secrets, readOnly: true }
+      volumes:
+        - { name: secrets, secret: { secretName: nvoi-secrets, defaultMode: 0400 } }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 20Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: db }
+spec: { selector: { app: db }, ports: [{ port: 5432 }] }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: forgejo }
+spec:
+  serviceName: forgejo
+  replicas: 1
+  selector: { matchLabels: { app: forgejo } }
+  template:
+    metadata: { labels: { app: forgejo } }
+    spec:
+      # The rootless image runs as uid 1000: the secrets are its group's to read.
+      securityContext: { fsGroup: 1000 }
+      containers:
+        - name: forgejo
+          image: codeberg.org/forgejo/forgejo:15.0.9-rootless
+          # args, not command: the image's entrypoint writes app.ini from the FORGEJO__ variables first.
+          args:
+            - sh
+            - -ec
+            - |
+              forgejo migrate
+              forgejo admin user list --admin | awk 'NR > 1 { print $2 }' | grep -qx nvoi ||
+                forgejo admin user create --admin --username nvoi --email nvoi@localhost --password "$(cat /secrets/forgejo_password)" --must-change-password=false
+              exec forgejo web
+          env:
+            - { name: FORGEJO__database__DB_TYPE, value: sqlite3 }
+            - { name: FORGEJO__database__PATH, value: /var/lib/gitea/data/forgejo.db }
+            - { name: FORGEJO__database__SQLITE_JOURNAL_MODE, value: WAL }
+            - { name: FORGEJO__server__DOMAIN, value: forgejo }
+            - { name: FORGEJO__server__ROOT_URL, value: "http://forgejo:3000/" }
+            - { name: FORGEJO__server__HTTP_PORT, value: "3000" }
+            - { name: FORGEJO__server__DISABLE_SSH, value: "true" }
+            - { name: FORGEJO__server__START_SSH_SERVER, value: "false" }
+            - { name: FORGEJO__server__OFFLINE_MODE, value: "true" }
+            - { name: FORGEJO__server__LFS_START_SERVER, value: "false" }
+            - { name: FORGEJO__security__INSTALL_LOCK, value: "true" }
+            - { name: FORGEJO__service__DISABLE_REGISTRATION, value: "true" }
+            - { name: FORGEJO__service__REQUIRE_SIGNIN_VIEW, value: "true" }
+            - { name: FORGEJO__service__DEFAULT_KEEP_EMAIL_PRIVATE, value: "true" }
+            - { name: FORGEJO__openid__ENABLE_OPENID_SIGNIN, value: "false" }
+            - { name: FORGEJO__openid__ENABLE_OPENID_SIGNUP, value: "false" }
+            - { name: FORGEJO__repository__DEFAULT_PRIVATE, value: private }
+            - { name: FORGEJO__repository__FORCE_PRIVATE, value: "true" }
+            - { name: FORGEJO__repository__DISABLE_MIGRATIONS, value: "true" }
+            - { name: FORGEJO__mirror__ENABLED, value: "false" }
+            - { name: FORGEJO__actions__ENABLED, value: "false" }
+            - { name: FORGEJO__packages__ENABLED, value: "false" }
+            - { name: FORGEJO__cron_0X2E_update_checker__ENABLED, value: "false" }
+          ports: [{ containerPort: 3000 }]
+          readinessProbe: { httpGet: { path: /api/healthz, port: 3000 }, periodSeconds: 3 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/gitea }
+            - { name: secrets, mountPath: /secrets, readOnly: true }
+      volumes:
+        - name: secrets
+          secret: { secretName: nvoi-secrets, defaultMode: 0440, items: [{ key: forgejo_password, path: forgejo_password }] }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 20Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: forgejo }
+spec: { selector: { app: forgejo }, ports: [{ port: 3000 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: nvoi }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: nvoi } }
+  template:
+    metadata: { labels: { app: nvoi } }
+    spec:
+      containers:
+        - name: nvoi
+          image: ghcr.io/getnvoi/core:latest
+          command: ["sh", "-c", "/app/bin/nvoi eval 'Nvoi.Release.migrate()' && exec /app/bin/nvoi start"]
+          # nvoi-github: the optional GitHub App (GITHUB_APP_*, README.md); without it GitHub is off.
+          envFrom: [{ secretRef: { name: nvoi } }, { secretRef: { name: nvoi-github, optional: true } }]
+          env:
+            - { name: DATABASE_HOST, value: db }
+            - { name: FORGE_URL, value: "http://forgejo:3000" }
+            - { name: NVOI_SECRETS, value: /secrets }
+          ports: [{ containerPort: 4000 }]
+          readinessProbe: { tcpSocket: { port: 4000 }, periodSeconds: 5 }
+          # The secrets volume follows the Secret: the `previews` key the previews Job adds counts without a restart.
+          volumeMounts: [{ name: secrets, mountPath: /secrets, readOnly: true }]
+      volumes:
+        - { name: secrets, secret: { secretName: nvoi-secrets, defaultMode: 0400 } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: nvoi }
+spec: { selector: { app: nvoi }, ports: [{ port: 4000 }] }
+---
+# The installation's names (Nvoi.Hosts, README.md) to the server, for NVOI_HOST=acme.dev: replace them with yours.
+# TLS is the cluster's own: a cert-manager issuer named in the annotation, or the controller's default certificate.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nvoi
+  annotations:
+    # cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  tls: [{ hosts: [acme.dev, git.acme.dev, mcp.acme.dev, sandbox.acme.dev], secretName: nvoi-tls }]
+  rules:
+    - { host: acme.dev, http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: nvoi, port: { number: 4000 } } } }] } }
+    - { host: git.acme.dev, http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: nvoi, port: { number: 4000 } } } }] } }
+    - { host: mcp.acme.dev, http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: nvoi, port: { number: 4000 } } } }] } }
+    - { host: sandbox.acme.dev, http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: nvoi, port: { number: 4000 } } } }] } }

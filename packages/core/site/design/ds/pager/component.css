@@ -1,0 +1,7 @@
+.ds-pager { display: flex; justify-content: space-between; gap: 16px; padding-block: 24px 64px; }
+.ds-pager-link { display: flex; flex-direction: column; gap: 2px; min-width: 200px; padding: 12px 16px; border: 1px solid var(--ds-g12); background: var(--ds-surface); color: var(--ds-g12); text-decoration: none; }
+.ds-pager-link span { font: var(--ds-fs-11) var(--ds-mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ds-g11); }
+.ds-pager-link b { font: 600 var(--ds-fs-17) var(--ds-display); letter-spacing: -0.015em; }
+.ds-pager-link.is-next { text-align: right; margin-left: auto; }
+.ds-pager-link:hover { background: var(--ds-g2); }
+@media (max-width: 600px) { .ds-pager-link { min-width: 0; flex: 1; } }

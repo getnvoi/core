@@ -1,0 +1,17 @@
+---
+// Light or dark as on the public site (layouts/public, ds/site's controller): `.dark` on the document,
+// kept per browser in localStorage.publicDark, light by default. Starlight's data-theme follows the class,
+// so Expressive Code and Starlight's own rules agree with the design system's tokens.
+---
+
+<script is:inline>
+  (() => {
+    const root = document.documentElement;
+    const sync = () => (root.dataset.theme = root.classList.contains("dark") ? "dark" : "light");
+    try { if (localStorage.publicDark === "1") root.classList.add("dark"); } catch {}
+    sync();
+    new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["class"] });
+    // Starlight's pickers call this; the docs have the site's toggle instead.
+    window.StarlightThemeProvider = { updatePickers() {} };
+  })();
+</script>

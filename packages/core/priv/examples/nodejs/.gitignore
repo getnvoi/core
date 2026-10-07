@@ -1,0 +1,14 @@
+.DS_Store
+.env
+/node_modules/
+*.tsbuildinfo
+
+# React Router
+/.react-router/
+/build/
+
+# The database. `DATABASE_PATH` points at `db/app.sqlite3` and WAL makes it
+# three files — somebody's local data, never a commit.
+/db
+
+!.env.example

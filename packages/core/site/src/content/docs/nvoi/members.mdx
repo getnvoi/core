@@ -1,0 +1,42 @@
+---
+title: Members
+description: Who is in the workspace, and as what.
+---
+
+## What it is
+
+A workspace is a set of members, each an account with a role: `owner` or `member`. Everyone owns a workspace of their own from sign-up; an owner adds others by email.
+
+## How it behaves
+
+### An account first
+
+A member is added by the email of somebody who already has an account. There is no invitation waiting to be accepted.
+
+### Owners manage the list
+
+Adding and removing is an owner's. A member reads the list.
+
+### The last owner stays
+
+Removing the only owner is refused: a workspace with nobody to manage it is a workspace nobody can leave properly.
+
+### A token names one workspace
+
+Logging in from the shell pins the token to a workspace; `--workspace` picks one of yours. The app keeps a cookie for the choice and switches from the sidebar.
+
+## In the app
+
+The members page lists them by email and role, searchable. Owners see the add form and the remove buttons.
+
+## From the CLI
+
+```bash
+nvoi workspace-user list --table
+nvoi workspace-user create --email them@example.com --role member
+nvoi workspace-user delete <member-id>
+```
+
+## Related
+
+- [Getting started](/docs/nvoi/getting-started): an account and a workspace.

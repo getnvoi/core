@@ -1,0 +1,98 @@
+---
+title: Sessions
+description: "A conversation with the agent on a checkout: turns, the approval gate, the event log."
+---
+
+## What it is
+
+A session is a conversation on a checkout: one branch of a repository, on a machine of its own, under one [environment](/docs/nvoi/environments). A message is a turn: the agent reads, edits, runs and answers. It is one process on the machine, with the checkout as its working directory. Everything that happened is written as events, one row each, and the session is that log.
+
+## How it behaves
+
+### Starting on a repository makes the checkout
+
+`start` on a repository cuts a branch, starts the box in the background, opens the session and queues the first prompt, so the agent begins as soon as the box answers. `create` on a checkout that exists opens a second session on it: same clone, same branch, same machine.
+
+### A session runs one agent
+
+A session runs with the [agent](/docs/nvoi/agents) it was started with: the model, the instructions, the tool levels. The workspace's first agent runs when none is named.
+
+### A gated call parks the turn
+
+A tool the agent marks `approval` waits for a person. The session's status is `waiting` and nothing reaches the model until the answer lands. A decision on a call somebody already decided is refused, not repeated.
+
+A question the agent asks with `ask_user` waits the same way. The gate shows each question with its options and a field for your own words; approving sends the options you picked and what you wrote, and the agent reads them as its next message. Dismissing tells the agent you declined.
+
+### The log is the record
+
+Events are the durable record, in order. A turn is `queued`, then runs, then settles; a running turn is cancelled, a queued one withdrawn.
+
+### The checkout is served on request
+
+Serving starts the app on the box, and the box first when it is down, and puts it behind the checkout's own hostname. The patch of what the agent changed is read from the box at any time.
+
+## In the app
+
+The rail on the left is the sessions, grouped by day. A session's page is the transcript and the composer, with the preview, the changes, the terminal and the box's logs as views.
+
+## From the CLI
+
+### Start one
+
+```bash
+nvoi session start <repository-id> --prompt "Run the test suite and fix what fails."
+nvoi session start <repository-id> --prompt "…" --agent_id <agent-id> --environment_id <environment-id>
+nvoi session create <worktree-id>
+```
+
+`--environment_id` picks the environment; the repository's first environment by name otherwise.
+
+### Send a message and follow the turn
+
+```bash
+nvoi session-message send <session-id> --prompt "Now add a test for it."
+nvoi session follow <session-id>
+```
+
+`follow` prints events as they land and returns when the turn ends, or says so when the agent is waiting on an approval.
+
+### Answer a parked call, cancel a turn
+
+```bash
+nvoi session answer <session-id> --tool_use_id <id> --decision approve
+nvoi session answer <session-id> --tool_use_id <id> --decision reject
+nvoi session answer <session-id> --tool_use_id <id> --decision approve \
+  --answers '{"0":["Postgres"]}' --notes '{"1":"only the api"}'
+nvoi session stop <session-id> <turn-id>
+```
+
+### Read the log
+
+```bash
+nvoi session-message list <session-id>
+nvoi session-message list <session-id> --after <turn-id>
+nvoi session list --table
+nvoi session list --q health --table
+```
+
+`messages` answers the session and its turns with their events.
+
+### The checkout
+
+```bash
+nvoi preview start <worktree-id>
+nvoi change show <session-id>
+nvoi log list <session-id>
+```
+
+### Rename, archive
+
+```bash
+nvoi session update <session-id> --title "Health check"
+nvoi session update <session-id> --archived true
+```
+
+## Related
+
+- [Agents](/docs/nvoi/agents): what runs a session, and which calls it gates.
+- [Artifacts](/docs/nvoi/artifacts): pages and apps a session made.

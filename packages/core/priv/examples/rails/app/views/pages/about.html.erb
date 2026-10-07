@@ -1,0 +1,13 @@
+<% content_for :title, "About · Rails seed" %>
+
+<h1 class="text-2xl font-semibold tracking-tight">About</h1>
+
+<p class="mt-4 text-sm text-muted-foreground">
+  A Rails application with Postgres, a Solid Queue worker running as its own
+  process, and Turbo Streams over Solid Cable.
+</p>
+
+<p class="mt-4 text-sm text-muted-foreground">
+  The entries page enqueues work, <code>bin/jobs</code> records it, and every
+  connected browser is told.
+</p>

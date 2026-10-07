@@ -1,0 +1,59 @@
+/* Tailwind v4 is CSS-first: no tailwind.config.js, the theme IS this file.
+ *
+ * The variables are shadcn's, so a project that later adds those components
+ * inherits a palette that already matches rather than fighting one. The same
+ * block appears in the go and rust seeds — one palette, stated per project,
+ * because a shared file would have to live outside the tree that becomes
+ * somebody's repository.
+ */
+@import "tailwindcss";
+
+/* WHAT TAILWIND SCANS, STATED. `tailwindcss-rails` runs the CLI against this
+ * file with no config, and v4 infers its sources from the file's own location —
+ * `app/assets/stylesheets`, which holds no templates. Without this, every class
+ * below is emitted by nothing and the build succeeds with an empty utility
+ * layer: a served stylesheet, a 200, and an unstyled page.
+ */
+@source "../../views";
+@source "../../helpers";
+@source "../../javascript";
+
+@theme {
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.922 0 0);
+  --color-accent: oklch(0.97 0 0);
+
+  --radius: 0.625rem;
+}
+
+/* DARK IS A MEDIA QUERY, NOT A TOGGLE. A seed has no preferences UI and no
+ * place to store a choice, so it follows the operating system — which is the
+ * behaviour somebody expects from a page that has no settings. */
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: oklch(0.145 0 0);
+    --color-foreground: oklch(0.985 0 0);
+    --color-card: oklch(0.205 0 0);
+    --color-muted: oklch(0.269 0 0);
+    --color-muted-foreground: oklch(0.708 0 0);
+    --color-primary: oklch(0.985 0 0);
+    --color-primary-foreground: oklch(0.205 0 0);
+    --color-border: oklch(1 0 0 / 12%);
+    --color-accent: oklch(0.269 0 0);
+  }
+}
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+}

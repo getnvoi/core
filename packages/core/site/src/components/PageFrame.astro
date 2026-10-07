@@ -1,0 +1,51 @@
+---
+// The public shell in ds/site's markup: the .ds-site scroller with the sticky top
+// bar, the side nav beside the page, then the site's footer. Starlight's pages list keeps its own
+// element (sl-sidebar-pane): beside the page from 800px, a popover opened from the header's Pages
+// button below that.
+import SiteFooter from "./SiteFooter.astro";
+
+const { hasSidebar } = Astro.locals.starlightRoute;
+---
+
+<div class="ds-site nv-docs" data-controller="ds--site">
+  <header class="ds-site-top has-links"><slot name="header" /></header>
+  <div class:list={["nv-docs-shell", { "has-nav": hasSidebar }]}>
+    {
+      hasSidebar && (
+        <nav class="nv-docs-nav print:hidden" aria-label={Astro.locals.t("sidebarNav.accessibleLabel")}>
+          <script>
+            // Starlight's PageFrame script: the pages list is a popover on a phone only, and the page
+            // behind it is inert while it is open.
+            class StarlightSidebarPane extends HTMLElement {
+              constructor() {
+                super();
+                const desktop = matchMedia("(min-width: 50em)");
+                const reset = () => (this.popover = desktop.matches ? null : "auto");
+                reset();
+                desktop.addEventListener("change", reset);
+                this.addEventListener("toggle", (event) => {
+                  const open = (event as ToggleEvent).newState === "open";
+                  document.querySelectorAll<HTMLElement>(".main-frame, .ds-footer").forEach((el) => el.toggleAttribute("inert", open));
+                });
+              }
+            }
+            customElements.define("sl-sidebar-pane", StarlightSidebarPane);
+          </script>
+          <sl-sidebar-pane popover="" id="starlight__sidebar" class="nv-docs-pane">
+            <div class="sidebar-content">
+              <slot name="sidebar" />
+            </div>
+          </sl-sidebar-pane>
+        </nav>
+      )
+    }
+    <div class="main-frame"><slot /></div>
+  </div>
+  <SiteFooter />
+</div>
+
+<script>
+  import "../scripts/controllers";
+  import "../scripts/copy";
+</script>

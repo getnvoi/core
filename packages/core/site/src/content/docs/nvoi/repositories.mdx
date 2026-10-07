@@ -1,0 +1,100 @@
+---
+title: Repositories
+description: A GitHub repository, imported once.
+---
+
+## What it is
+
+A repository is where a project's code lives for nvoi. It is one of two kinds:
+
+- **On GitHub**, connected through nvoi's GitHub App. Importing records where the code comes from and makes the environment its checkouts run with. Nothing is cloned at import: a clone belongs to a checkout, made when a [session](/docs/nvoi/sessions) starts.
+- **Hosted by nvoi**, reached with git like any other remote. Nothing to install and no GitHub account: the code stays in nvoi.
+
+## Hosted by nvoi
+
+### Push a project
+
+```bash
+cd my-project
+git init && git add -A && git commit -m "Start"      # only if the folder has no git yet
+git remote add nvoi https://git.nvoi.to/<workspace>/my-project.git
+git push nvoi main
+```
+
+The first push to a new name makes the repository and its `development` environment. Its name is lowercase letters, digits and dashes. Making one needs the role manager or admin; pushing needs editor; reading (`clone`, `pull`) is open to every member.
+
+Check `.gitignore` before the first commit: `.env` files and other secrets belong outside git.
+
+### Sign in
+
+Git asks for a user name and a password: any user name, and an nvoi token as the password (`nvoi token create`). Git's credential store keeps it. A token of another workspace is refused with "Wrong context".
+
+A token made for an MCP client is refused.
+
+### Get the agents' work
+
+The agents work on branches, and their work lands on `main` once a person allows it. `git pull nvoi main` brings it to your folder; git merges it with your own changes, and its conflicts and undo work as usual.
+
+### Limits
+
+- A push is at most 100 MB per request, the limit of the network nvoi is served through. For a larger history, push it in parts: an older commit first (`git push nvoi <commit>:main`), then the rest.
+- Every night nvoi copies the hosted repositories to separate storage, and keeps 14 days.
+
+## On GitHub
+
+### The GitHub App is the way in
+
+GitHub is connected by installing nvoi's GitHub App on an account, from the repositories page. On GitHub, "Only select repositories" keeps nvoi to the ones you pick. nvoi makes a short-lived token for each call, narrowed to what that call needs; the machine never holds one.
+
+A repository is imported from the list an installation offers, never typed in as a URL. The list is cached and refreshed behind the page; `sync` asks GitHub again.
+
+A self-hosted server has GitHub once its admin gives it a GitHub App of its own. Until then, the GitHub commands answer `github_not_set_up` and repositories are hosted by nvoi.
+
+### The default branch is GitHub's
+
+Import reads the repository once more for its default branch. Guessing `main` for a repository living on `master` would branch every checkout off nothing.
+
+### Importing makes the first environment
+
+An import mints the repository's default [environment](/docs/nvoi/environments), empty until you give it commands, variables and a preview. A repository with no environment cannot be started.
+
+### Removing a repository takes its checkouts
+
+A repository is the anchor everything under it points at: environments, checkouts, sessions. Removing it removes them with it.
+
+## In the app
+
+The repositories page lists what is imported and, from the installations the workspace holds, what can be. A card per GitHub owner; a row per repository. Connecting a token starts from the same page. A repository's own page is its environments, one at a time.
+
+## From the CLI
+
+### List the installations
+
+```bash
+nvoi github-installation list --table
+nvoi github-installation sync <installation-id>
+```
+
+Each carries the account, its kind, whether it is suspended, and the repositories it offers with their cached row ids.
+
+### Import a repository
+
+```bash
+nvoi repo create --github_repository_id <github-repository-id>
+```
+
+Answers the repository with its environments. A repository the installation no longer sees is refused with the reason.
+
+### List, read, remove
+
+```bash
+nvoi repo list --table
+nvoi repo show <repository-id>
+nvoi repo delete <repository-id>
+```
+
+## Related
+
+- [Environments](/docs/nvoi/environments): what a checkout of this repository runs.
+- [Sessions](/docs/nvoi/sessions): `nvoi session start <repository-id>` makes the first checkout.
+- [API overview](/docs/reference/api/overview): the same operations over HTTP.

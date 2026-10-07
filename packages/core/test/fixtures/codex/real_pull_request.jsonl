@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a10000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"mcp_tool_call","server":"nvoi","tool":"create_pull_request","arguments":{"title":"chore: add CODEX_CHECK file","body":"## Summary\n- Add `CODEX_CHECK.md` containing `hello`.\n\n## Why\n- Add the requested check file."},"result":null,"error":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"nvoi","tool":"create_pull_request","arguments":{"title":"chore: add CODEX_CHECK file","body":"## Summary\n- Add `CODEX_CHECK.md` containing `hello`.\n\n## Why\n- Add the requested check file."},"result":{"content":[{"type":"text","text":"Queued. This action is performed for you once your turn ends and you will be told the outcome. This is the normal path; end your turn now with a one-line summary of what you asked for."}],"structured_content":null},"error":null,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"The PR for `chore: add CODEX_CHECK file` is queued to open."}}
+{"type":"turn.completed","usage":{"input_tokens":83936,"cached_input_tokens":70912,"cache_write_input_tokens":0,"output_tokens":555,"reasoning_output_tokens":100}}

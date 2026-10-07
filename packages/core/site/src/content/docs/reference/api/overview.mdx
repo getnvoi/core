@@ -1,0 +1,58 @@
+---
+title: Overview
+description: One base URL, one bearer, two failure shapes.
+---
+
+## Base URL
+
+Every path on these pages is under `https://nvoi.to`. The document they are rendered from is recorded from the api's own tests: a schema no test produced is a schema that drifts.
+
+## Authentication
+
+A login answers a token, and the token names a workspace.
+
+```bash
+curl -s https://nvoi.to/api/v1/login \
+  -H "content-type: application/json" \
+  -d '{"email":"you@example.com","password":"…","workspace":"acme"}'
+```
+
+The answer is `{ "token": "…", "user": { "id", "email" }, "workspace": { "id", "name", "slug" } }`. `workspace` is optional: your first one otherwise; one you are not a member of answers 403 `not_a_member`. Send the token on every call:
+
+```bash
+curl -s https://nvoi.to/api/v1/repos -H "Authorization: Bearer $TOKEN"
+```
+
+A token carries its workspace, so no call takes a workspace parameter. It lives thirty days, or until `DELETE /api/v1/logout` with the same bearer. The browser's session cookie opens the same endpoints; when both are sent, the bearer wins.
+
+## Operations
+
+Every operation has an id `<group>.<action>`, and the [CLI](/docs/reference/cli) is one command per operation: `sessions.say` is `nvoi session-message send`. Path parameters are positional, in the order the path names them; query parameters and body fields are flags. Bodies are flat JSON, as sent. A list answers `{ "<plural>": [ … ] }`; a single row answers `{ "<singular>": { … } }`.
+
+## Ids
+
+Every id is a UUID. A lookup that misses in your workspace answers 404, never 403: distinguishing the two would confirm that an id exists.
+
+## Errors
+
+A refused request carries a sentence to show and a code to branch on:
+
+```json
+{ "error": "That email or password is incorrect.", "code": "invalid_credentials" }
+```
+
+A body that fails validation carries the fields:
+
+```json
+{ "errors": { "name": ["can't be blank"] } }
+```
+
+| status | meaning |
+| --- | --- |
+| 400 `parameter_missing` | a required field is absent |
+| 401 `unauthenticated` | no bearer, a bad or expired one, or a login that was logged out |
+| 403 | the token may not do this: `not_a_member`, `not_an_owner` |
+| 404 `not_found` | no such row in this workspace |
+| 409 | the request is late: `already_decided` |
+| 422 | the body was refused; `errors` says which fields |
+| 429 `too_many_requests` | the login limit: ten per three minutes, by address and by email |

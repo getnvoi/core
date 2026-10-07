@@ -1,0 +1,14 @@
+{"type":"thread.started","thread_id":"01a104cd-594f-7222-9f2b-60ce396d4058"}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 2/5 (stream disconnected before completion: WebSocket protocol error: HTTP version must be 1.1 or higher)"}
+{"type":"error","message":"Reconnecting... 3/5 (stream disconnected before completion: WebSocket protocol error: HTTP version must be 1.1 or higher)"}
+{"type":"error","message":"Reconnecting... 4/5 (stream disconnected before completion: WebSocket protocol error: HTTP version must be 1.1 or higher)"}
+{"type":"error","message":"Reconnecting... 5/5 (stream disconnected before completion: WebSocket protocol error: HTTP version must be 1.1 or higher)"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Falling back from WebSockets to HTTPS transport. stream disconnected before completion: WebSocket protocol error: HTTP version must be 1.1 or higher"}}
+{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses)"}
+{"type":"error","message":"Reconnecting... 2/5 (unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses)"}
+{"type":"error","message":"Reconnecting... 3/5 (unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses)"}
+{"type":"error","message":"Reconnecting... 4/5 (unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses)"}
+{"type":"error","message":"Reconnecting... 5/5 (unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses)"}
+{"type":"error","message":"unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses"}
+{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Incorrect API key provided, url: http://127.0.0.1:8799/v1/responses"}}

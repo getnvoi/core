@@ -1,0 +1,247 @@
+[
+  {
+    "name": "Thinking",
+    "family": "blue",
+    "note": "Anything that reasons or talks back.",
+    "icons": [
+      {
+        "drawing": "session",
+        "label": "Session",
+        "description": "Pixel eyes, an open pixel mouth, sound in lines"
+      },
+      {
+        "drawing": "agent",
+        "label": "Agent",
+        "description": "A square head, dot eyes, a line mouth"
+      },
+      {
+        "drawing": "subagent",
+        "label": "Sub-agent",
+        "description": "Two square heads, the small one in front"
+      },
+      {
+        "drawing": "llm",
+        "label": "LLM",
+        "description": "Sparks for eyes, a pixel smile"
+      },
+      {
+        "drawing": "skill",
+        "label": "Skill",
+        "description": "Triangle, circle and square"
+      }
+    ]
+  },
+  {
+    "name": "Tools",
+    "family": "olive",
+    "note": "What an agent can do.",
+    "icons": [
+      {
+        "drawing": "tool",
+        "label": "Tool",
+        "description": "A toolbox, two pixel latches"
+      },
+      {
+        "drawing": "read",
+        "label": "Read",
+        "description": "An eye with a pixel pupil"
+      },
+      {
+        "drawing": "edit",
+        "label": "Edit",
+        "description": "A pencil over a pixel line"
+      },
+      {
+        "drawing": "bash",
+        "label": "Bash",
+        "description": "A prompt with a pixel cursor"
+      },
+      {
+        "drawing": "grep",
+        "label": "Grep",
+        "description": "A lens over found lines"
+      },
+      {
+        "drawing": "settitle",
+        "label": "Set title",
+        "description": "A text cursor between pixel words"
+      },
+      {
+        "drawing": "screenshot",
+        "label": "Screenshot",
+        "description": "A camera with a pixel flash"
+      },
+      {
+        "drawing": "push",
+        "label": "Push branch",
+        "description": "An arrow up off a pixel base"
+      },
+      {
+        "drawing": "pr",
+        "label": "Pull request",
+        "description": "Three nodes, a pixel arrowhead"
+      }
+    ]
+  },
+  {
+    "name": "Code",
+    "family": "green",
+    "note": "What lives in git.",
+    "icons": [
+      {
+        "drawing": "repo",
+        "label": "Repository",
+        "description": "A branch with square nodes"
+      },
+      {
+        "drawing": "changes",
+        "label": "Changes",
+        "description": "Pixel plus and minus for eyes"
+      }
+    ]
+  },
+  {
+    "name": "Machines",
+    "family": "orange",
+    "note": "Where code runs.",
+    "icons": [
+      {
+        "drawing": "env",
+        "label": "Environment",
+        "description": "A box with vents for a mouth"
+      },
+      {
+        "drawing": "terminal",
+        "label": "Terminal",
+        "description": "A line chevron and a pixel underscore"
+      },
+      {
+        "drawing": "preview",
+        "label": "Preview",
+        "description": "Square glasses with pixel pupils"
+      },
+      {
+        "drawing": "layers",
+        "label": "Standard",
+        "description": "A top plane over two pixel-dashed layers"
+      },
+      {
+        "drawing": "zap",
+        "label": "Advanced",
+        "description": "Solid layers and a pixel bolt"
+      },
+      {
+        "drawing": "server",
+        "label": "Production",
+        "description": "Two racks apart, with lights"
+      },
+      {
+        "drawing": "history",
+        "label": "History",
+        "description": "A clock face, its hand, an arrow turning back"
+      }
+    ]
+  },
+  {
+    "name": "Knowledge",
+    "family": "amber",
+    "note": "What people and agents read.",
+    "icons": [
+      {
+        "drawing": "library",
+        "label": "Library",
+        "description": "Shut pixel eyes over an open book"
+      },
+      {
+        "drawing": "note",
+        "label": "Note",
+        "description": "A page with a pixel face"
+      }
+    ]
+  },
+  {
+    "name": "Output",
+    "family": "pink",
+    "note": "What a session hands back.",
+    "icons": [
+      {
+        "drawing": "artifact",
+        "label": "Artifact",
+        "description": "A cube with eyes on its lid"
+      }
+    ]
+  },
+  {
+    "name": "People",
+    "family": "purple",
+    "note": "Who is in the workspace.",
+    "icons": [
+      {
+        "drawing": "you",
+        "label": "You",
+        "description": "Round glasses, a pixel smile"
+      },
+      {
+        "drawing": "member",
+        "label": "Members",
+        "description": "Two faces, pixel eyes"
+      },
+      {
+        "drawing": "workspace",
+        "label": "Workspace",
+        "description": "A house with windows for eyes"
+      }
+    ]
+  },
+  {
+    "name": "Work",
+    "family": "teal",
+    "note": "What is asked and tracked.",
+    "icons": [
+      {
+        "drawing": "task",
+        "label": "Task",
+        "description": "Pixel eyes over a flat check"
+      },
+      {
+        "drawing": "plan",
+        "label": "Plan",
+        "description": "Two done, one to do"
+      }
+    ]
+  },
+  {
+    "name": "Waiting on you",
+    "family": "yellow",
+    "note": "Something needs a decision.",
+    "icons": [
+      {
+        "drawing": "gate",
+        "label": "Approval",
+        "description": "One brow raised high"
+      },
+      {
+        "drawing": "secret",
+        "label": "Secret",
+        "description": "Eyes shut above the lock"
+      },
+      {
+        "drawing": "mention",
+        "label": "Mention",
+        "description": "An @ with pixel eyes in its loop"
+      }
+    ]
+  },
+  {
+    "name": "Wiring",
+    "family": "gray",
+    "note": "Links to the outside.",
+    "icons": [
+      {
+        "drawing": "connector",
+        "label": "Connector",
+        "description": "A square plug with a face"
+      }
+    ]
+  }
+]

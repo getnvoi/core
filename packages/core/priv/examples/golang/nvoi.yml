@@ -1,0 +1,36 @@
+# Go, Postgres, River jobs and server-sent events: a job's progress reaches the page while it runs.
+# air rebuilds web and worker on change; each migrates its schema at boot.
+detect:
+- go.mod
+ignore:
+- vendor/
+- tmp/
+env:
+  PATH: "/usr/lib/postgresql/16/bin:$PATH"
+  PGDATA: "$HOME/.local/pgdata"
+  PGHOST: 127.0.0.1
+  PGUSER: postgres
+  PGDATABASE: seed_development
+  DATABASE_URL: postgres://postgres@127.0.0.1:5432/seed_development
+# The toolchain, installed before setup, even when an environment types its own setup commands.
+tools:
+- mise use -g go@$(sed -n "s/^go //p" go.mod) air aqua:tailwindlabs/tailwindcss@latest
+setup:
+- test -x /usr/lib/postgresql/16/bin/initdb || { sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq postgresql-16 libpq-dev && { sudo systemctl disable -q --now postgresql 2>/dev/null; sudo pg_ctlcluster 16 main stop 2>/dev/null; true; }; }
+- go mod download
+- tailwindcss -i assets/app.css -o public/app.css
+services:
+- name: postgres
+  command: '{ test -d "$PGDATA" || initdb --username=postgres --auth=trust --encoding=UTF8 --locale=C "$PGDATA"; } && exec postgres -D "$PGDATA" -p $PORT -k /tmp'
+  port: 5432
+- name: css
+  command: exec tailwindcss -i assets/app.css -o public/app.css --watch=always
+- name: jobs
+  before:
+  - psql -tAd postgres -c "select 1 from pg_database where datname = '$PGDATABASE'" | grep -q 1 || createdb "$PGDATABASE"
+  command: exec air -c .air.jobs.toml
+- name: app
+  before:
+  - psql -tAd postgres -c "select 1 from pg_database where datname = '$PGDATABASE'" | grep -q 1 || createdb "$PGDATABASE"
+  command: exec air -c .air.web.toml
+  port: 3000

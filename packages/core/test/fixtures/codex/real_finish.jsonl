@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"01a10000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Pull request opened: [#288](https://github.com/benbonnet/dummy-rails/pull/288)."}}
+{"type":"turn.completed","usage":{"input_tokens":96531,"cached_input_tokens":82944,"cache_write_input_tokens":0,"output_tokens":584,"reasoning_output_tokens":100}}

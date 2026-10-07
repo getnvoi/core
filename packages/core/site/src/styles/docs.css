@@ -1,0 +1,370 @@
+/* The docs in the design system. Its faces and tokens load before this sheet (customCss);
+   here: its reset under Starlight's layers, the components the frame reuses, then
+   Starlight's variables and parts mapped onto the tokens. Every value is a --ds-* token. */
+
+/* The reset sits in a layer under Starlight's, so it keeps
+   the document still (the .ds-site frame scrolls, as on the site) without undoing Starlight's spacing. */
+@layer nvoi-base, starlight;
+@import "../../design/stylesheets/base.css" layer(nvoi-base);
+
+/* The components the frame is drawn with, in folder order
+   so where two rules tie the same one wins: ds/site's hides ds/menu's fold on a wide screen. */
+@import "../../design/ds/article/component.css";
+@import "../../design/ds/button/component.css";
+@import "../../design/ds/code/component.css";
+@import "../../design/ds/footer/component.css";
+@import "../../design/ds/hero/component.css";
+@import "../../design/ds/menu/component.css";
+@import "../../design/ds/pager/component.css";
+@import "../../design/ds/site/component.css";
+@import "../../design/ds/table/component.css";
+
+/* ---------------------------------------------------------------------------------------------
+   Starlight's variables on the tokens. One mapping serves both modes: the tokens change under .dark,
+   which ThemeProvider keeps in step with data-theme. */
+:root,
+::backdrop {
+  --sl-color-white: var(--ds-g12);
+  --sl-color-gray-1: var(--ds-g12);
+  --sl-color-gray-2: var(--ds-g11);
+  --sl-color-gray-3: var(--ds-g11);
+  --sl-color-gray-4: var(--ds-g9);
+  --sl-color-gray-5: var(--ds-g7);
+  --sl-color-gray-6: var(--ds-g6);
+  --sl-color-gray-7: var(--ds-g2);
+  --sl-color-black: var(--ds-bg);
+
+  /* The accent is ink: the system has no brand hue for links or the current page. */
+  --sl-color-accent-low: var(--ds-ga4);
+  --sl-color-accent: var(--ds-ink);
+  --sl-color-accent-high: var(--ds-g12);
+  --sl-color-text: var(--ds-g12);
+  --sl-color-text-accent: var(--ds-g12);
+  --sl-color-text-invert: var(--ds-g1);
+  --sl-color-bg: var(--ds-bg);
+  --sl-color-bg-nav: var(--ds-bg);
+  --sl-color-bg-sidebar: var(--ds-bg);
+  --sl-color-bg-inline-code: var(--ds-ga4);
+  --sl-color-bg-accent: var(--ds-g12);
+  --sl-color-hairline-light: var(--ds-g6);
+  --sl-color-hairline: var(--ds-g6);
+  --sl-color-hairline-shade: var(--ds-g6);
+  --sl-color-backdrop-overlay: var(--ds-backdrop);
+
+  /* Starlight's hues are the families' pairs: -low the fill, -high and the base the ink. */
+  --sl-color-blue-low: var(--ds-blue-f);
+  --sl-color-blue: var(--ds-blue-i);
+  --sl-color-blue-high: var(--ds-blue-i);
+  --sl-color-green-low: var(--ds-green-f);
+  --sl-color-green: var(--ds-green-i);
+  --sl-color-green-high: var(--ds-green-i);
+  --sl-color-orange-low: var(--ds-amber-f);
+  --sl-color-orange: var(--ds-amber-i);
+  --sl-color-orange-high: var(--ds-amber-i);
+  --sl-color-purple-low: var(--ds-purple-f);
+  --sl-color-purple: var(--ds-purple-i);
+  --sl-color-purple-high: var(--ds-purple-i);
+  --sl-color-red-low: var(--ds-pink-f);
+  --sl-color-red: var(--ds-pink-i);
+  --sl-color-red-high: var(--ds-pink-i);
+
+  /* Only the system's shadows: none on a surface, the float shadow on what floats while open. */
+  --sl-shadow-sm: none;
+  --sl-shadow-md: none;
+  --sl-shadow-lg: var(--ds-sh-float);
+
+  --sl-font: var(--ds-sans);
+  --sl-font-mono: var(--ds-mono);
+  --sl-font-system: var(--ds-sans);
+  --sl-font-system-mono: var(--ds-mono);
+
+  /* Reading size (ds/prose read) and the site's heading scale (ds/article). */
+  --sl-text-body: 16px;
+  --sl-text-body-sm: 13px;
+  --sl-text-code: 13px;
+  --sl-text-code-sm: 14px;
+  --sl-text-h1: 48px;
+  --sl-text-h2: 26px;
+  --sl-text-h3: 18px;
+  --sl-text-h4: 15px;
+  --sl-text-h5: 14px;
+  --sl-text-h6: 13px;
+  --sl-line-height: 1.6;
+  --sl-line-height-headings: 1.2;
+
+  /* ds/site's frame: a 56px bar, the 232px side nav; the article sets its own column. */
+  --sl-nav-height: 56px;
+  --sl-sidebar-width: 232px;
+  --sl-sidebar-pad-x: 12px;
+  --sl-content-width: none;
+  --sl-content-pad-x: 0px;
+  --sl-content-gap-y: 14px;
+  --sl-mobile-toc-height: 0px;
+  --sl-main-pad: 0;
+  --sl-menu-button-size: var(--ds-h-control-sm);
+  --sl-outline-offset-inside: -2px;
+}
+
+/* The frame scrolls, as .ds-site does on the site; titles land under the top bar. */
+.nv-docs { scroll-padding-top: calc(var(--sl-nav-height) + 24px); }
+.nv-docs ::selection { background: var(--ds-ga4); }
+:focus-visible { outline-color: var(--ds-focus); }
+
+/* ---------------------------------------------------------------------------------------------
+   Header. ds/site draws the bar; these are the docs' additions to it. */
+.ds-site-drop { --menu-width: 320px; }
+.ds-site-fold { --menu-width: 280px; }
+/* ds/icon's disc and line weight at 20px. */
+.ds-icon { flex: none; --w: 1.15; }
+.ds-icon-disc { fill: var(--f); }
+
+/* Search: an outline pill like the bar's other buttons, the shortcut in mono. */
+.nv-search button[data-open-modal] { display: inline-flex; align-items: center; gap: 6px; height: var(--ds-h-control-sm); padding: 0 10px; border: 1px solid var(--ds-g8); border-radius: var(--ds-round); background: var(--ds-surface); color: var(--ds-g11); font: 500 12px/1 var(--ds-sans); box-shadow: var(--ds-sh-neutral); transition: transform var(--ds-dur-press) var(--ds-ease-out), background-color var(--ds-dur-hover) ease; }
+.nv-search button[data-open-modal] svg { width: 12px; height: 12px; font-size: 12px; }
+.nv-search button[data-open-modal] kbd { gap: 2px; font: 11px var(--ds-mono); color: var(--ds-g9); background: none; border: 0; }
+.nv-search button[data-open-modal] kbd kbd { padding: 0; }
+@media (hover: hover) and (pointer: fine) { .nv-search button[data-open-modal]:hover { background: var(--ds-g2); color: var(--ds-g12); } }
+.nv-search button[data-open-modal]:active { transform: scale(0.97); }
+@media (max-width: 49.99em) {
+  .nv-search button[data-open-modal] { width: var(--ds-h-control-sm); padding: 0; justify-content: center; }
+}
+/* The dialog floats: square, the float shadow, a washed backdrop. */
+.nv-search dialog { border: 0; border-radius: 0; background: var(--ds-surface); box-shadow: var(--ds-sh-float); color: var(--ds-g12); }
+.nv-search dialog::backdrop { background: var(--ds-backdrop); backdrop-filter: none; }
+.nv-search .dialog-frame { background: var(--ds-surface); }
+.nv-search button[data-close-modal] { font: 500 13px var(--ds-sans); color: var(--ds-g11); }
+#starlight__search {
+  --pagefind-ui-font: var(--ds-sans);
+  --pagefind-ui-text: var(--ds-g12);
+  --pagefind-ui-background: var(--ds-surface);
+  --pagefind-ui-border: var(--ds-g8);
+  --pagefind-ui-primary: var(--ds-g12);
+  --pagefind-ui-tag: var(--ds-g4);
+  --pagefind-ui-border-radius: 0;
+  --pagefind-ui-image-border-radius: 0;
+  --sl-search-result-bg: var(--ds-surface);
+  --sl-search-result-hover-bg: var(--ds-g2);
+  --sl-search-result-pad-inline-start: 16px;
+  --sl-search-result-pad-inline-end: 16px;
+  --sl-search-result-pad-block: 12px;
+  --sl-search-result-nested-pad-inline-start: 28px;
+  --sl-search-corners: 0;
+  --sl-search-page-icon-size: 16px;
+  --sl-search-cancel-space: 0px;
+}
+#starlight__search .pagefind-ui__search-input { font: 400 14px var(--ds-sans); color: var(--ds-g12); }
+#starlight__search .pagefind-ui__form::before { background-color: var(--ds-g9); }
+/* Matches are marked quietly: weight and a g4 wash, not a highlighter. */
+#starlight__search mark { background: var(--ds-g4); color: var(--ds-g12); font-weight: 500; padding: 0 1px; }
+#starlight__search .pagefind-ui__result-link { color: var(--ds-g12); }
+#starlight__search .pagefind-ui__message { font: 500 13px var(--ds-sans); color: var(--ds-g11); }
+#starlight__search .pagefind-ui__result-title { font: 500 14px/1.4 var(--ds-sans); }
+#starlight__search .pagefind-ui__result-nested .pagefind-ui__result-title { font: 500 13px/1.4 var(--ds-sans); }
+#starlight__search .pagefind-ui__result-excerpt { font: 400 13px/1.5 var(--ds-sans); color: var(--ds-g11); }
+#starlight__search .pagefind-ui__result-nested { border-left-color: var(--ds-g6); }
+#starlight__search .pagefind-ui__result-nested::before { background: var(--ds-g6); }
+/* The clear button as a round glyph button, ds/button ghost sm. */
+#starlight__search .pagefind-ui__search-clear { width: 28px; height: 28px; padding: 0; border-radius: 50%; color: var(--ds-g11); background: transparent; font-size: 0; }
+#starlight__search .pagefind-ui__search-clear:hover { background: var(--ds-g3); color: var(--ds-g12); }
+#starlight__search .pagefind-ui__search-clear svg { width: 14px; height: 14px; }
+
+/* The pages list's button: only while the list is a popover. */
+@media (min-width: 50em) { .nv-pages { display: none; } }
+@media (max-width: 480px) { .nv-pages { padding: 0 8px; } }
+
+/* ---------------------------------------------------------------------------------------------
+   Shell: the side nav beside the page from 800px, as ds/site's .has-nav shell draws it. */
+.nv-docs-shell { min-width: 0; }
+/* The pane is a popover element; none of the browser's popover box. */
+.nv-docs-pane { inset: auto; width: auto; margin: 0; padding: 0; border: 0; color: inherit; background: var(--ds-bg); overflow-y: auto; }
+@media (min-width: 50em) {
+  .nv-docs-shell.has-nav { display: grid; grid-template-columns: var(--sl-sidebar-width) minmax(0, 1fr); }
+  .nv-docs-pane { position: sticky; top: var(--sl-nav-height); display: block; height: calc(100dvh - var(--sl-nav-height)); overflow-y: auto; border-right: 1px solid var(--ds-g6); background: var(--ds-bg); }
+}
+/* On a phone the list is a popover under the top bar, over the page. */
+@media (max-width: 49.99em) {
+  .nv-docs-pane { position: fixed; inset: var(--sl-nav-height) 0 0 0; width: 100%; height: auto; margin: 0; padding: 0; border: 0; background: var(--ds-bg); color: inherit; overflow-y: auto; }
+  .nv-docs-pane:popover-open { display: block; }
+}
+.main-frame { min-width: 0; }
+/* On the site the footer follows a paper band; here it follows white, so one g6 edge divides them. */
+.nv-docs > .ds-footer { border-top: 1px solid var(--ds-g6); }
+
+/* ---------------------------------------------------------------------------------------------
+   Side nav: ds/side_nav. Group labels in mono caps, 28px rows, the current page on --ds-ga4.
+   Squares, as every surface. A nested group opens from a chevron in the 28px lead column and its
+   pages hang under its title, on an edge. */
+.sidebar-content { display: flex; flex-direction: column; padding: 20px 12px 40px; font: 400 14px/1.3 var(--ds-sans); }
+.sidebar-content ul { list-style: none; margin: 0; padding: 0; }
+.sidebar-content .top-level { display: flex; flex-direction: column; gap: 18px; }
+.sidebar-content .top-level > li + li { margin-top: 0; }
+.sidebar-content li { margin: 0; overflow-wrap: anywhere; }
+.sidebar-content ul ul li { margin: 0; padding: 0; border: 0; }
+.sidebar-content ul ul { display: flex; flex-direction: column; gap: 1px; }
+.sidebar-content a { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; border-radius: 0; color: var(--ds-g11); font-size: 14px; line-height: 1.3; text-decoration: none; transition: background-color var(--ds-dur-hover) ease, color var(--ds-dur-hover) ease; }
+.sidebar-content a .large { font: inherit; color: inherit; }
+@media (hover: hover) and (pointer: fine) { .sidebar-content a:hover { background: var(--ds-ga3); color: var(--ds-g12); } }
+.sidebar-content a:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: -2px; }
+.sidebar-content a[aria-current="page"],
+.sidebar-content a[aria-current="page"]:hover,
+.sidebar-content a[aria-current="page"]:focus { background: var(--ds-ga4); color: var(--ds-g12); font-weight: 500; }
+
+/* A top-level group: its label is the section title, always open. */
+.sidebar-content .top-level > li > details > summary { display: flex; align-items: center; padding: 0 8px 6px; cursor: default; pointer-events: none; }
+.sidebar-content .top-level > li > details > summary .large { font: 500 11px var(--ds-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ds-g9); }
+.sidebar-content .top-level > li > details > summary .caret { display: none; }
+
+/* A nested group (an API tag): a row with its chevron in the lead column. */
+.sidebar-content ul ul summary { display: flex; flex-direction: row-reverse; justify-content: flex-end; align-items: center; min-height: 28px; padding: 4px 8px 4px 0; color: var(--ds-g11); cursor: pointer; transition: background-color var(--ds-dur-hover) ease, color var(--ds-dur-hover) ease; }
+.sidebar-content ul ul summary .large { font: 400 14px/1.3 var(--ds-sans); color: inherit; }
+.sidebar-content ul ul summary .caret { flex: none; width: var(--ds-lead); height: 16px; color: var(--ds-g9); transition: transform var(--ds-dur-pop) var(--ds-ease-out); }
+.sidebar-content ul ul [open] > summary { color: var(--ds-g12); }
+@media (hover: hover) and (pointer: fine) { .sidebar-content ul ul summary:hover { background: var(--ds-ga3); color: var(--ds-g12); } }
+.sidebar-content summary::marker, .sidebar-content summary::-webkit-details-marker { display: none; }
+/* The pages of a nested group hang on an edge under the chevron's centre; their titles start where the
+   group's title does, one lead column in. */
+.sidebar-content ul ul ul { margin: 1px 0 4px calc(var(--ds-lead) / 2); padding: 0; border-left: 1px solid var(--ds-g6); }
+.sidebar-content ul ul ul a { padding-left: calc(var(--ds-lead) / 2 - 1px); }
+.sidebar-content ul ul ul summary { padding-left: 0; }
+@media (prefers-reduced-motion: reduce) { .sidebar-content ul ul summary .caret { transition: none; } }
+
+/* ---------------------------------------------------------------------------------------------
+   The head and the article. ds/hero and ds/article draw them; the docs keep the hero to its column
+   width and the article's text at reading size. */
+.nv-docs .ds-hero h1 { margin: 0; }
+.nv-docs .ds-article-body { padding-top: 40px; padding-bottom: 0; }
+.nv-docs .ds-article:not(.has-toc) { grid-template-columns: minmax(0, 1fr); }
+.nv-docs main { min-width: 0; }
+.nv-docs .content-panel { padding: 0; }
+.nv-docs .content-panel + .content-panel { border-top: 0; }
+.nv-docs .content-panel .sl-container { max-width: none; margin: 0; }
+/* The title's panel is empty: the title is in the head. */
+.nv-docs .content-panel:has(> .sl-container:not(:has(*))) { display: none; }
+
+/* The rail: ds/article's, from 1180px; the contents bar below that. */
+.ds-article-toc nav { display: flex; flex-direction: column; gap: 6px; }
+.ds-article-toc h2 { font: 500 11px var(--ds-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ds-g9); padding-bottom: 4px; margin: 0; }
+.ds-article-toc ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ds-article-toc ul ul { margin-top: 6px; padding-left: 12px; }
+.ds-article-toc a { display: block; padding: 0; color: var(--ds-g11); font-size: 13px; line-height: 1.35; text-decoration: none; transition: color var(--ds-dur-hover) ease; }
+.ds-article-toc a:hover { color: var(--ds-g12); }
+/* The section in view: ds/article's is-on, g12 at 500. */
+.ds-article-toc a[aria-current="true"] { color: var(--ds-g12); font-weight: 500; }
+.ds-article-toc { max-height: calc(100dvh - 80px); overflow-y: auto; padding-bottom: 32px; }
+
+.nv-toc-bar { position: sticky; top: var(--sl-nav-height); z-index: 4; }
+@media (min-width: 1181px) { .nv-toc-bar { display: none; } }
+.nv-toc-bar nav { position: static; border: 0; border-bottom: 1px solid var(--ds-g6); background: var(--ds-bg); }
+.nv-toc-bar summary { height: 40px; padding: 0 48px; gap: 12px; border: 0; font: 400 13px var(--ds-sans); color: var(--ds-g11); }
+.nv-toc-bar .toggle { height: var(--ds-h-control-sm); padding: 0 8px 0 10px; gap: 4px; border: 1px solid var(--ds-g8); border-radius: var(--ds-round); background: var(--ds-surface); color: var(--ds-g12); font: 500 12px/1 var(--ds-sans); }
+.nv-toc-bar details[open] .toggle, .nv-toc-bar details .toggle:hover { border-color: var(--ds-g12); color: var(--ds-g12); }
+.nv-toc-bar .display-current { color: var(--ds-g11); }
+.nv-toc-bar .dropdown { border: 0; border-top: 1px solid var(--ds-g6); background: var(--ds-surface); box-shadow: var(--ds-sh-float); }
+.nv-toc-bar .dropdown a { padding-inline: 48px; border-top-color: var(--ds-g6); color: var(--ds-g11); font-size: 13px; }
+.nv-toc-bar .dropdown a[aria-current="true"] { background: var(--ds-ga4); color: var(--ds-g12); font-weight: 500; }
+@media (max-width: 600px) {
+  .nv-toc-bar summary { padding: 0 16px; }
+  .nv-toc-bar .dropdown a { padding-inline: 16px; }
+}
+
+/* ---------------------------------------------------------------------------------------------
+   The text: ds/prose read. 16px/1.6 in a 72ch column, blocks 14px apart, lists with their markers in
+   g9, inline code in mono on --ds-ga4, links underlined in g8. */
+.sl-markdown-content { max-width: 72ch; color: var(--ds-g12); font: 400 16px/1.6 var(--ds-sans); overflow-wrap: break-word; }
+.sl-markdown-content :is(ul, ol):not(:where(.not-content *)) { padding-left: 20px; }
+.sl-markdown-content li:not(:where(.not-content *)) + li { margin-top: 8px; }
+.sl-markdown-content li:not(:where(.not-content *))::marker { color: var(--ds-g9); font-variant-numeric: tabular-nums; }
+.sl-markdown-content strong:not(:where(.not-content *)) { font-weight: 500; }
+.sl-markdown-content a:not(:where(.not-content *)) { color: var(--ds-g12); text-decoration: underline; text-decoration-color: var(--ds-g8); text-underline-offset: 2px; transition: text-decoration-color var(--ds-dur-hover) ease; }
+.sl-markdown-content a:hover:not(:where(.not-content *)) { color: var(--ds-g12); text-decoration-color: var(--ds-g12); }
+.sl-markdown-content code:not(:where(.not-content *)) { margin: 0; padding: 1px 4px; background: var(--ds-ga4); font: 14px var(--ds-mono); overflow-wrap: anywhere; }
+.sl-markdown-content :is(h2, h3, h4) code:not(:where(.not-content *)) { font-size: 0.85em; }
+.sl-markdown-content blockquote:not(:where(.not-content *)) { padding-left: 12px; border-left: 2px solid var(--ds-g7); color: var(--ds-g11); }
+.sl-markdown-content hr:not(:where(.not-content *)) { border: 0; border-bottom: 1px solid var(--ds-g6); }
+
+/* Headings in the display face, on the site's scale: h2 26 (ds/article's section title), h3 18. */
+.sl-markdown-content :is(h2, h3, h4, h5, h6):not(:where(.not-content *)) { font-family: var(--ds-display); font-weight: 600; color: var(--ds-g12); text-wrap: balance; }
+.sl-markdown-content h2:not(:where(.not-content *)) { line-height: 1.15; letter-spacing: -0.02em; }
+.sl-markdown-content h3:not(:where(.not-content *)) { line-height: 1.25; letter-spacing: -0.01em; }
+.sl-markdown-content h4:not(:where(.not-content *)) { font-weight: 500; letter-spacing: -0.015em; }
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper.level-h2 { margin-top: 40px; }
+.sl-markdown-content :not(h1, h2, h3, h4, h5, h6, .sl-heading-wrapper) + .sl-heading-wrapper.level-h3 { margin-top: 28px; }
+.sl-markdown-content :is(.sl-heading-wrapper, h2, h3) + * { margin-top: 12px; }
+.sl-markdown-content > :first-child { margin-top: 0; }
+.sl-markdown-content .sl-anchor-link { color: var(--ds-g9); transition: opacity var(--ds-dur-hover) ease; }
+.sl-markdown-content .sl-anchor-link:hover { color: var(--ds-g12); }
+
+/* Tables: the ds/table frame (the build wraps each table); cells keep reading size one step down. */
+.sl-markdown-content .ds-table { max-width: 100%; }
+.sl-markdown-content .ds-table td { font-size: 14px; line-height: 1.5; }
+.sl-markdown-content .ds-table td code { padding: 1px 4px; background: var(--ds-ga4); font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+
+/* Asides: ds/alert. A square box on the g7 edge, the tone in a round 20px signal cell; the note and
+   the tip are info, caution the warning, danger the error. */
+.starlight-aside { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 10px; row-gap: 2px; padding: 12px 14px; border: 1px solid var(--ds-g7); background: var(--ds-surface); color: var(--ds-g12); font-size: 14px; line-height: 20px; }
+.starlight-aside--caution { border-color: color-mix(in oklab, var(--ds-busy) 70%, var(--ds-g7)); }
+.starlight-aside--danger { border-color: color-mix(in oklab, var(--ds-bad) 55%, var(--ds-g7)); }
+.starlight-aside__title { display: contents; font: 500 14px/20px var(--ds-sans); color: var(--ds-g12); }
+/* The svg is the round cell; its own drawing is hidden and ds/alert's glyph (--nvoi-aside-glyph, from
+   virtual:nvoi/aside-glyphs.css) is masked over it, in the cell's ink. */
+.starlight-aside__icon { grid-row: 1; grid-column: 1; box-sizing: border-box; width: 20px; height: 20px; border-radius: 50%; background: var(--ds-g4); color: var(--ds-g12); }
+.starlight-aside__icon > * { display: none; }
+.starlight-aside__title::before { content: ""; grid-row: 1; grid-column: 1; place-self: center; width: 12px; height: 12px; background: var(--ds-g12); -webkit-mask: var(--nvoi-aside-glyph) center / 12px 12px no-repeat; mask: var(--nvoi-aside-glyph) center / 12px 12px no-repeat; }
+.starlight-aside--caution .starlight-aside__icon { background: var(--ds-busy); }
+.starlight-aside--caution .starlight-aside__title::before { background: var(--ds-ink); }
+.starlight-aside--danger .starlight-aside__icon { background: var(--ds-bad); }
+.starlight-aside--danger .starlight-aside__title::before { background: var(--ds-on-fill); }
+.starlight-aside__content { grid-column: 2; color: var(--ds-g11); }
+.starlight-aside__title + .starlight-aside__content { margin-top: 0; }
+.sl-markdown-content .starlight-aside__content a { color: var(--ds-g12); }
+.sl-markdown-content .starlight-aside code:not(:where(.not-content *)) { background: var(--ds-ga4); color: var(--ds-g12); font-size: 12px; }
+
+/* Previous and next: ds/pager, under the text. */
+.nv-docs .ds-pager { margin-top: 48px; }
+.nv-docs footer.sl-flex .meta { color: var(--ds-g9); font-size: 12px; }
+
+/* Code blocks are ds/code (src/lib/code.mjs builds the markup; ds/code's CSS draws it, 13px inside the
+   site container). Starlight's Markdown rules would space its parts and edge its <pre>; undone here. */
+.sl-markdown-content .ds-code * { margin-top: 0; }
+.sl-markdown-content .ds-code pre { border: 0; }
+
+/* ---------------------------------------------------------------------------------------------
+   The API pages (starlight-openapi). The method is a round ds/badge in its family, the path in mono;
+   panels are squares on the g6 edge; tags are kind badges. */
+.sl-markdown-content .sl-openapi-operation-method { align-items: center; gap: 10px; }
+:root .sl-openapi-operation-method-badge,
+:root .sidebar-content .sl-badge[class*="sl-openapi-method-"] { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border: 0; border-radius: var(--ds-round); background: var(--f, var(--ds-g4)); color: var(--i, var(--ds-g12)); font: 500 12px/1 var(--ds-sans); letter-spacing: 0; text-transform: uppercase; }
+:root .sidebar-content .sl-badge[class*="sl-openapi-method-"] { height: 18px; padding: 0 6px; font-size: 11px; }
+:root .sidebar-content a[aria-current="page"] > .sl-badge[class*="sl-openapi-method-"] { background: var(--f, var(--ds-g4)); color: var(--i, var(--ds-g12)); }
+/* The families of the verbs: reading blue, making green, changing amber, removing pink. */
+.sl-openapi-operation-method-badge:is(.get, .head, .options), .sl-badge.sl-openapi-method-get { --f: var(--ds-blue-f); --i: var(--ds-blue-i); }
+.sl-openapi-operation-method-badge.post, .sl-badge.sl-openapi-method-post { --f: var(--ds-green-f); --i: var(--ds-green-i); }
+.sl-openapi-operation-method-badge:is(.put, .patch), .sl-badge:is(.sl-openapi-method-put, .sl-openapi-method-patch) { --f: var(--ds-amber-f); --i: var(--ds-amber-i); }
+.sl-openapi-operation-method-badge.delete, .sl-badge.sl-openapi-method-delete { --f: var(--ds-pink-f); --i: var(--ds-pink-i); }
+.sl-markdown-content .sl-openapi-operation-method-path { font: 500 14px var(--ds-mono); color: var(--ds-g12); }
+/* The operation's box: its header is a row of controls, the sample under it takes the box's edge. */
+:root .sl-markdown-content .sl-openapi-operation-description { border-color: var(--ds-g6); }
+:root .sl-markdown-content .sl-openapi-operation-description-header { align-items: center; padding: 10px 12px; border-color: var(--ds-g6); background: var(--ds-g3); }
+:root .sl-markdown-content .sl-openapi-snippets { border-color: var(--ds-g6); }
+.sl-openapi-snippet .ds-code { border-width: 0; }
+:root .sl-markdown-content .sl-openapi-operation-description-button { justify-content: center; width: var(--ds-h-control-sm); height: var(--ds-h-control-sm); padding: 0; border: 1px solid var(--ds-g8); border-radius: var(--ds-round); background: var(--ds-surface); box-shadow: var(--ds-sh-neutral); color: var(--ds-g11); }
+:root .sl-markdown-content .sl-openapi-operation-description-caret { font-size: 16px; color: var(--ds-g11); transition: transform var(--ds-dur-pop) var(--ds-ease-out); }
+:root .sl-openapi-operation-description-urls { border: 0; background: var(--ds-surface); box-shadow: var(--ds-sh-float); padding: 12px; }
+:root #sl-openapi-operation-description-popover::before { background: var(--ds-surface); border-color: var(--ds-g6); }
+/* The sample picker: ds/menu's select field. */
+:root .sl-openapi-snippet-picker select,
+:root .sl-openapi-snippet-picker-value { height: var(--ds-h-control); padding: 0 28px 0 10px; border: 1px solid var(--ds-g8); border-radius: 0; background: var(--ds-surface); box-shadow: var(--ds-sh-neutral); color: var(--ds-g12); font: 400 13px/26px var(--ds-sans); }
+:root .sl-openapi-snippet-picker-value { padding-right: 10px; }
+:root .sl-openapi-snippet-picker select:hover { border-color: var(--ds-g12); }
+:root .sl-openapi-snippet-picker-caret { color: var(--ds-g11); font-size: 16px; }
+.sl-markdown-content .sl-openapi-operation-url input { border: 1px solid var(--ds-g8); border-radius: 0; background: var(--ds-surface); color: var(--ds-g12); font: 400 13px var(--ds-mono); height: var(--ds-h-control); padding: 0 10px; box-shadow: var(--ds-sh-neutral); }
+.sl-markdown-content .sl-openapi-operation-url label { color: var(--ds-g11); font-size: 13px; }
+:root .sl-markdown-content .sl-openapi-section-panel { padding: 14px 16px; border: 1px solid var(--ds-g6); background: var(--ds-surface); font-size: 14px; line-height: 1.5; }
+:root .sl-markdown-content .sl-openapi-tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border: 1px solid var(--ds-g7); border-radius: var(--ds-round); color: var(--ds-g11); font: 400 12px/1 var(--ds-sans); vertical-align: middle; }
+:root .sl-markdown-content .sl-openapi-type { color: var(--ds-g11); font: 500 12px var(--ds-mono); }
+.sl-markdown-content .sl-openapi-key-name strong { font: 500 13px var(--ds-mono); color: var(--ds-g12); }
+.sl-markdown-content .sl-openapi-key-required { color: var(--ds-bad); font: 500 12px var(--ds-sans); }
+.sl-markdown-content .sl-openapi-key-deprecated { color: var(--ds-g9); font: 500 12px var(--ds-sans); }
+.sl-markdown-content [role="tablist"] { gap: 2px; border-bottom: 1px solid var(--ds-g6); }
+.sl-markdown-content [role="tab"] { border-radius: 0; color: var(--ds-g11); font: 500 13px var(--ds-sans); }
+.sl-markdown-content [role="tab"][aria-selected="true"] { color: var(--ds-g12); border-color: var(--ds-g12); }

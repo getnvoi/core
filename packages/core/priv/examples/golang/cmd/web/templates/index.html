@@ -1,0 +1,81 @@
+{{define "index.html"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Go seed</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="min-h-screen">
+    <div class="mx-auto max-w-2xl px-6 py-10">
+      <nav class="mb-8 flex gap-4 text-sm">
+        <a href="/" class="font-medium text-foreground">Entries</a>
+        <a href="/about" class="text-muted-foreground hover:text-foreground">About</a>
+      </nav>
+
+      <h1 class="text-2xl font-semibold tracking-tight">Go seed</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        Gin · Huma · gorilla/websocket · goqite · GORM · SQLite
+      </p>
+
+      <div class="mt-6 flex items-center gap-3">
+        <button
+          id="add"
+          class="inline-flex h-9 items-center rounded-[var(--radius)] bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          Record an entry
+        </button>
+        <span id="status" class="text-sm text-muted-foreground">connecting…</span>
+      </div>
+
+      <ul id="entries" class="mt-6 divide-y divide-border rounded-[var(--radius)] border border-border">
+        {{range .Entries}}
+        <li class="px-4 py-3 text-sm">
+          Entry #{{.ID}}
+          <span class="text-muted-foreground">— {{.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
+        </li>
+        {{end}}
+      </ul>
+    </div>
+
+    <script>
+      // THE PROOF IS THAT A SECOND TAB UPDATES TOO.
+      //
+      // The button POSTs and does NOT touch the list. Everything on screen
+      // arrives over the socket, put there by the WORKER — a different process
+      // — so one browser recording an entry is visible in every other one. A
+      // handler that inserted the row and returned it would look identical here
+      // and demonstrate nothing.
+      const status = document.getElementById("status");
+      const list = document.getElementById("entries");
+
+      // Same host, so a preview served over TLS gets `wss` with nothing to
+      // configure. A hardcoded `ws://` works locally and fails on the preview,
+      // which is the one place this is actually looked at.
+      const socket = new WebSocket(
+        (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws",
+      );
+
+      socket.onopen = () => (status.textContent = "live");
+      socket.onclose = () => (status.textContent = "disconnected");
+      socket.onerror = () => (status.textContent = "websocket error");
+
+      socket.onmessage = (event) => {
+        const entry = JSON.parse(event.data);
+        const li = document.createElement("li");
+        li.className = "px-4 py-3 text-sm";
+        li.innerHTML =
+          `Entry #${entry.id} <span class="text-muted-foreground">— ` +
+          `${new Date(entry.created_at).toLocaleString()}</span>`;
+        list.prepend(li);
+      };
+
+      document.getElementById("add").onclick = async () => {
+        const response = await fetch("/api/entries", { method: "POST" });
+        if (!response.ok) status.textContent = "could not enqueue";
+      };
+    </script>
+  </body>
+</html>
+{{end}}

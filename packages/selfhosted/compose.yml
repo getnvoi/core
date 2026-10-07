@@ -1,0 +1,165 @@
+# A self-hosted nvoi: the server, its Postgres, its Forgejo (hosted repositories) and Caddy in front, which gets a
+# certificate for each of the installation's names when it is first asked for. `.env` holds three lines (env.example);
+# then `docker compose up -d`. Every other secret is made once by `init` and kept in the secrets volume. Upgrading is
+# a new NVOI_VERSION and `docker compose up -d`: the server migrates its database before it starts. Previews are
+# off until `docker compose --profile previews run --rm previews` (Cloudflare, README.md).
+name: nvoi
+
+x-image: &image ${NVOI_IMAGE:-ghcr.io/getnvoi/core}:${NVOI_VERSION:-latest}
+
+services:
+  # The secrets, one file each, made once (bin/secrets). Forgejo's rootless image runs as uid 1000 and reads its own.
+  init:
+    image: *image
+    command: sh -c '/app/bin/secrets /secrets && chown 1000:1000 /secrets/forgejo_password'
+    volumes:
+      - secrets:/secrets
+
+  # The only published ports. A certificate is asked for a name only when the server says it is the installation's.
+  caddy:
+    image: caddy:2.10.2
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+      - caddy:/data
+    restart: unless-stopped
+    depends_on:
+      - nvoi
+
+  nvoi:
+    image: *image
+    init: true
+    # The three lines, and the optional GitHub App's (GITHUB_APP_*, README.md): without them GitHub is
+    # off and its operations answer github_not_set_up.
+    env_file: .env
+    environment:
+      DATABASE_HOST: db
+      FORGE_URL: http://forgejo:3000
+      NVOI_SECRETS: /secrets
+    command: sh -c '/app/bin/nvoi eval "Nvoi.Release.migrate()" && exec /app/bin/nvoi start'
+    volumes:
+      - secrets:/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/4000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      forgejo:
+        condition: service_healthy
+
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD_FILE: /secrets/postgres_password
+    volumes:
+      - db:/var/lib/postgresql
+      - secrets:/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # Hosted repositories. nvoi is its only client (the git door on git.<host>), so it has no published port.
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:15.0.9-rootless
+    command:
+      - sh
+      - -ec
+      - |
+        forgejo migrate
+        forgejo admin user list --admin | awk 'NR > 1 { print $$2 }' | grep -qx nvoi ||
+          forgejo admin user create --admin --username nvoi --email nvoi@localhost --password "$$(cat /secrets/forgejo_password)" --must-change-password=false
+        exec forgejo web
+    environment:
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__database__PATH: /var/lib/gitea/data/forgejo.db
+      FORGEJO__database__SQLITE_JOURNAL_MODE: WAL
+      FORGEJO__server__DOMAIN: forgejo
+      FORGEJO__server__ROOT_URL: http://forgejo:3000/
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__server__START_SSH_SERVER: "false"
+      FORGEJO__server__OFFLINE_MODE: "true"
+      FORGEJO__server__LFS_START_SERVER: "false"
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__service__DEFAULT_KEEP_EMAIL_PRIVATE: "true"
+      FORGEJO__openid__ENABLE_OPENID_SIGNIN: "false"
+      FORGEJO__openid__ENABLE_OPENID_SIGNUP: "false"
+      # Repositories are private whatever an API call says; migrations and mirrors would let the forge fetch
+      # arbitrary urls from inside the network.
+      FORGEJO__repository__DEFAULT_PRIVATE: private
+      FORGEJO__repository__FORCE_PRIVATE: "true"
+      FORGEJO__repository__DISABLE_MIGRATIONS: "true"
+      FORGEJO__mirror__ENABLED: "false"
+      FORGEJO__actions__ENABLED: "false"
+      FORGEJO__packages__ENABLED: "false"
+      FORGEJO__cron_0X2E_update_checker__ENABLED: "false"
+    volumes:
+      - forgejo:/var/lib/gitea
+      - secrets:/secrets:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:3000/api/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  # Previews, once, when the admin turns them on: the preview worker on Cloudflare, its route and its DNS record,
+  # then the `previews` file the server reads (packages/selfhosted/previews).
+  previews:
+    image: ${NVOI_IMAGE:-ghcr.io/getnvoi/core}-previews:${NVOI_VERSION:-latest}
+    profiles: [previews]
+    environment:
+      NVOI_HOST: ${NVOI_HOST:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      PREVIEWS: ${PREVIEWS:-}
+    volumes:
+      - secrets:/secrets
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+configs:
+  caddyfile:
+    content: |
+      {
+        on_demand_tls {
+          ask http://nvoi:4000/tls
+        }
+      }
+
+      https:// {
+        tls {
+          on_demand
+        }
+        reverse_proxy nvoi:4000
+      }
+
+volumes:
+  caddy:
+  db:
+  forgejo:
+  secrets:

@@ -1,0 +1,38 @@
+.ds-site { container: site / inline-size; height: 100%; overflow-y: auto; background: var(--ds-bg); color: var(--ds-g12); font: 14px/1.55 var(--ds-sans); letter-spacing: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.ds-site-top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; height: 56px; padding: 0 20px; background: var(--ds-bg); border-bottom: 1px solid var(--ds-g6); }
+.ds-site-brand { display: flex; align-items: center; gap: 6px; color: var(--ds-g12); text-decoration: none; }
+/* The mark 1.2 times the wordmark's height, 0.3 of it away (the ds/brand lockup's proportions). */
+.ds-site-mark { width: 24px; height: 24px; display: block; }
+/* The mark is ink on a light ground and paper on a dark one (the logo page). */
+.ds-site-mark.is-dark, .dark .ds-site-mark.is-light { display: none; }
+.dark .ds-site-mark.is-dark { display: block; }
+.ds-site-word { height: 20px; width: auto; display: block; }
+.ds-site-tag { font: 500 var(--ds-fs-11) var(--ds-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ds-g11); border: 1px solid var(--ds-g8); border-radius: var(--ds-round); padding: 1px 8px; }
+.ds-site-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+/* The site's links, beside the logo: Inter 14, g11, g12 for the page you are on. A link with a menu opens
+   it from a chevron; under 900px the links fold into the Menu button. */
+.ds-site-links { display: flex; align-items: center; gap: 2px; margin-left: 28px; }
+.ds-site-link { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border: 0; border-radius: var(--ds-round); background: none; color: var(--ds-g11); font: 500 var(--ds-fs-13)/1 var(--ds-sans); text-decoration: none; cursor: pointer; transition: color var(--ds-dur-hover) ease; }
+.ds-site-link[aria-current="page"], .ds-site-link[aria-expanded="true"] { color: var(--ds-g12); }
+.ds-site-link:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 2px; }
+.ds-site-link .ds-glyph { color: var(--ds-g9); }
+@media (hover: hover) and (pointer: fine) { .ds-site-link:hover { color: var(--ds-g12); } }
+.ds-site-fold { display: none; }
+@container site (max-width: 900px) {
+  .ds-site-links { display: none; }
+  .ds-site-fold { display: inline-flex; }
+}
+/* On a phone the bar keeps the mark, Menu and the actions; the wordmark goes first. */
+@container site (max-width: 480px) {
+  .ds-site-top { padding: 0 16px; }
+  .ds-site-top.has-links .ds-site-word, .ds-site-top.has-links .ds-site-tag { display: none; }
+  .ds-site-top.has-links .ds-site-actions { gap: 4px; }
+}
+.ds-site-shell.has-nav { display: grid; grid-template-columns: 232px minmax(0, 1fr); }
+.ds-site-nav { position: sticky; top: 56px; height: calc(100dvh - 56px); overflow-y: auto; border-right: 1px solid var(--ds-g6); }
+.ds-site-main { min-width: 0; }
+@media (max-width: 860px) {
+  .ds-site-shell.has-nav { grid-template-columns: 1fr; }
+  .ds-site-nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--ds-g6); }
+}

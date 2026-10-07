@@ -1,0 +1,54 @@
+---
+// The site's top bar, inside ds/site's <header class="ds-site-top"> (PageFrame): the links, the
+// Product menu and, under 900px, the folded Menu, from site.yml (src/lib/site.ts);
+// the menus are ds/menu's markup and controller.
+// The docs add Starlight's search and, on a phone, the button that opens the pages list.
+import Search from "virtual:starlight/components/Search";
+import { brand, glyph, icon } from "../lib/design";
+import { links, product, productPage, signIn, signUp, type Row } from "../lib/site";
+
+const { hasSidebar } = Astro.locals.starlightRoute;
+const docs = "/docs/";
+
+// A menu row for a link, with its category face when it has one.
+const row = (r: Row) =>
+  `<a class="ds-menu-row" role="menuitem" tabindex="-1" data-ds--menu-target="row" data-action="ds--menu#act" href="${r.href}">` +
+  (r.icon ? icon(r.icon as never, r.family!, 20) : "") +
+  `<span class="ds-menu-text"><span class="ds-menu-label">${r.label}</span>` +
+  (r.hint ? `<span class="ds-menu-hint">${r.hint}</span>` : "") +
+  `</span></a>`;
+const menu = (align: "start" | "end") =>
+  `data-controller="ds--menu" data-ds--menu-align-value="${align}" data-ds--menu-side-value="bottom" data-ds--menu-submit-value="false"`;
+const panel = `class="ds-menu-panel" role="menu" popover="manual" tabindex="-1" data-ds--menu-target="panel" data-action="keydown->ds--menu#key"`;
+const trigger = `class="ds-menu-trigger" data-ds--menu-target="trigger" data-action="click->ds--menu#toggle keydown->ds--menu#press"`;
+
+const productMenu =
+  `<div class="ds-menu ds-site-drop" ${menu("start")}><div ${trigger}>` +
+  `<button type="button" class="ds-site-link">Product${glyph("chevron-down", 12)}</button></div>` +
+  `<div ${panel}>${product.map(row).join("")}<hr class="ds-menu-rule">${row(productPage)}</div></div>`;
+
+// The folded menu: the Product menu becomes a labelled group, the other links rows.
+const foldMenu =
+  `<div class="ds-menu ds-site-fold" ${menu("end")}><div ${trigger}>` +
+  `<button type="button" class="ds-button is-ghost is-sm">Menu</button></div><div ${panel}>` +
+  `<div class="ds-menu-group" role="group" aria-label="Product"><div class="ds-menu-group-label" aria-hidden="true">Product</div>` +
+  `${[...product, productPage].map(row).join("")}</div>${links.map(row).join("")}</div></div>`;
+---
+
+<a class="ds-site-brand" aria-label="nvoi" href="/">
+  <Fragment set:html={brand("mark", 'class="ds-site-mark is-light"')} />
+  <Fragment set:html={brand("mark-paper", 'class="ds-site-mark is-dark"')} />
+  <Fragment set:html={brand("wordmark", 'class="ds-site-word"')} />
+</a>
+<nav class="ds-site-links" aria-label="Site">
+  <Fragment set:html={productMenu} />
+  {links.map((l) => <a class="ds-site-link" href={l.href} aria-current={l.href === docs ? "page" : undefined}>{l.label}</a>)}
+</nav>
+<div class="ds-site-actions">
+  <Fragment set:html={foldMenu} />
+  <Search class="nv-search" />
+  {hasSidebar && <button type="button" class="ds-button is-ghost is-sm nv-pages" popovertarget="starlight__sidebar">Pages</button>}
+  <a class="ds-button is-ghost is-sm" href={signIn}>Sign in</a>
+  <a class="ds-button is-solid is-sm" href={signUp}>Start</a>
+  <button type="button" class="ds-button is-outline is-sm" data-action="ds--site#theme" data-ds--site-target="theme">Dark</button>
+</div>

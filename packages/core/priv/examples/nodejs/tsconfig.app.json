@@ -1,0 +1,34 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    ".react-router/types/**/*",
+    "app/**/*",
+    "app/**/.server/**/*",
+    "app/**/.client/**/*",
+    "server/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "strict": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+
+    // BOTH, because this project is one graph now. On Cloudflare the app was
+    // `vite/client` only and the server lived in `workers/` under a separate
+    // config; here `server/app.ts` is Node — `process`, `node:http` — and it
+    // imports the same `~/services/*` the routes do.
+    "types": ["vite/client", "node"],
+
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": {
+      "~/*": ["./app/*"],
+      "@/*": ["./app/*"]
+    },
+    "esModuleInterop": true,
+    "resolveJsonModule": true
+  }
+}

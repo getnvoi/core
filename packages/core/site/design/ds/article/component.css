@@ -1,0 +1,34 @@
+.ds-article { max-width: 1120px; padding-inline: 48px; display: grid; grid-template-columns: minmax(0, 1fr) 180px; column-gap: 48px; }
+.ds-article-body { min-width: 0; padding-bottom: 32px; display: flex; flex-direction: column; }
+.ds-article-body { padding-top: 40px; }
+.ds-article-body > section:first-child { padding-top: 0; }
+.ds-article-toc { position: sticky; top: 80px; align-self: start; padding-top: 40px; display: flex; flex-direction: column; gap: 6px; }
+.ds-article-toc-label { font: 500 var(--ds-fs-11) var(--ds-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ds-g9); padding-bottom: 4px; }
+.ds-article-toc a { color: var(--ds-g11); text-decoration: none; font-size: var(--ds-fs-13); }
+.ds-article-toc a:hover, .ds-article-toc a.is-on { color: var(--ds-g12); }
+.ds-article-toc a.is-on { font-weight: 500; }
+.ds-article-pager { grid-column: 1 / -1; }
+@media (max-width: 1180px) { .ds-article { grid-template-columns: minmax(0, 1fr); } .ds-article-toc { display: none; } }
+@media (max-width: 600px) { .ds-article { padding-inline: 16px; } }
+
+/* Sections: an h2 opens one; a rule separates it from the previous. */
+.ds-article-body > section { display: flex; flex-direction: column; gap: 14px; padding-block: 40px 8px; }
+.ds-article-body > section + section { border-top: 1px solid var(--ds-g6); margin-top: 32px; }
+.ds-article-body > section > h2 { scroll-margin-top: 80px; font: 600 26px/1.15 var(--ds-display); letter-spacing: -0.02em; color: var(--ds-g12); }
+.ds-article-body > section > h3 { margin-top: 16px; font: 600 var(--ds-fs-20)/1.25 var(--ds-display); letter-spacing: -0.01em; }
+.ds-article-body > section > p { max-width: 72ch; }
+.ds-article-body > section > p.lead { font-size: var(--ds-fs-15); color: var(--ds-g11); }
+.ds-article-body > section > ul, .ds-article-body > section > ol { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
+.ds-article-body > section > :is(p, ul, ol) code { font: var(--ds-fs-12) var(--ds-mono); background: var(--ds-ga3); padding: 1px 5px; }
+.ds-article-body .note { color: var(--ds-g11); font-size: var(--ds-fs-13); }
+
+/* Grids of small specimens. */
+.ds-article-body .cells { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(var(--min, 200px), 1fr)); }
+.ds-article-body .cell { display: flex; flex-direction: column; gap: 6px; padding: 14px; background: var(--ds-surface); border: 1px solid var(--ds-g6); min-width: 0; }
+.ds-article-body .cell b { font-weight: 500; }
+.ds-article-body .cell code { font: var(--ds-fs-11) var(--ds-mono); color: var(--ds-g11); background: none; padding: 0; }
+
+/* Reading size for posts. */
+.ds-article.is-read .ds-article-body > section > :is(p, ul, ol) { font-size: 16px; line-height: 1.6; }
+.ds-article.is-read .ds-article-body > section > p.lead { font-size: 18px; }
+.ds-article.is-read .ds-article-body > section > :is(p, ul, ol) code { font-size: 14px; }

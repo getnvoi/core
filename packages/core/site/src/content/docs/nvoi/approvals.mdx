@@ -1,0 +1,68 @@
+---
+title: Approvals and tokens
+description: Who may allow what an agent or a connected AI app asks for. People decide, tools only act.
+---
+
+## The rule
+
+People decide; tools only act. Anything that waits on an approval is allowed or denied by a person, from their own sign-in in nvoi. An AI app, a script or a token can ask, read and run actions for you, but it never says yes in your place.
+
+A decision is one of these:
+
+- allowing or denying a call an agent holds, such as opening a pull request;
+- answering a question an agent asked;
+- allowing an action that needs approval, asked by an AI app connected to nvoi.
+
+## Who asks, who allows
+
+Anyone may ask. Only you allow.
+
+| Who asks | Where it waits | Who may allow it |
+|---|---|---|
+| An nvoi agent in a session (open a pull request, run a command at "approval") | your inbox, and the session | you, in the app or the CLI |
+| An AI app connected to nvoi (Claude, Cursor) running an action at "approval" | it is refused with a reason; you run it in nvoi | you, in the app or the CLI |
+| A script with a personal token | it is refused with a reason | you, in the app or the CLI |
+
+### Example: an agent asks
+
+An agent in a session wants to open a pull request. Opening one is at the level "approval", so the call waits. It shows in your inbox and in the session. You click **Allow**, the agent opens it and goes on in the same turn.
+
+### Example: an AI app asks
+
+You connected Claude to nvoi and ask it to open the pull request for a session. The action needs approval, so nvoi tells Claude that a person must allow it. Claude cannot allow it itself. You allow it in nvoi.
+
+This is what keeps an approval meaningful: text an AI reads, a web page or a file, cannot push it into approving something you never saw.
+
+## Kinds of sign-in
+
+Every call to nvoi carries a token, and the token says what kind of sign-in made it.
+
+| Sign-in | How it is made | Acts for you | Decides | The API (`/api/v1`) |
+|---|---|---|---|---|
+| Your own | signing in to the app, or `nvoi login` | yes | yes | yes |
+| Personal token | `nvoi token create`, or `nvoi mcp add` | yes | no | yes |
+| AI app connected through the browser | the app asks, you click Allow | yes, through nvoi's MCP server | no | no |
+
+A personal token suits a script or CI: it reads and runs actions with your role, and is refused (`403 person_only`) when it tries to decide.
+
+An AI app connected through the browser works only on nvoi's MCP server (`mcp.nvoi.to`). Its token on the API is refused (`403 mcp_only`), so it cannot go around the MCP server's limits.
+
+## Connect an AI app
+
+With the CLI signed in, one command makes a personal token and writes it into the app's configuration, without showing you the secret:
+
+```bash
+nvoi mcp add claude
+nvoi mcp add cursor
+```
+
+Claude's connectors can also connect through the browser: add nvoi's MCP server (`https://mcp.nvoi.to`), sign in and click **Allow**.
+
+## Revoke a token
+
+```bash
+nvoi token list
+nvoi token delete <id>
+```
+
+A revoked token stops working at once, and the sockets it held are closed.

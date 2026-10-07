@@ -1,0 +1,18 @@
+# Compiled binaries, should anyone `go build` in place rather than `go run`.
+#
+# Go's module and build caches live in `~/go` and `~/.cache/go-build`, outside
+# the checkout, so there is far less to exclude here than in a Cargo project —
+# but a stray binary is still ours to keep out of somebody's first commit.
+#
+# This file ships WITH the seed and becomes the new repository's `.gitignore`.
+/web
+/worker
+
+# AIR'S BUILD DIRECTORY. `air` compiles the service into `tmp/` on every save,
+# so this is a binary rewritten several times a minute — committed once, it is a
+# conflict on every future pull.
+/tmp
+
+# The database. `DATABASE_PATH` points at `db/app.sqlite3` and WAL makes it
+# three files — somebody's local data, never a commit.
+/db

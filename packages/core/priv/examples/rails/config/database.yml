@@ -1,0 +1,72 @@
+# Postgres, ONE database, on a branch nvoi cut before this container existed.
+#
+# ── WHY ONE, WHEN RAILS GENERATES FOUR ───────────────────────────────────────
+#
+# Solid Queue, Solid Cache and Solid Cable each want their own database so a
+# flood of jobs cannot lock out the app's own queries. That is right on a server
+# where making a database is free.
+#
+# It is not free here. A managed provider gives one database per branch, and
+# nvoi cuts a branch per worktree so a checkout is nearly instant; asking for
+# three more turns "give me a copy of this app" into a provisioning script.
+#
+# Their tables do not collide — `solid_queue_*`, `solid_cache_*`,
+# `solid_cable_*` — so one database holds all four. `migrations_paths` is KEPT:
+# each still owns its own schema history and `db:prepare` applies every one.
+#
+# ── THE VARIABLES ARE RAILS' OWN, NOT nvoi's ─────────────────────────────────
+#
+# `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and
+# `POSTGRES_PORT`, exactly as a generated `database.yml` reads them, with the
+# same `localhost` defaults. nvoi fills them in for a preview; a laptop fills
+# them in from a local server. Neither has to know about the other, and this
+# file has no nvoi-specific key in it.
+#
+# nvoi also exports `DATABASE_URL`, `PGHOST` and the rest from the same
+# credentials — one connection written out in every shape a client looks for.
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %>
+  host: <%= ENV.fetch("POSTGRES_HOST", "localhost") %>
+  port: <%= ENV.fetch("POSTGRES_PORT", 5432) %>
+  username: <%= ENV.fetch("POSTGRES_USER", nil) %>
+  password: <%= ENV.fetch("POSTGRES_PASSWORD", nil) %>
+  # SSL IS NOT OPTIONAL against a managed provider — Neon refuses a plaintext
+  # connection outright. `prefer` rather than `require` so a local server with
+  # no certificate still works, which is what keeps this file the same on both.
+  sslmode: <%= ENV.fetch("PGSSLMODE", "prefer") %>
+
+development:
+  primary: &primary_development
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DB", "app_development") %>
+  cache:
+    <<: *primary_development
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *primary_development
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *primary_development
+    migrations_paths: db/cable_migrate
+
+# Warning: the test database is erased and re-generated from development.
+test:
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DB", "app_development") %>_test
+
+production:
+  primary: &primary_production
+    <<: *default
+    database: <%= ENV.fetch("POSTGRES_DB", "app_production") %>
+  cache:
+    <<: *primary_production
+    migrations_paths: db/cache_migrate
+  queue:
+    <<: *primary_production
+    migrations_paths: db/queue_migrate
+  cable:
+    <<: *primary_production
+    migrations_paths: db/cable_migrate

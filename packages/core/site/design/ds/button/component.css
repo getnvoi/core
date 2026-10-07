@@ -1,0 +1,43 @@
+/* A floor, not a fixed height, so larger text grows the button; fit-content keeps a row from stretching it. */
+.ds-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: fit-content; min-height: var(--ds-h-control); padding: 0 12px; border: 1px solid transparent; border-radius: var(--ds-round); background: none; color: var(--ds-g12); font: 500 var(--ds-fs-13)/1 var(--ds-sans); white-space: nowrap; text-decoration: none; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent; transition: transform var(--ds-dur-press) var(--ds-ease-out), background-color var(--ds-dur-hover) ease, color var(--ds-dur-hover) ease; }
+.ds-button.is-sm { min-height: var(--ds-h-control-sm); padding: 0 10px; font-size: var(--ds-fs-12); gap: 4px; }
+.ds-button.is-lg { min-height: var(--ds-h-control-lg); padding: 0 20px; font-size: var(--ds-fs-15); gap: 8px; }
+.ds-button.is-glyph { width: var(--ds-h-control); padding: 0; }
+.ds-button.is-glyph.is-sm { width: var(--ds-h-control-sm); }
+.ds-button.is-glyph.is-lg { width: var(--ds-h-control-lg); }
+.ds-button.is-solid { background: var(--ds-g12); color: var(--ds-g1); }
+.ds-button.is-outline { background: var(--ds-surface); border-color: var(--ds-g8); box-shadow: var(--ds-sh-neutral); }
+.ds-button.is-line { border-color: var(--ds-g12); }
+.ds-button.is-ghost { color: var(--ds-g11); }
+/* Link: the discreet action as words, no pill and no fill; its label underlines on hover, and it keeps the
+   control's height as its target. */
+.ds-button.is-link { padding: 0; color: var(--ds-g11); text-underline-offset: 3px; }
+.ds-button.is-link:active:not(:disabled) { transform: none; }
+.ds-button.is-warning { background: color-mix(in oklab, var(--ds-busy) 22%, var(--ds-surface)); border-color: color-mix(in oklab, var(--ds-busy) 70%, var(--ds-g7)); color: var(--ds-g12); }
+.ds-button.is-danger { background: var(--ds-bad-fill); color: var(--ds-on-fill); }
+@media (hover: hover) and (pointer: fine) {
+  .ds-button.is-solid:hover { background: color-mix(in oklab, var(--ds-g12) 86%, var(--ds-bg)); }
+  .ds-button.is-outline:hover { background: var(--ds-g2); }
+  .ds-button.is-line:hover { background: var(--ds-ga3); }
+  .ds-button.is-ghost:hover { background: var(--ds-ga3); color: var(--ds-g12); }
+  .ds-button.is-link:hover { color: var(--ds-g12); text-decoration: underline; }
+  .ds-button.is-warning:hover { background: color-mix(in oklab, var(--ds-busy) 36%, var(--ds-surface)); }
+  .ds-button.is-danger:hover { background: color-mix(in oklab, var(--ds-bad-fill) 88%, var(--ds-g12)); }
+}
+/* Press: a slight give, so the button answers before anything else happens. */
+.ds-button:active:not(:disabled) { transform: scale(0.97); }
+.ds-button:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 2px; }
+.ds-button:disabled { cursor: not-allowed; opacity: var(--ds-dim-off); box-shadow: none; }
+/* Loading keeps the width; the spinner takes the glyph's place and turns fast, which reads as progress. */
+.ds-button.is-loading { cursor: progress; opacity: var(--ds-dim-busy); }
+.ds-button-spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: ds-spin 0.6s linear infinite; }
+@starting-style { .ds-button-spin { opacity: 0; filter: blur(2px); } }
+.ds-button-spin { transition: opacity var(--ds-dur-pop) ease, filter var(--ds-dur-pop) ease; }
+@media (prefers-reduced-motion: reduce) {
+  .ds-button { transition: background-color var(--ds-dur-hover) ease, color var(--ds-dur-hover) ease; }
+  .ds-button:active:not(:disabled) { transform: none; }
+  .ds-button-spin { animation-duration: 1.8s; }
+}
+/* The count: a white disc astride the top left corner. */
+.ds-button.has-count { position: relative; }
+.ds-button .ds-button-count { position: absolute; top: 0; left: 0; translate: -35% -35%; min-width: 14px; height: 14px; padding: 0 3px; font-size: var(--ds-fs-9); background: var(--ds-surface); color: var(--ds-g12); box-shadow: 0 0 0 1px var(--ds-g7); }

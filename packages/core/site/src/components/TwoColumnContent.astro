@@ -1,0 +1,43 @@
+---
+// A docs page as the design system's pages are laid out (layouts/design): ds/hero's paper head with the
+// group, the title and the description, then ds/article's grid, the text beside its on-this-page rail.
+// The mobile contents bar sits between them and sticks under the top bar.
+import MobileTableOfContents from "@astrojs/starlight/components/MobileTableOfContents.astro";
+
+const { entry, sidebar, toc } = Astro.locals.starlightRoute;
+const { title, description, pagefind, hero } = entry.data;
+const indexed = pagefind !== false && entry.id !== "404";
+
+// The innermost sidebar group holding this page names it in the kicker.
+type Entry = (typeof sidebar)[number];
+const group = (entries: Entry[], label?: string): string | undefined => {
+  for (const e of entries) {
+    if (e.type === "link" && e.isCurrent) return label;
+    if (e.type === "group") {
+      const found = group(e.entries, e.label);
+      if (found) return found;
+    }
+  }
+};
+const kicker = group(sidebar);
+// Starlight's PAGE_TITLE_ID: the contents' first link and its scroll spy point at it.
+const titleId = "_top";
+---
+
+{
+  // A page with Starlight's own hero (the 404) keeps it and has no head.
+  !hero && (
+    <header class="ds-hero" data-pagefind-body={indexed ? "" : undefined}>
+      <div class="ds-hero-in">
+        {kicker && <span class="ds-hero-kicker">{kicker}</span>}
+        <h1 id={titleId}>{title}</h1>
+        {description && <p class="ds-hero-lead">{description}</p>}
+      </div>
+    </header>
+  )
+}
+{toc && <div class="nv-toc-bar print:hidden"><MobileTableOfContents /></div>}
+<div class:list={["ds-article", { "has-toc": toc }]}>
+  <div class="ds-article-body"><slot /></div>
+  {toc && <aside class="ds-article-toc print:hidden" aria-label="On this page"><slot name="right-sidebar" /></aside>}
+</div>

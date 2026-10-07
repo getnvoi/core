@@ -1,0 +1,25 @@
+# `async` is in-process — fine when web + jobs run in the same ruby
+# process (the default `bin/dev` story). In any setup where the worker
+# is a separate process (foreman with two processes, k8s sandbox with a
+# `bin/jobs` container, prod-shaped local), broadcasts emitted from the
+# worker can't reach the web's WebSocket subscribers and the UI never
+# updates. solid_cable persists messages in the `cable` database so any
+# subscriber, any process, sees them.
+development:
+  adapter: solid_cable
+  connects_to:
+    database:
+      writing: cable
+  polling_interval: 0.1.seconds
+  message_retention: 1.day
+
+test:
+  adapter: test
+
+production:
+  adapter: solid_cable
+  connects_to:
+    database:
+      writing: cable
+  polling_interval: 0.1.seconds
+  message_retention: 1.day

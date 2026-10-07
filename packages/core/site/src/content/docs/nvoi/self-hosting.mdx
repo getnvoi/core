@@ -1,0 +1,170 @@
+---
+title: Self-hosting
+description: nvoi's core on your own server, with docker compose and three lines of configuration.
+---
+
+import { Code } from "@astrojs/starlight/components";
+// The page shows the files packages/selfhosted holds, read at build time: one source, never a copy.
+import compose from "../../../../../../selfhosted/compose.yml?raw";
+import env from "../../../../../../selfhosted/env.example?raw";
+
+You can run nvoi's core on your own server. The core is the server, its database, its hosted repositories and the docs. The agents' machines run on your own Daytona account.
+
+## What it is
+
+The core is published at [github.com/getnvoi/core](https://github.com/getnvoi/core) under the GNU Affero General Public License, version 3 only (AGPL-3.0-only). The installation files are in its `packages/selfhosted` folder.
+
+A self-hosted server differs from nvoi.to in these ways:
+
+- It has no billing. There is no credit, no package and no top-up. You pay Daytona for the machines directly.
+- GitHub is optional. Without a GitHub App of your own, people push repositories with plain git to the server ([GitHub](#github)).
+- Previews are optional. They need a Cloudflare account ([Previews](#previews)).
+- There is no desktop app for a self-hosted server yet. The [CLI](/docs/reference/cli/) is the client.
+
+## What you need
+
+- A server with Docker (with compose) and a public address. Ports 80 and 443 must be open.
+- A domain. Its names must point at the server ([DNS records](#dns-records)).
+- A Daytona API key, for the agents' machines.
+
+## Install
+
+1. On the server, make a folder for the installation.
+2. In that folder, write `.env` with the three lines below, and fill them in.
+3. In the same folder, write `compose.yml` with the content below. It is the file `packages/selfhosted/compose.yml` of the public repository.
+4. Point the installation's names at the server ([DNS records](#dns-records)).
+5. Start the services: `docker compose up -d`.
+6. Sign up as the first person, and approve the account ([The first account](#the-first-account)).
+
+<Code code={env} lang="sh" title=".env" />
+
+| Variable | What it holds |
+| --- | --- |
+| `NVOI_HOST` | the name the installation answers on (`acme.dev`, or `nvoi.acme.com`) |
+| `SANDBOX_PROVIDER` | `daytona` |
+| `SANDBOX_CREDENTIALS` | the Daytona API key |
+
+<Code code={compose} lang="yaml" title="compose.yml" />
+
+```bash
+docker compose up -d
+```
+
+The first start does these steps:
+
+1. The `init` service makes every other secret once and writes it to the `secrets` volume. A later start keeps the files that exist.
+2. Postgres (`db`) and Forgejo (`forgejo`) start with their passwords from that volume. Forgejo keeps the hosted repositories.
+3. The server (`nvoi`) migrates its database, then serves.
+4. Caddy (`caddy`) gets a certificate from Let's Encrypt for each of the installation's names when that name is first asked for.
+
+```
+ internet ──► caddy :80 :443 ──► nvoi :4000 ──► db (Postgres)
+              (certificates)       │       └──► forgejo (hosted repositories)
+                                   └── /secrets ◄── init (once)
+```
+
+The same installation runs on Kubernetes too, from the `kubernetes/` folder. The [README](https://github.com/getnvoi/core/tree/main/packages/selfhosted#kubernetes) gives its steps.
+
+### DNS records
+
+Point these names at the server's address, with an A or AAAA record each. `H` is `NVOI_HOST`.
+
+| Name | What answers on it |
+| --- | --- |
+| `H` | the API and the docs |
+| `git.H` | git for hosted repositories |
+| `mcp.H` | the MCP server |
+
+When `NVOI_HOST` is a name under a domain (`nvoi.acme.com`), the other names are `git-nvoi.acme.com` and `mcp-nvoi.acme.com`. The [README](https://github.com/getnvoi/core/tree/main/packages/selfhosted#names) lists every name.
+
+### The first account
+
+Sign up with the CLI ([Connect the CLI](#connect-the-cli) installs it). The password has at least 12 characters.
+
+```bash
+nvoi signup --endpoint https://<your host> --email you@acme.dev --password … --workspace acme
+```
+
+Every new account waits for approval. Approve it on the server:
+
+```bash
+docker compose exec nvoi /app/bin/nvoi rpc 'Nvoi.User.approve!("you@acme.dev")'
+```
+
+Approve each person who signs up later in the same way.
+
+## Connect the CLI
+
+1. Install the CLI:
+
+   ```bash
+   curl -fsSL https://cli.nvoi.to/install.sh | sh
+   ```
+
+2. Log in to your server:
+
+   ```bash
+   nvoi login --endpoint https://<your host> --email you@acme.dev --password …
+   nvoi whoami
+   ```
+
+The login is kept as a context, beside any context for nvoi.to ([CLI](/docs/reference/cli/)). Push a repository to `git.<your host>` with git, with a personal token as the password (`nvoi token create --name git`). [Getting started](/docs/nvoi/getting-started/) continues from a model credential.
+
+## Options
+
+### GitHub
+
+Without a GitHub App, the server runs on hosted repositories only. Every GitHub operation answers `501` with the code `github_not_set_up`.
+
+To turn GitHub on:
+
+1. Create a GitHub App of your own, with the settings the [README](https://github.com/getnvoi/core/tree/main/packages/selfhosted#github-optional) lists.
+2. Add its six values to `.env`: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY`.
+3. Run `docker compose up -d` again.
+4. Check it: `nvoi github-installation list` answers a list instead of `github_not_set_up`.
+
+GitHub is on only when all six values are set. Issue [#124](https://github.com/getnvoi/app/issues/124) tracks a check of the App's settings against nvoi.to's App.
+
+### Previews
+
+Previews go through a Cloudflare Worker. They are off until you turn them on. Without them, these features do not work:
+
+- a session's preview,
+- the Terminal,
+- the agent's browser tools, which act in the preview,
+- app artifacts.
+
+Their operations answer `501 previews_not_set_up`. Everything else works without previews.
+
+To turn previews on, the domain's zone must be on Cloudflare. Point `sandbox.H` at the server too (`sandbox-nvoi.acme.com` for a name under a domain), then run the `previews` compose profile:
+
+```bash
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… \
+  docker compose --profile previews run --rm previews
+```
+
+The token needs Workers Scripts Edit on the account, and Zone Read, DNS Edit and Workers Routes Edit on the zone. The `previews` service deploys the worker, its route (`*-preview.H/*`) and a wildcard DNS record, then turns previews on. When `NVOI_HOST` is a name under a zone (`nvoi.acme.com`), the wildcard record covers the whole zone. Add `PREVIEWS=wildcard` to that command to allow it.
+
+### Production environments
+
+Building and deploying images needs a bucket that build machines and cluster nodes reach from the internet. Add `NVOI_BUCKET`, `NVOI_BUCKET_ENDPOINT_URL`, `NVOI_BUCKET_ACCESS_KEY_ID` and `NVOI_BUCKET_SECRET_ACCESS_KEY` to `.env` for any S3-compatible bucket (`NVOI_BUCKET_REGION` too when it is not `auto`). Without them, those operations answer `501 bucket_not_set_up`. Nothing else needs the bucket.
+
+## Upgrade
+
+1. Set `NVOI_VERSION` in `.env` to the new version. Without it, the server runs `latest`.
+2. Run `docker compose pull`, then `docker compose up -d`.
+3. With previews on, run the `previews` profile again. It deploys the worker's new code and changes nothing else.
+
+The server migrates its database before it starts.
+
+## Back up
+
+Back up the `secrets`, `db` and `forgejo` volumes together. The `secrets` volume holds the keys that open what the database seals. If you lose the `secrets` volume, you lose the data.
+
+## Uninstall
+
+1. Stop and remove the services: `docker compose down`.
+2. To remove the data too, remove the volumes: `docker compose down --volumes`. This removes the secrets and cannot be undone.
+3. In Daytona, delete the installation's machines: the sandboxes labelled `nvoi-installation`, or named `seed-…` and after a session.
+4. With previews on, delete the worker `nvoi-<host with dashes>-preview` in Cloudflare (its route goes with it). Delete the wildcard record too if the `previews` service made it (its comment is "nvoi previews").
+5. Remove the DNS records you made.

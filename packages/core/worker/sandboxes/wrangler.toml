@@ -1,0 +1,68 @@
+# The preview worker: a serializer in front of every preview, and nothing else.
+#
+# TOML, not jsonc, deliberately — `bin/setup-workers` discovers workers by
+# globbing `packages/worker/*/wrangler.toml` and parses this file for the name,
+# host and bucket. A `.jsonc` here would be a worker nobody deploys, with no
+# error to notice.
+#
+# NO DURABLE OBJECT AND NO CONTAINER. Boxes run on Hetzner, Daytona or E2B; this
+# worker holds no provider key and no binding to one. It asks the app where a
+# preview lives and sets the headers it is handed, so a substrate change reaches
+# it as a different answer rather than a deploy.
+
+main = "index.ts"
+compatibility_date = "2026-07-26"
+
+# Routes only. The worker answers on its routes and never on workers.dev, so a deploy needs no workers.dev
+# subdomain on the account (a self-hosted account may have none) and never makes one. Both keys apply to every
+# environment below.
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = true
+
+# ── dev ──────────────────────────────────────────────────────────────────────
+
+[env.dev]
+name = "nvoi-preview-dev"
+
+# THE SUFFIX IS WHAT SEPARATES THE ENVIRONMENTS.
+#
+# `*.nvoi.to/*` would be claimed by dev AND prod, and Cloudflare gives a route to
+# whoever deployed last — silently, taking every dev preview away. So each
+# environment claims its own pattern.
+#
+# Previews are one label deep (`<slug>-preview-dev.nvoi.to`, `<slug>-preview.nvoi.to`): the zone's universal
+# certificate covers `*.nvoi.to` and nothing deeper.
+routes = [{ pattern = "*-preview-dev.nvoi.to/*", zone_name = "nvoi.to" }]
+
+[env.dev.vars]
+RESERVED_HOSTS = "nvoi.to,www.nvoi.to,dev.nvoi.to"
+# Where this worker asks where to go. It is in RESERVED_HOSTS above, so a request
+# arriving on it is passed to origin rather than treated as a preview.
+APP_URL = "https://dev.nvoi.to"
+# The app pages that frame a preview; the bridge script talks to these and no other.
+PARENT_ORIGINS = "https://dev.nvoi.to"
+
+# ── prod ─────────────────────────────────────────────────────────────────────
+
+[env.prod]
+name = "nvoi-preview-production"
+routes = [{ pattern = "*-preview.nvoi.to/*", zone_name = "nvoi.to" }]
+
+[env.prod.vars]
+RESERVED_HOSTS = "nvoi.to,www.nvoi.to,sandbox.nvoi.to"
+# ITS OWN HOSTNAME, ON ITS OWN TUNNEL.
+#
+# This worker asks the app about one sandbox once per document. Pointed at
+# `nvoi.to`, every one of those questions queued behind the page views a person
+# was waiting on, through the same connectors — so a preview flood was an
+# outage of the site. `sandbox.nvoi.to`
+# resolves to a second tunnel with its own connectors and the same Service
+# behind it: this splits the payload, not the app.
+#
+# The app answers `/route`, `/touch` and `/boot` on this host and nowhere else,
+# so there is no path prefix — the hostname already says which three these are.
+APP_URL = "https://sandbox.nvoi.to"
+PARENT_ORIGINS = "https://nvoi.to"

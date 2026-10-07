@@ -1,0 +1,2 @@
+# The installation's three lines (env.example); SANDBOX_CREDENTIALS is a secret.
+.env

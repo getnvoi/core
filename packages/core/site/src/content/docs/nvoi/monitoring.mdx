@@ -1,0 +1,100 @@
+---
+title: Monitoring
+description: Your workspace from the CLI. What runs, what waits on a person, and what failed.
+---
+
+Four commands read your workspace. They change nothing. They show only what your role and your reach allow: an environment restricted to other members is left out, with its machines, sessions and errors. They never show a secret, such as a database's connection string.
+
+| Command | What it shows |
+|---|---|
+| `nvoi workspace status` | the machines, the seeds, the databases, the environments and the counts of sessions and turns |
+| `nvoi workspace runs` | the turns running now, and the turns waiting on a person |
+| `nvoi workspace errors` | failed turns, failed setups and refused calls over a window (24 hours by default) |
+| `nvoi environment database <id>` | one environment's database and its branches |
+
+Each command answers JSON. Add `--table` to read it as columns. The columns of a command do not change from one call to the next, even when a value is empty.
+
+## Status
+
+```bash
+nvoi workspace status --table
+```
+
+```text
+sessions       3
+turns_running  1
+turns_waiting  1
+
+machines
+id        name                disk  environment  idle_since                session                 session_id  shape  state
+01a1…373  dummy-rails-k2x9qa  10    development                            Add a /health endpoint  01a1…39e    2x4    running
+01a1…aa6  dummy-rails-p0m3zt  10    development  2026-10-07T13:22:34.097Z  Upgrade Rails to 8.1    01a1…dec    2x4    idle
+01a1…ee9  dummy-rails-h7c1ud  10    development  2026-10-07T10:29:34.097Z  Fix the sign-up form    01a1…f17    2x4    stopped
+
+seeds
+id        name                   built_at  environment  reason                           repo                   state   step
+01a1…488  seed-3f9a1c0d2b7e4a10            development  setup failed: bin/setup: exit 5  benbonnet/dummy-rails  failed  bin/setup
+```
+
+The output also lists the databases and the environments. A machine has one of these states:
+
+- `running`: a turn of its session is at work.
+- `idle`: the machine is up and no turn is at work. `idle_since` says when it was last used. An idle machine pauses after ten minutes.
+- `stopped`: the machine is paused. It keeps its disk and starts again with the next message.
+- `starting` or `failed`: the machine is starting, or its start failed.
+
+A seed is `building`, `ready`, `failed` or `missing`. A failed seed shows the step it failed on and why.
+
+## Runs
+
+```bash
+nvoi workspace runs --table
+```
+
+```text
+agent  call                                      session                 since                     status   waiting_on
+Dev    Bash: git push origin dummy-rails-p0m3zt  Upgrade Rails to 8.1    2026-10-07T13:27:34.144Z  waiting  approval
+Dev                                              Add a /health endpoint  2026-10-07T13:25:34.139Z  running
+```
+
+A waiting turn waits on an `approval` or a `question`. `call` shows the call on one line. A running turn is shown since it started; a waiting one since its call was held. Allow or deny a call from the app, or with `nvoi session answer`.
+
+## Errors
+
+```bash
+nvoi workspace errors --since 1h --table
+```
+
+`--since` takes a number and `s`, `m`, `h` or `d` (`15m`, `24h`, `7d`), up to 30 days. Each line has a `kind`:
+
+- `turn`: a turn that failed, with the error the agent or nvoi wrote.
+- `setup`: a seed or a machine start that failed. `step` names the command, and `lines` shows its last lines.
+- `refused`: a call of a member or an agent that nvoi refused or that failed, with its code (`not_allowed`, `invalid_database_engine`).
+
+Each line also says when (`at`), who (a person or an agent), and where (a session, a seed, or the kind of record).
+
+## A database
+
+```bash
+nvoi environment database <environment-id> --table
+```
+
+```text
+engine          postgres
+environment     development
+error
+provider        neon
+ready           true
+size            31457280
+status          ready
+version         17
+
+branches
+checkout            created_at                ready  session
+dummy-rails-k2x9qa  2026-10-07T13:29:34.162Z  true   Add a /health endpoint
+dummy-rails-p0m3zt  2026-10-07T13:29:34.162Z  true   Upgrade Rails to 8.1
+```
+
+Each checkout has its own branch of the environment's database. `ready` says whether the vendor has made it. `status` is `creating`, `ready` or `failed`, with the reason in `error`. `size` is the bytes the main branch holds, when the vendor says. An environment without a database answers `404 no_database`.
+
+A production environment's database is a Neon project of its own, never branched, so it lists no branches. It is set as a development one's is (`nvoi environment update <id> --database_engine postgres --database_version 17`) and made at once. Each step goes to its log: `nvoi database logs <environment-id>` reads it, and `nvoi database follow <environment-id>` prints the lines until it is ready. Once it is made, its engine and version do not change. Deleting the environment keeps it; `nvoi environment teardown` removes it, with its data.

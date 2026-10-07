@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title><%= content_for(:title) || "Rails seed" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
+    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
+
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.png">
+
+    <%# `tailwind` is the file the CLI writes; `app` is the Propshaft manifest.
+        `inter-font` is NOT here: it was an asset bundled by tailwindcss-rails 3
+        and dropped in 4, and Propshaft raises on one it cannot find. %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body class="min-h-screen">
+    <div class="mx-auto max-w-2xl px-6 py-10">
+      <nav class="mb-8 flex gap-4 text-sm">
+        <%= link_to "Entries", root_path, class: "font-medium text-foreground" %>
+        <%= link_to "About", about_path, class: "text-muted-foreground hover:text-foreground" %>
+      </nav>
+
+      <%= yield %>
+    </div>
+  </body>
+</html>

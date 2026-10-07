@@ -1,0 +1,58 @@
+---
+title: Library
+description: The workspace's files.
+---
+
+## What it is
+
+The library is the workspace's files. A document is bytes with a name and a content type: uploaded by hand (a brand guide, a contract template, a CSV) or kept by an agent during a session: a page saved for reading, a capture of the app. It belongs to no parent; it exists so a person can put a file where an agent can later be pointed at it.
+
+## How it behaves
+
+### A name, not a path
+
+A document's name holds no slash. A slash invites a tree nothing renders and a traversal nothing checks.
+
+### A size ceiling
+
+A document is at most 20 MB. A saved web page carries every asset it draws inline, and a real one clears 10.
+
+### Several at once
+
+Several files upload in one request.
+
+### Archived, never deleted
+
+A document is hidden, not destroyed: a turn may have read it, and a transcript read later still resolves.
+
+## In the app
+
+The library page lists documents, takes uploads and previews what it can.
+
+## From the CLI
+
+### Upload
+
+```bash
+nvoi library-item create --files style-guide.md
+```
+
+### List, search, rename
+
+```bash
+nvoi library-item list --table
+nvoi library-item list --q style --table
+nvoi library-item update <document-id> --name "Style guide"
+```
+
+### Archive
+
+```bash
+nvoi library-item archive <document-id>
+nvoi library-item list --archived true --table
+```
+
+## Related
+
+- [Skills](/docs/nvoi/skills): files the agent carries onto the machine.
+- [Artifacts](/docs/nvoi/artifacts): pages and apps an agent made.

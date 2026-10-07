@@ -1,0 +1,22 @@
+<h1 class="text-2xl font-semibold tracking-tight">Rails seed</h1>
+<p class="mt-1 text-sm text-muted-foreground">
+  Rails · Solid Queue · Solid Cable · Turbo Streams · Postgres
+</p>
+
+<div class="mt-6 flex items-center gap-3">
+  <%# THE BUTTON ENQUEUES AND NOTHING ELSE. The entry that appears below was
+      written by `bin/jobs`, in another process, and arrives here over the cable
+      — so a second tab updates too. A controller that created the row and
+      re-rendered would look identical and demonstrate nothing. %>
+  <%= button_to "Record an entry", logs_path,
+        class: "inline-flex h-9 items-center rounded-[var(--radius)] bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90" %>
+  <span class="text-sm text-muted-foreground">live over Action Cable</span>
+</div>
+
+<%# SUBSCRIBED BEFORE THE LIST IS RENDERED, so a broadcast that lands between
+    the query and the connection is not missed. %>
+<%= turbo_stream_from "logs" %>
+
+<ul id="logs" class="mt-6 divide-y divide-border rounded-[var(--radius)] border border-border">
+  <%= render @logs %>
+</ul>

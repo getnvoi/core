@@ -1,0 +1,96 @@
+---
+title: FAQ
+description: The questions a first week asks.
+---
+
+## Accounts and access
+
+<details>
+<summary>Do I need a GitHub account?</summary>
+
+No. Push a project to nvoi's git (`git push nvoi main`) and nvoi hosts it. A GitHub repository works too, connected through nvoi's GitHub App. Either way the machine never holds a credential: nvoi clones and pushes for it ([Repositories](/docs/nvoi/repositories)).
+
+</details>
+<details>
+<summary>Can two workspaces use the same repository?</summary>
+
+Yes. Each holds its own row, its own environments and its own checkouts. Nothing is shared between them.
+
+</details>
+<details>
+<summary>Where is the model credential?</summary>
+
+In the workspace, on the LLM page: an API key, billed by its provider. There is no operator credential to fall back to: a workspace with none refuses a turn rather than running it on somebody else's account.
+
+</details>
+<details>
+<summary>I am in several workspaces. Which one does the CLI act on?</summary>
+
+The one the token names. `nvoi login --workspace <slug>` picks it; without the flag, your first. `nvoi whoami` says which.
+
+Each login is a context, so one per workspace and `nvoi context set <slug>` between them. `nvoi context` lists what this machine holds.
+
+</details>
+
+## Machines
+
+<details>
+<summary>One machine per user, per project, or per session?</summary>
+
+Per checkout. Starting a session on a repository makes a new checkout: one branch, one machine. Starting one on a checkout that exists joins it, and every session on it shares the clone and the machine. Two people who want to work apart start two sessions on the repository.
+
+</details>
+<details>
+<summary>What is on the machine?</summary>
+
+The checkout, the app the agent brought up, the environment's variables, and the agent itself with the workspace's model credential in its environment. No GitHub token: pushing a branch and opening a pull request are run by nvoi, on the machine's behalf.
+
+</details>
+<details>
+<summary>Does a machine stop?</summary>
+
+Yes, when nothing has talked to it for a while. The next request, a message or a visit to the preview, brings it back.
+
+</details>
+<details>
+<summary>How fast is a first turn?</summary>
+
+Seconds: every machine is a fork of the environment's seed, a machine built once with the repository cloned, `setup` run and the app started once. On the Advanced tier a fork also keeps the seed's memory and resumes in seconds.
+
+</details>
+
+## Sessions
+
+<details>
+<summary>What happens when the agent wants to do something I gated?</summary>
+
+The call parks. The session's status is `waiting` and the turn stays paused until you answer, from the session page or `nvoi session answer`.
+
+</details>
+<details>
+<summary>Can I change the agent mid-session?</summary>
+
+No. A session runs with the agent it started with. Start a new session for a different agent.
+
+</details>
+<details>
+<summary>Is the conversation kept?</summary>
+
+Every event is a row, forever. Archiving a session hides it from the rail; nothing is deleted.
+
+</details>
+
+## Previews
+
+<details>
+<summary>How do I open what the agent built?</summary>
+
+Serve the checkout, from the preview view in the app or with `nvoi preview start <worktree-id>`, and open the checkout's hostname. A machine that went to sleep wakes on the first request and serves the page once the app is up.
+
+</details>
+<details>
+<summary>Why does the preview say it is starting?</summary>
+
+The machine is waking, or the app is not yet answering on its port. The page refreshes on its own; a run that died shows what failed.
+
+</details>

@@ -1,0 +1,21 @@
+# Cargo's build directory. Hundreds of megabytes after one `cargo check`.
+#
+# This file ships WITH the seed and becomes the new repository's own
+# `.gitignore`, which is where it belongs: `target/` is not ours to know about,
+# it is a fact about Rust projects.
+#
+# It also protects this repository. `pack/2` builds the seed tarball from
+# `git ls-files --cached --others --exclude-standard` — tracked files plus
+# untracked ones that are NOT ignored — so a build directory sitting here is
+# committed by the next `git add -A` and shipped into every sandbox after that.
+# It was: 2,524 files and 466MB, and provisioning failed with
+#
+#     413 Payload Too Large
+#
+# from Cloudflare, which reads as an infrastructure limit rather than a seed
+# carrying a build cache.
+/target
+
+# The database. `DATABASE_PATH` points at `db/app.sqlite3` and WAL makes it
+# three files — somebody's local data, never a commit.
+/db

@@ -1,0 +1,26 @@
+/* White, with no edge on top: the change from the paper band above divides them. */
+.ds-footer { container-type: inline-size; overflow: hidden; background: var(--ds-bg); color: var(--ds-g12); }
+.ds-footer-in { max-width: 1120px; margin-inline: auto; padding: 64px 48px 0; display: flex; flex-direction: column; gap: 40px; }
+.ds-footer-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr); gap: 48px; }
+.ds-footer-about { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
+.ds-footer-home { display: block; }
+.ds-footer-logo { width: 28px; height: 28px; display: block; }
+.ds-footer-logo.is-dark, .dark .ds-footer-logo.is-light { display: none; }
+.dark .ds-footer-logo.is-dark { display: block; }
+.ds-footer-text { max-width: 40ch; color: var(--ds-g11); font-size: var(--ds-fs-13); line-height: 1.6; }
+.ds-footer-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 32px 24px; }
+.ds-footer-title { margin-bottom: 12px; font: 500 var(--ds-fs-12) var(--ds-mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ds-g11); }
+.ds-footer-col ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ds-footer-link { color: var(--ds-g11); font-size: var(--ds-fs-13); text-decoration: none; transition: color var(--ds-dur-hover) ease; }
+.ds-footer-link:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) { .ds-footer-link:hover { color: var(--ds-g12); text-decoration: underline; text-underline-offset: 3px; } }
+@media (pointer: coarse) { .ds-footer-col ul { gap: 0; } .ds-footer-link { display: inline-block; padding-block: 7px; } }
+.ds-footer-legal { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding-top: 20px; border-top: 1px solid var(--ds-g6); color: var(--ds-g11); font-size: var(--ds-fs-12); line-height: 16px; }
+/* The wordmark across the column, its top 70% shown; the page ends on it. Its paths fill with currentColor. */
+.ds-footer-mark { aspect-ratio: 1586 / 370; overflow: hidden; color: var(--ds-g4); }
+.ds-footer-mark svg { display: block; width: 100%; height: auto; }
+@container (max-width: 760px) {
+  .ds-footer-top { grid-template-columns: 1fr; gap: 40px; }
+  .ds-footer-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container (max-width: 600px) { .ds-footer-in { padding: 48px 16px 0; } .ds-footer-legal { flex-direction: column; } }

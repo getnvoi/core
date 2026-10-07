@@ -1,0 +1,7 @@
+<%# An `<li>`, because it is prepended into a `<ul>` both on first render and by
+    the broadcast. A `<div>` inside a list renders, and then the two paths
+    disagree about what the list is made of. %>
+<li id="<%= dom_id(log) %>" class="px-4 py-3 text-sm">
+  Entry #<%= log.id %>
+  <span class="text-muted-foreground">— <%= log.created_at.strftime("%Y-%m-%d %H:%M:%S") %></span>
+</li>

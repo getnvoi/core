@@ -1,0 +1,44 @@
+{{define "about.html"}}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About · Go seed</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body class="min-h-screen">
+    <div class="mx-auto max-w-2xl px-6 py-10">
+      <nav class="mb-8 flex gap-4 text-sm">
+        <a href="/" class="text-muted-foreground hover:text-foreground">Entries</a>
+        <a href="/about" class="font-medium text-foreground">About</a>
+      </nav>
+
+      <h1 class="text-2xl font-semibold tracking-tight">About</h1>
+
+      <p class="mt-4 text-sm text-muted-foreground">
+        A second route, so that "it routes" is a claim with evidence rather than
+        a single page that happens to be served.
+      </p>
+
+      <div class="mt-6 rounded-[var(--radius)] border border-border p-4 text-sm">
+        <p class="font-medium">{{.Runtime}}</p>
+        <p class="mt-2 text-muted-foreground">
+          Three processes run this: <code>css</code>, <code>jobs</code> and
+          <code>app</code>. There is no database process — the database is a
+          FILE in this checkout, at <code>$DATABASE_PATH</code>, and GORM
+          migrates it at boot. The entries page enqueues; the worker records;
+          the app notices the new row and tells every open browser.
+        </p>
+      </div>
+
+      <p class="mt-6 text-sm text-muted-foreground">
+        The API is described at
+        <a href="/openapi.json" class="underline underline-offset-4 hover:text-foreground">
+          /openapi.json </a
+        >, served by the same router as these pages.
+      </p>
+    </div>
+  </body>
+</html>
+{{end}}

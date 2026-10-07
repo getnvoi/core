@@ -1,0 +1,67 @@
+---
+title: LLM
+description: The workspace's model credential.
+---
+
+## What it is
+
+A model credential is the API key the agent's process runs with. A workspace brings its own, and its usage is billed to the workspace by the model provider, not by nvoi. nvoi holds no provider account and no operator key to fall back to.
+
+## How it behaves
+
+### What the runs cost
+
+Each turn keeps the tokens its runs consumed and, when the runner states one, their price at the model's API rates: Claude Code states it, Codex does not. The Usage page sums them by day, agent and session; `nvoi usage show` returns the same under `spend`, `agents` and `costly`. This spend is the provider's to bill and never draws on credit.
+
+### No fallback
+
+A workspace with no credential refuses a turn rather than running it on somebody else's account.
+
+### The provider declares its form
+
+`nvoi provider list` lists the providers, the fields each asks for, and the models each offers. `claude_code` asks for a `kind` and the `token`: `api_key` for an Anthropic API key, or `bearer` for a third-party endpoint that speaks the same API, with its `base_url`.
+
+### Secrets are write-only
+
+A secret field is never read back. Submitting it blank on an update keeps the stored one.
+
+### The model never sees it
+
+The credential reaches the process on the machine through its environment at start, and enters no event and no log line.
+
+### Archived and restored
+
+A credential is archived and restored, never deleted: the sessions that ran on it keep naming it.
+
+## In the app
+
+The LLM page lists the credentials and takes a new one on the provider's form.
+
+## From the CLI
+
+### Providers
+
+```bash
+nvoi provider list
+```
+
+### Add a credential
+
+```bash
+nvoi llm-config create --provider claude_code --label "Team key" --values '{"kind":"api_key","token":"sk-ant-…"}'
+nvoi llm-config create --provider claude_code --label "Gateway" --values '{"kind":"bearer","token":"…","base_url":"https://…"}'
+```
+
+### Update, archive, restore
+
+```bash
+nvoi llm-config update <config-id> --label "Rotated key" --values '{"token":"sk-ant-…"}'
+nvoi llm-config archive <config-id>
+nvoi llm-config restore <config-id>
+nvoi llm-config list --table
+```
+
+## Related
+
+- [Agents](/docs/nvoi/agents): the model an agent names.
+- [Environments](/docs/nvoi/environments): variables cannot take a name the credential sets.

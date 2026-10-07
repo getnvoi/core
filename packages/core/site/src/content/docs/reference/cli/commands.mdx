@@ -1,0 +1,2203 @@
+---
+title: Commands
+description: Every nvoi command, generated from the binary.
+---
+
+Install, contexts and how a command reads are in the [overview](/docs/reference/cli/).
+
+## Authentication
+
+### `nvoi login`
+
+Log in to a workspace and keep its token as a context
+
+```bash
+nvoi login [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--email` | required | the account's email |
+| `--endpoint` |  | the server to log in to, instead of the context's or https://nvoi.to |
+| `--password` | required | the account's password |
+| `--workspace` |  | the workspace slug the token is for; the account's first when absent |
+
+### `nvoi logout`
+
+Revoke the context's token and forget it
+
+```bash
+nvoi logout
+```
+
+### `nvoi signup`
+
+Sign up with an email and a password: an account and its workspace, pending approval
+
+```bash
+nvoi signup [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--email` | required | the account's email |
+| `--endpoint` |  | the server to sign up on, instead of the context's or https://nvoi.to |
+| `--password` | required | the account's password, at least 12 characters |
+| `--workspace` | required | the new workspace's name |
+
+### `nvoi whoami`
+
+The account and workspace the token names
+
+```bash
+nvoi whoami
+```
+
+## activity
+
+### `nvoi activity ingest`
+
+Record the desktop app's events
+
+```bash
+nvoi activity ingest [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--events` | required |  |
+
+## agent
+
+### `nvoi agent archive`
+
+Archive an agent
+
+```bash
+nvoi agent archive <agent-id>
+```
+
+### `nvoi agent create`
+
+Create an agent
+
+```bash
+nvoi agent create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--instructions` |  |  |
+| `--model` |  |  |
+| `--name` | required |  |
+| `--skill_ids` |  |  |
+| `--tagline` |  |  |
+| `--tools` |  | tool name → auto, approval or deny |
+
+### `nvoi agent list`
+
+List agents
+
+```bash
+nvoi agent list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+
+### `nvoi agent restore`
+
+Restore an archived agent
+
+```bash
+nvoi agent restore <agent-id>
+```
+
+### `nvoi agent show`
+
+Get an agent
+
+```bash
+nvoi agent show <agent-id>
+```
+
+### `nvoi agent update`
+
+Update an agent
+
+```bash
+nvoi agent update <agent-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--instructions` |  |  |
+| `--llm_config_id` |  |  |
+| `--model` |  |  |
+| `--name` |  |  |
+| `--skill_ids` |  |  |
+| `--tagline` |  |  |
+| `--tools` |  | tool name → auto, approval or deny |
+
+## agent-tool
+
+### `nvoi agent-tool list`
+
+List the tools an agent sets a level for, by category
+
+```bash
+nvoi agent-tool list
+```
+
+## app
+
+### `nvoi app create`
+
+Make an app and start the session building it
+
+```bash
+nvoi app create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--name` | required |  |
+| `--prompt` | required |  |
+
+### `nvoi app list`
+
+List apps
+
+```bash
+nvoi app list
+```
+
+## artifact
+
+### `nvoi artifact archive`
+
+Archive an artifact
+
+```bash
+nvoi artifact archive <artifact-id>
+```
+
+### `nvoi artifact list`
+
+List artifacts
+
+```bash
+nvoi artifact list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+| `--q` |  |  |
+
+### `nvoi artifact restore`
+
+Restore an archived artifact
+
+```bash
+nvoi artifact restore <artifact-id>
+```
+
+### `nvoi artifact show`
+
+Get an artifact
+
+```bash
+nvoi artifact show <artifact-id>
+```
+
+### `nvoi artifact start`
+
+Start an app again on its machine
+
+```bash
+nvoi artifact start <artifact-id>
+```
+
+### `nvoi artifact update`
+
+Rename, share or publish an artifact
+
+```bash
+nvoi artifact update <artifact-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--name` |  |  |
+| `--public` |  |  |
+| `--shared` |  |  |
+
+## artifact-version
+
+### `nvoi artifact-version create`
+
+Save a new version of an artifact
+
+```bash
+nvoi artifact-version create <artifact-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--content` | required |  |
+
+### `nvoi artifact-version export`
+
+Build a version's download on its box
+
+```bash
+nvoi artifact-version export <artifact-id> <number> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--extension` | required |  |
+
+### `nvoi artifact-version read`
+
+Download a version as its kind exports it
+
+```bash
+nvoi artifact-version read <artifact-id> <number> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--extension` |  |  |
+
+### `nvoi artifact-version restore`
+
+Make an older version the newest again
+
+```bash
+nvoi artifact-version restore <artifact-id> <number>
+```
+
+### `nvoi artifact-version start`
+
+Run a version in place of the newest
+
+```bash
+nvoi artifact-version start <artifact-id> <number>
+```
+
+## billing
+
+### `nvoi billing show`
+
+Credit, budget, package, card, seats, history and prices
+
+```bash
+nvoi billing show
+```
+
+### `nvoi billing update`
+
+Set the monthly budget and its alert
+
+```bash
+nvoi billing update [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--alert_percent` |  |  |
+| `--dollars` | required | a month, in dollars and cents; null or blank for none |
+
+## change
+
+### `nvoi change show`
+
+The checkout's patch
+
+```bash
+nvoi change show <session-id>
+```
+
+## checkout
+
+### `nvoi checkout create`
+
+Open a Stripe Checkout page
+
+```bash
+nvoi checkout create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--item` | required |  |
+
+## cloud-credential
+
+### `nvoi cloud-credential check`
+
+Check a cloud credential with its provider
+
+```bash
+nvoi cloud-credential check <credential-id>
+```
+
+### `nvoi cloud-credential create`
+
+Add the workspace's cloud credential
+
+```bash
+nvoi cloud-credential create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--provider` | required | hetzner |
+| `--token` | required | The provider's API token, read and write |
+
+### `nvoi cloud-credential delete`
+
+Remove a cloud credential
+
+```bash
+nvoi cloud-credential delete <credential-id>
+```
+
+### `nvoi cloud-credential list`
+
+List the workspace's cloud credentials
+
+```bash
+nvoi cloud-credential list
+```
+
+## cluster
+
+### `nvoi cluster destroy`
+
+Destroy a production environment's cluster
+
+```bash
+nvoi cluster destroy <environment-id>
+```
+
+### `nvoi cluster ensure`
+
+Make a production environment's cluster
+
+```bash
+nvoi cluster ensure <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--location` |  | hel1 by default |
+| `--provider` |  | hetzner (the default) |
+| `--server_type` |  | The master's server type; cx23 by default |
+
+### `nvoi cluster show`
+
+Show a production environment's cluster
+
+```bash
+nvoi cluster show <environment-id>
+```
+
+## connector
+
+### `nvoi connector list`
+
+List connectors
+
+```bash
+nvoi connector list
+```
+
+## context
+
+### `nvoi context list`
+
+Every context on this machine
+
+```bash
+nvoi context list
+```
+
+### `nvoi context remove`
+
+Forget a context, without revoking its token
+
+```bash
+nvoi context remove <name>
+```
+
+### `nvoi context show`
+
+The context commands run against
+
+```bash
+nvoi context show
+```
+
+## database
+
+### `nvoi database follow`
+
+Print a database's log lines until it ends
+
+```bash
+nvoi database follow <id>
+```
+
+### `nvoi database logs`
+
+Read an environment database's log lines since one
+
+```bash
+nvoi database logs <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--since` |  | The id of the last line read |
+
+## deployment
+
+### `nvoi deployment allow`
+
+Allow a waiting deployment
+
+```bash
+nvoi deployment allow <deployment-id>
+```
+
+### `nvoi deployment apply`
+
+Apply an image to a production environment and roll it out
+
+```bash
+nvoi deployment apply <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--commit` |  | A full commit id or a branch; the environment's branch by default |
+| `--variables` |  | Variables set on the environment before it deploys, e.g. \{"DRY_RUN": "0"\} |
+
+### `nvoi deployment deny`
+
+Deny a waiting deployment
+
+```bash
+nvoi deployment deny <deployment-id>
+```
+
+### `nvoi deployment follow`
+
+Print a deployment's log lines until it ends
+
+```bash
+nvoi deployment follow <id>
+```
+
+### `nvoi deployment list`
+
+List a production environment's deployments
+
+```bash
+nvoi deployment list <environment-id>
+```
+
+### `nvoi deployment logs`
+
+Read a deployment's log lines since one
+
+```bash
+nvoi deployment logs <deployment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--since` |  | The id of the last line read |
+
+### `nvoi deployment rollback`
+
+Roll back to an earlier deployment
+
+```bash
+nvoi deployment rollback <deployment-id>
+```
+
+### `nvoi deployment show`
+
+Show a deployment and its log
+
+```bash
+nvoi deployment show <deployment-id>
+```
+
+## dry-run
+
+### `nvoi dry-run start`
+
+Start a dry run
+
+```bash
+nvoi dry-run start <environment-id>
+```
+
+## engine
+
+### `nvoi engine list`
+
+List the database engines on offer, with their versions
+
+```bash
+nvoi engine list
+```
+
+## env-var
+
+### `nvoi env-var delete`
+
+Remove a variable
+
+```bash
+nvoi env-var delete <environment-id> <key>
+```
+
+### `nvoi env-var set`
+
+Set a variable
+
+```bash
+nvoi env-var set <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--key` | required |  |
+| `--secret` |  |  |
+| `--value` | required |  |
+
+## environment
+
+### `nvoi environment create`
+
+Create an environment
+
+```bash
+nvoi environment create <repo-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--branch` |  |  |
+| `--database_engine` |  |  |
+| `--database_version` |  |  |
+| `--disk` |  |  |
+| `--kind` |  | development (the default) or production |
+| `--name` | required |  |
+| `--preview_port` |  |  |
+| `--provider_name` |  |  |
+| `--shape` |  |  |
+
+### `nvoi environment database`
+
+An environment's database and its branches
+
+```bash
+nvoi environment database <environment-id>
+```
+
+### `nvoi environment delete`
+
+Delete an environment
+
+```bash
+nvoi environment delete <environment-id>
+```
+
+### `nvoi environment list`
+
+List a repository's environments
+
+```bash
+nvoi environment list <repo-id>
+```
+
+### `nvoi environment show`
+
+Get an environment
+
+```bash
+nvoi environment show <environment-id>
+```
+
+### `nvoi environment teardown`
+
+Destroy a production environment's cluster, build machine, images and database
+
+```bash
+nvoi environment teardown <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--confirm` | required | The environment's name, typed again |
+
+### `nvoi environment update`
+
+Rename an environment, set its kind, its preview or its database
+
+```bash
+nvoi environment update <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--branch` |  |  |
+| `--database_engine` |  |  |
+| `--database_version` |  |  |
+| `--deploy` |  | What a ship into a production environment's branch does: approval (by default) or auto |
+| `--disk` |  |  |
+| `--images_kept` |  | Ready images a production environment keeps; older ones are pruned. 10 by default |
+| `--kind` |  | development or production |
+| `--member_ids` |  |  |
+| `--name` |  |  |
+| `--preview_port` |  |  |
+| `--provider_name` |  |  |
+| `--purge` |  |  |
+| `--restricted` |  |  |
+| `--shape` |  |  |
+
+## environment-command
+
+### `nvoi environment-command delete`
+
+Remove a command
+
+```bash
+nvoi environment-command delete <environment-id> <command-id>
+```
+
+### `nvoi environment-command set`
+
+Set a command
+
+```bash
+nvoi environment-command set <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--before` |  |  |
+| `--command` | required |  |
+| `--kind` |  |  |
+| `--name` | required |  |
+| `--port` |  |  |
+| `--position` |  |  |
+
+## file
+
+### `nvoi file list`
+
+List the checkout's paths
+
+```bash
+nvoi file list <session-id>
+```
+
+### `nvoi file read`
+
+Read one file of the checkout
+
+```bash
+nvoi file read <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--path` |  |  |
+
+## funnel
+
+### `nvoi funnel actors`
+
+List a funnel step's actors
+
+```bash
+nvoi funnel actors <funnel-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--dropped` |  | those who reached the step and never the next |
+| `--from` |  |  |
+| `--page` |  |  |
+| `--per_page` |  | at most 100; 25 when absent |
+| `--period` |  | a sequence: the trend period (its first day) the actors entered in; a retention grid: the period's index |
+| `--step` |  | the step's index; for a retention grid the cohort's, or -1 for every cohort |
+| `--to` |  |  |
+| `--unit` |  |  |
+| `--user_id` |  |  |
+| `--workspace_id` |  |  |
+
+### `nvoi funnel create`
+
+Create a funnel
+
+```bash
+nvoi funnel create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--actor` |  | user (the default) or a record kind |
+| `--description` |  |  |
+| `--group` | required | the tab it shows in |
+| `--kind` |  | sequence (the default) or retention (one step) |
+| `--name` | required |  |
+| `--steps` | required | 1 to 10 ordered steps |
+| `--window_days` |  | the most days between two steps, 1 to 365; 30 when absent |
+
+### `nvoi funnel list`
+
+List funnels
+
+```bash
+nvoi funnel list
+```
+
+### `nvoi funnel preview`
+
+Preview a draft funnel
+
+```bash
+nvoi funnel preview [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--actor` |  |  |
+| `--from` |  | the first day read (YYYY-MM-DD); 90 days before to when absent |
+| `--group` |  |  |
+| `--kind` |  |  |
+| `--name` |  |  |
+| `--steps` | required |  |
+| `--to` |  | the last day read, included; today when absent |
+| `--unit` |  | week when absent |
+| `--user_id` |  |  |
+| `--window_days` |  |  |
+| `--workspace_id` |  |  |
+
+### `nvoi funnel reorder`
+
+Reorder a tab's funnels
+
+```bash
+nvoi funnel reorder [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--group` | required |  |
+| `--ids` | required |  |
+
+### `nvoi funnel result`
+
+Run a funnel
+
+```bash
+nvoi funnel result <funnel-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--from` |  | the first day read (YYYY-MM-DD); 90 days before to when absent |
+| `--to` |  | the last day read, included; today when absent |
+| `--unit` |  | week when absent |
+| `--user_id` |  |  |
+| `--workspace_id` |  |  |
+
+### `nvoi funnel update`
+
+Update a funnel
+
+```bash
+nvoi funnel update <funnel-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--actor` |  |  |
+| `--description` |  |  |
+| `--group` |  |  |
+| `--kind` |  |  |
+| `--name` |  |  |
+| `--steps` |  |  |
+| `--window_days` |  |  |
+
+## gateway
+
+### `nvoi gateway describe`
+
+Get one action's input schema and permission facts
+
+```bash
+nvoi gateway describe <name>
+```
+
+### `nvoi gateway execute`
+
+Run one action as the signed-in member
+
+```bash
+nvoi gateway execute [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--approve` |  |  |
+| `--name` | required |  |
+| `--params` | required |  |
+
+### `nvoi gateway search`
+
+Find the actions that answer what you want to do
+
+```bash
+nvoi gateway search [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--limit` |  |  |
+| `--q` |  |  |
+
+## github-install-intent
+
+### `nvoi github-install-intent show`
+
+The latest GitHub App install and what came of it
+
+```bash
+nvoi github-install-intent show
+```
+
+### `nvoi github-install-intent start`
+
+Start installing the GitHub App: the GitHub page to open
+
+```bash
+nvoi github-install-intent start [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--check` |  |  |
+
+### `nvoi github-install-intent stop`
+
+Stop waiting on GitHub
+
+```bash
+nvoi github-install-intent stop
+```
+
+## github-installation
+
+### `nvoi github-installation delete`
+
+Remove a GitHub installation
+
+```bash
+nvoi github-installation delete <installation-id>
+```
+
+### `nvoi github-installation list`
+
+List the GitHub installations
+
+```bash
+nvoi github-installation list
+```
+
+### `nvoi github-installation sync`
+
+Read an installation's repositories from GitHub again
+
+```bash
+nvoi github-installation sync <installation-id>
+```
+
+## github-sign-in
+
+### `nvoi github-sign-in collect`
+
+Collect a GitHub sign-in: pending, refused, or a token once
+
+```bash
+nvoi github-sign-in collect <sign_in-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--code` |  | the code GitHub's return handed the browser (nvoi://github?…&code=, or shown on the page) |
+| `--key` | required |  |
+
+### `nvoi github-sign-in start`
+
+Start signing in with GitHub: the page to open and the key to collect with
+
+```bash
+nvoi github-sign-in start
+```
+
+## grant-conflict
+
+### `nvoi grant-conflict list`
+
+List members denied a tool this agent carries on the system agent
+
+```bash
+nvoi grant-conflict list <agent-id>
+```
+
+## image
+
+### `nvoi image build`
+
+Build a production environment's commit into an image
+
+```bash
+nvoi image build <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--commit` |  | A branch, a tag or a full commit id; the environment's branch when absent |
+
+### `nvoi image follow`
+
+Print a image's log lines until it ends
+
+```bash
+nvoi image follow <id>
+```
+
+### `nvoi image list`
+
+List a production environment's images
+
+```bash
+nvoi image list <environment-id>
+```
+
+### `nvoi image logs`
+
+Read an image's build lines since one
+
+```bash
+nvoi image logs <image-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--since` |  | The id of the last line read |
+
+### `nvoi image show`
+
+Show an image and its build log
+
+```bash
+nvoi image show <image-id>
+```
+
+## inbox
+
+### `nvoi inbox list`
+
+What waits on you: parked calls and mentions
+
+```bash
+nvoi inbox list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--answered` |  |  |
+
+## library-item
+
+### `nvoi library-item archive`
+
+Archive a document
+
+```bash
+nvoi library-item archive <library-id>
+```
+
+### `nvoi library-item create`
+
+Upload a document
+
+```bash
+nvoi library-item create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--files` | required | (repeat the flag, or separate with commas) |
+
+### `nvoi library-item list`
+
+List documents
+
+```bash
+nvoi library-item list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+| `--q` |  |  |
+
+### `nvoi library-item update`
+
+Rename a document
+
+```bash
+nvoi library-item update <library-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+| `--name` |  |  |
+
+## llm-config
+
+### `nvoi llm-config archive`
+
+Archive a model credential
+
+```bash
+nvoi llm-config archive <config-id>
+```
+
+### `nvoi llm-config create`
+
+Add a model credential
+
+```bash
+nvoi llm-config create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--label` | required |  |
+| `--provider` | required |  |
+| `--values` | required |  |
+
+### `nvoi llm-config delete`
+
+Remove a model credential
+
+```bash
+nvoi llm-config delete <config-id>
+```
+
+### `nvoi llm-config list`
+
+List model credentials
+
+```bash
+nvoi llm-config list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+
+### `nvoi llm-config restore`
+
+Restore a model credential
+
+```bash
+nvoi llm-config restore <config-id>
+```
+
+### `nvoi llm-config update`
+
+Update a model credential
+
+```bash
+nvoi llm-config update <config-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--label` |  |  |
+| `--main` |  |  |
+| `--values` |  |  |
+
+## llm-connection
+
+### `nvoi llm-connection show`
+
+Where a connection stands: the code while it waits, then the credential
+
+```bash
+nvoi llm-connection show <connection-id>
+```
+
+### `nvoi llm-connection start`
+
+Start connecting a model credential with a code shown to the member
+
+```bash
+nvoi llm-connection start [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--label` |  |  |
+| `--llm_config_id` |  |  |
+| `--provider` | required |  |
+
+### `nvoi llm-connection stop`
+
+Cancel a connection
+
+```bash
+nvoi llm-connection stop <connection-id>
+```
+
+## log
+
+### `nvoi log list`
+
+The box's log lines
+
+```bash
+nvoi log list <session-id>
+```
+
+## machine
+
+### `nvoi machine show`
+
+Read the machine: memory, CPU, disk and processes
+
+```bash
+nvoi machine show <session-id>
+```
+
+## machine-process
+
+### `nvoi machine-process read`
+
+Read the last lines a process on the machine wrote
+
+```bash
+nvoi machine-process read <session-id> <pid>
+```
+
+### `nvoi machine-process stop`
+
+Stop a process on the machine
+
+```bash
+nvoi machine-process stop <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--pid` | required |  |
+| `--signal` | required |  |
+
+## mcp
+
+### `nvoi mcp add`
+
+Make a personal token and write the nvoi MCP server into Claude Code or Cursor
+
+```bash
+nvoi mcp add [claude|cursor] [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--expires-in-days` |  | the token's life in days, 1 to 365 |
+| `--force` |  | replace an nvoi server already configured |
+| `--print` |  | write nothing; print the token and the configuration |
+| `--scope` |  | claude only: local (this folder) or user (every folder); project is refused, it would commit the token |
+| `--url` |  | the MCP server, instead of the one of the context's endpoint |
+
+## mentionable
+
+### `nvoi mentionable list`
+
+Who a note may name: agents, and the members who reach the session
+
+```bash
+nvoi mentionable list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--session_id` |  |  |
+
+## onboarding
+
+### `nvoi onboarding show`
+
+The onboarding step and what it holds
+
+```bash
+nvoi onboarding show [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--repo_id` |  |  |
+
+### `nvoi onboarding start`
+
+Start the first session and end onboarding
+
+```bash
+nvoi onboarding start [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--agent_id` |  |  |
+| `--prompt` | required |  |
+| `--repo_id` |  |  |
+| `--values` |  |  |
+
+### `nvoi onboarding update`
+
+Save onboarding's environment
+
+```bash
+nvoi onboarding update [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--disk` |  |  |
+| `--environment_commands_attributes` |  |  |
+| `--preview_port` |  |  |
+| `--provider_name` |  |  |
+| `--repo_id` |  |  |
+| `--shape` |  |  |
+
+## portal
+
+### `nvoi portal create`
+
+Open the Stripe Customer Portal
+
+```bash
+nvoi portal create
+```
+
+## preview
+
+### `nvoi preview show`
+
+Where the preview points, and whether it is served
+
+```bash
+nvoi preview show <session-id>
+```
+
+### `nvoi preview start`
+
+Serve the checkout
+
+```bash
+nvoi preview start <worktree-id>
+```
+
+## preview-call
+
+### `nvoi preview-call answer`
+
+Answer what the agent asked of the preview
+
+```bash
+nvoi preview-call answer <session-id> <call-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--error` |  |  |
+| `--image` |  | A screenshot's PNG, base64 |
+| `--text` | required |  |
+| `--url` |  | The page's address when the screenshot was taken |
+
+### `nvoi preview-call list`
+
+The agent's calls waiting for the session's preview
+
+```bash
+nvoi preview-call list <session-id>
+```
+
+### `nvoi preview-call start`
+
+Pick up a call to perform it in the preview
+
+```bash
+nvoi preview-call start <session-id> <call-id>
+```
+
+## provider
+
+### `nvoi provider list`
+
+List providers
+
+```bash
+nvoi provider list
+```
+
+## repo
+
+### `nvoi repo create`
+
+Import a GitHub repository
+
+```bash
+nvoi repo create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--github_repository_id` | required |  |
+
+### `nvoi repo delete`
+
+Remove a repository
+
+```bash
+nvoi repo delete <repo-id>
+```
+
+### `nvoi repo host`
+
+Make a repository hosted by nvoi, reached with git
+
+```bash
+nvoi repo host [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--name` | required |  |
+
+### `nvoi repo list`
+
+List repositories
+
+```bash
+nvoi repo list
+```
+
+### `nvoi repo show`
+
+Get a repository
+
+```bash
+nvoi repo show <repo-id>
+```
+
+## role
+
+### `nvoi role list`
+
+List what each role may use through the tool gateway
+
+```bash
+nvoi role list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--page` |  |  |
+| `--per` |  |  |
+| `--role` |  |  |
+
+### `nvoi role update`
+
+Set a role's levels for some tools
+
+```bash
+nvoi role update <role> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--tools` | required |  |
+
+## service
+
+### `nvoi service delete`
+
+Remove a service of a production environment
+
+```bash
+nvoi service delete <environment-id> <name>
+```
+
+### `nvoi service exec`
+
+Run a command in a production service
+
+```bash
+nvoi service exec <environment-id> <name> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--command` | required | Run with sh, e.g. bun run backfill --apply |
+| `--variables` |  | Variables for this run only, never kept, e.g. \{"LEGACY_DATABASE_URL": "postgres://…"\} |
+
+### `nvoi service list`
+
+List the services of a production environment
+
+```bash
+nvoi service list <environment-id>
+```
+
+### `nvoi service logs`
+
+Read a production service's logs
+
+```bash
+nvoi service logs <environment-id> <name> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--lines` |  | The last lines per pod; 200 by default, at most 5000 |
+| `--since` |  | Only lines this recent: 30s, 15m, 2h |
+
+### `nvoi service set`
+
+Set a service of a production environment
+
+```bash
+nvoi service set <environment-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--command` |  | Run in the project's image with sh -c; its CMD when empty |
+| `--cpu` |  | CPU, e.g. 500m |
+| `--image` |  | Another image than the project's, e.g. redis:7-alpine |
+| `--memory` |  | Memory, e.g. 512Mi |
+| `--name` | required |  |
+| `--port` |  | The port it listens on, reached as &lt;name>:&lt;port> in the cluster |
+| `--replicas` |  | Pods to run; 0 runs none. 1 by default |
+| `--strategy` |  | Recreate stops the old pods first (one scheduler, never two); RollingUpdate by default |
+
+## service-run
+
+### `nvoi service-run show`
+
+Show a command run in a production service
+
+```bash
+nvoi service-run show <service_run-id>
+```
+
+## session
+
+### `nvoi session answer`
+
+Answer a parked tool call
+
+```bash
+nvoi session answer <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--answers` |  | A question's picked option labels, by index |
+| `--decision` | required | approve allows the call (answers a question), reject denies it |
+| `--notes` |  | A question's own-words answers, by index |
+| `--tool_use_id` | required |  |
+
+### `nvoi session approve`
+
+Allow the call the session waits on (answer it, for a question)
+
+```bash
+nvoi session approve <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--answers` |  | A question's picked option labels, by index |
+| `--notes` |  | A question's own-words answers, by index |
+
+### `nvoi session create`
+
+Start a session on an existing checkout
+
+```bash
+nvoi session create <worktree-id>
+```
+
+### `nvoi session deny`
+
+Deny the call the session waits on
+
+```bash
+nvoi session deny <session-id>
+```
+
+### `nvoi session follow`
+
+Print a session's events until its turn ends
+
+```bash
+nvoi session follow <id>
+```
+
+### `nvoi session list`
+
+List sessions
+
+```bash
+nvoi session list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+| `--q` |  |  |
+
+### `nvoi session show`
+
+Get a session
+
+```bash
+nvoi session show <session-id>
+```
+
+### `nvoi session start`
+
+Start a session on a new checkout
+
+```bash
+nvoi session start <repo-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--agent_id` |  |  |
+| `--environment_id` |  |  |
+| `--prompt` | required |  |
+
+### `nvoi session stop`
+
+Cancel a turn
+
+```bash
+nvoi session stop <session-id> <turn-id>
+```
+
+### `nvoi session update`
+
+Rename or archive a session
+
+```bash
+nvoi session update <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+| `--llm_config_id` |  |  |
+| `--title` |  |  |
+
+## session-message
+
+### `nvoi session-message list`
+
+Read a session's turns and events
+
+```bash
+nvoi session-message list <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--after` |  |  |
+
+### `nvoi session-message send`
+
+Send a prompt
+
+```bash
+nvoi session-message send <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--files` |  | (repeat the flag, or separate with commas) |
+| `--prompt` | required |  |
+
+## session-note
+
+### `nvoi session-note create`
+
+Write a note or a reply
+
+```bash
+nvoi session-note create <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--body` | required |  |
+| `--mentions` |  |  |
+| `--parent_id` |  |  |
+
+### `nvoi session-note list`
+
+List a session's notes with their replies
+
+```bash
+nvoi session-note list <session-id>
+```
+
+### `nvoi session-note send`
+
+Send a note to the agent
+
+```bash
+nvoi session-note send <session-id> <note-id>
+```
+
+## shell
+
+### `nvoi shell stop`
+
+Hang up a shell
+
+```bash
+nvoi shell stop <session-id> <shell-id>
+```
+
+## skill
+
+### `nvoi skill archive`
+
+Archive a skill
+
+```bash
+nvoi skill archive <skill-id>
+```
+
+### `nvoi skill create`
+
+Create a skill
+
+```bash
+nvoi skill create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--body` |  |  |
+| `--description` |  |  |
+| `--example` |  |  |
+| `--name` | required |  |
+| `--tagline` |  |  |
+
+### `nvoi skill list`
+
+List skills
+
+```bash
+nvoi skill list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+
+### `nvoi skill restore`
+
+Restore an archived skill
+
+```bash
+nvoi skill restore <skill-id>
+```
+
+### `nvoi skill show`
+
+Get a skill
+
+```bash
+nvoi skill show <skill-id>
+```
+
+### `nvoi skill update`
+
+Update a skill
+
+```bash
+nvoi skill update <skill-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--body` |  |  |
+| `--description` |  |  |
+| `--example` |  |  |
+| `--name` |  |  |
+| `--tagline` |  |  |
+
+## skill-file
+
+### `nvoi skill-file archive`
+
+Remove a file
+
+```bash
+nvoi skill-file archive <skill-id> <file-id>
+```
+
+### `nvoi skill-file create`
+
+Add files
+
+```bash
+nvoi skill-file create <skill-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--files` | required | (repeat the flag, or separate with commas) |
+
+## task
+
+### `nvoi task archive`
+
+Archive a task
+
+```bash
+nvoi task archive <task-id>
+```
+
+### `nvoi task create`
+
+Create a task
+
+```bash
+nvoi task create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--actions` |  |  |
+| `--agent_id` | required |  |
+| `--cron` |  |  |
+| `--environment_id` | required |  |
+| `--event` |  |  |
+| `--filters` |  |  |
+| `--name` | required |  |
+| `--prompt` | required |  |
+| `--timezone` |  |  |
+| `--trigger` | required |  |
+| `--workflow_id` |  |  |
+
+### `nvoi task list`
+
+List tasks
+
+```bash
+nvoi task list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+
+### `nvoi task restore`
+
+Restore an archived task
+
+```bash
+nvoi task restore <task-id>
+```
+
+### `nvoi task rotate`
+
+Make a new webhook token
+
+```bash
+nvoi task rotate <task-id>
+```
+
+### `nvoi task show`
+
+Get a task
+
+```bash
+nvoi task show <task-id>
+```
+
+### `nvoi task start`
+
+Start a run now
+
+```bash
+nvoi task start <task-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--text` |  |  |
+
+### `nvoi task update`
+
+Update, pause or resume a task
+
+```bash
+nvoi task update <task-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--paused` |  |  |
+| `--trigger` |  |  |
+
+## task-run
+
+### `nvoi task-run list`
+
+List a task's runs
+
+```bash
+nvoi task-run list <task-id>
+```
+
+## terminal
+
+### `nvoi terminal start`
+
+Open the terminal: its socket, token and shells
+
+```bash
+nvoi terminal start <session-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--typing` |  |  |
+
+## tier
+
+### `nvoi tier list`
+
+List the tiers on offer, with their sizes
+
+```bash
+nvoi tier list
+```
+
+## timezone
+
+### `nvoi timezone list`
+
+List the time zones a schedule takes
+
+```bash
+nvoi timezone list
+```
+
+## token
+
+### `nvoi token create`
+
+Make a personal token; its secret is shown once
+
+```bash
+nvoi token create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--expires_in_days` |  | 1 to 365; 90 when absent |
+| `--name` | required |  |
+| `--workspace` |  | a slug of one of the caller's workspaces; the current one when absent |
+
+### `nvoi token delete`
+
+Revoke one of your tokens
+
+```bash
+nvoi token delete <token-id>
+```
+
+### `nvoi token list`
+
+List your tokens: app sign-ins, personal tokens and connected clients
+
+```bash
+nvoi token list
+```
+
+## tool-grant
+
+### `nvoi tool-grant delete`
+
+Give the role's preset back to a member
+
+```bash
+nvoi tool-grant delete <member-id>
+```
+
+### `nvoi tool-grant list`
+
+List what a member may use through the tool gateway
+
+```bash
+nvoi tool-grant list <member-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--overridden` |  |  |
+| `--q` |  |  |
+
+### `nvoi tool-grant update`
+
+Set some of a member's tools, or give the preset back
+
+```bash
+nvoi tool-grant update <member-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--tools` | required |  |
+
+## trigger
+
+### `nvoi trigger list`
+
+List what each connector offers a task
+
+```bash
+nvoi trigger list
+```
+
+## usage
+
+### `nvoi usage show`
+
+How much the machines spent over a month or another range of days
+
+```bash
+nvoi usage show [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--days` |  |  |
+
+## user
+
+### `nvoi user update`
+
+Name yourself and pick a picture
+
+```bash
+nvoi user update [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--last_name` | required |  |
+
+## workflow
+
+### `nvoi workflow archive`
+
+Archive a workflow
+
+```bash
+nvoi workflow archive <workflow-id>
+```
+
+### `nvoi workflow create`
+
+Create a workflow
+
+```bash
+nvoi workflow create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--environment_id` | required |  |
+| `--name` | required |  |
+| `--steps` | required |  |
+
+### `nvoi workflow list`
+
+List workflows, with the board's columns
+
+```bash
+nvoi workflow list [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--archived` |  |  |
+
+### `nvoi workflow restore`
+
+Restore an archived workflow
+
+```bash
+nvoi workflow restore <workflow-id>
+```
+
+### `nvoi workflow show`
+
+Get a workflow
+
+```bash
+nvoi workflow show <workflow-id>
+```
+
+### `nvoi workflow update`
+
+Rename a workflow, narrow it or change its steps
+
+```bash
+nvoi workflow update <workflow-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--name` | required |  |
+| `--steps` |  |  |
+
+## workspace
+
+### `nvoi workspace create`
+
+Open a new workspace and mint a token for it
+
+```bash
+nvoi workspace create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--name` | required |  |
+
+### `nvoi workspace errors`
+
+Failed turns, failed setups and refused calls over a window
+
+```bash
+nvoi workspace errors [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--since` |  | How far back: a number and s, m, h or d (15m, 24h, 7d), 30 days at most; 24h when absent. |
+
+### `nvoi workspace runs`
+
+The turns running now and the turns waiting on a person
+
+```bash
+nvoi workspace runs
+```
+
+### `nvoi workspace status`
+
+The workspace at a glance: machines, seeds, databases, environments, sessions
+
+```bash
+nvoi workspace status
+```
+
+### `nvoi workspace switch`
+
+Mint a token for another workspace
+
+```bash
+nvoi workspace switch <workspace-id>
+```
+
+## workspace-user
+
+### `nvoi workspace-user create`
+
+Add a member
+
+```bash
+nvoi workspace-user create [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--email` | required |  |
+| `--role` |  |  |
+
+### `nvoi workspace-user delete`
+
+Remove a member
+
+```bash
+nvoi workspace-user delete <member-id>
+```
+
+### `nvoi workspace-user list`
+
+List members
+
+```bash
+nvoi workspace-user list
+```
+
+### `nvoi workspace-user update`
+
+Change a member's role
+
+```bash
+nvoi workspace-user update <member-id> [flags]
+```
+
+| flag | | |
+| --- | --- | --- |
+| `--role` | required |  |
+
+## worktree
+
+### `nvoi worktree ship`
+
+Ship a checkout's branch into main
+
+```bash
+nvoi worktree ship <worktree-id>
+```

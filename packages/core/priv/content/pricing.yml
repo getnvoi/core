@@ -1,0 +1,34 @@
+# The rate card of /pricing, /pricing.md, /pricing.json and the page's JSON-LD, and of billing: one source
+# for all of them. Set by Ben on 28 Sep 2026.
+#
+# Machines are priced at the vendor's rate (Billing.rate, never written here) times a multiplier: package
+# credit at package_rate, on-demand credit at demand_rate. Credit is spent in order: the free month (a
+# person's, shared by the free workspaces they own, at package_rate), the workspace's package, then
+# on-demand credit charged to the card on file, top_up at a time, up to the workspace's budget.
+# The subscription only licenses members: one member needs none, a second one needs a seat each.
+# Every machine runs on Daytona, sold as the one tier. The disk range is our org's limit, sizes the app's
+# ladder (ReposHelper::SIZES). L and XL need Daytona to raise our per-sandbox limit: on request.
+as_of: 2026-09-28
+currency: USD
+package_rate: 2.5
+demand_rate: 3
+free: 1
+seat: 15
+packages: [25, 50, 100]
+top_up: { below: 2, amount: 10 }
+machines_at_once: 20
+# Every managed database, whoever owns it: the most vCPU it scales to and its GB. What it uses is
+# included for now; metering it against credit is next.
+database: { compute: 1, storage: 5 }
+machines:
+  - { tier: Standard, size: S, vcpu: 2, memory: 4, disk: "10 to 15 GB" }
+  - { tier: Standard, size: M, vcpu: 4, memory: 8, disk: "10 to 15 GB" }
+  - { tier: Standard, size: L, vcpu: 8, memory: 16, on_request: true }
+  - { tier: Standard, size: XL, vcpu: 16, memory: 32, on_request: true }
+counts:
+  - A machine counts while it runs, while the agent works or someone views its preview, and for 10 minutes after the last of either. Then it pauses.
+  - A paused machine keeps its disk and costs nothing. Your next message starts it again.
+  - Building an environment's seed, the machine its sessions are forked from, costs like any running machine.
+  - nvoi reads each machine's state every 5 minutes and books its cost per machine per day.
+  - "Credit is spent in order: the free month, your package, then on-demand credit charged to your card, $10 at a time."
+  - At your monthly budget, or with no credit and no card, new machines do not start. A running machine gets 10 more minutes, then pauses with a notice in the session. Nothing is deleted.

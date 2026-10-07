@@ -1,0 +1,79 @@
+# The public site's footer and company details, read by the docs site (src/lib/site.ts).
+#
+# A link with `route: true` is a page of the public site, outside the docs: the docs show it only when
+# `live: true`; set that when the page ships. A link without `route` (the docs' own
+# pages, a mail address) is always shown.
+legal_entity: nvoi
+
+# The objects, each with a page under /product: the header's Product menu, the llms file and the docs
+# header. The icon is a ds/icon drawing; its colour comes from the icon's family.
+objects:
+  - { slug: sessions, name: Sessions, icon: session, line: "One agent, one branch, one machine" }
+  - { slug: agents, name: Agents and sub-agents, icon: agent, line: "Harness, model, instructions, tool levels" }
+  - { slug: approvals, name: Approvals, icon: gate, line: "What waits for a person" }
+  - { slug: previews, name: Previews, icon: preview, line: "The running app on a signed link" }
+  - { slug: environments, name: Environments and machines, icon: env, line: "Tiers, sizes, setup and preview commands" }
+  - { slug: skills, name: Skills and library, icon: skill, line: "SKILL.md folders and workspace files" }
+  - { slug: artifacts, name: Artifacts, icon: artifact, line: "Pages and apps a session hands back" }
+  - { slug: cli, name: CLI and API, icon: terminal, line: "Every operation from a terminal" }
+
+# The site's own pages: the headline each one opens with (one *italic* word) and the scene on its link card.
+pages:
+  /: { title: "Coding agents that *ask* before they push", scene: session }
+  /product: { title: "What nvoi is *made* of", scene: harness }
+  /pricing: { title: "Pay for the *minutes* your machines run", scene: environment }
+  /changelog: { title: "What *changed*, week by week", scene: session }
+  /blog: { title: "Questions teams *ask*", scene: approval }
+  /compare: { title: "nvoi and the *others*", scene: approval }
+
+# The header's links after Product, in order.
+header:
+  - { label: Pricing, href: /pricing }
+  - { label: Changelog, href: /changelog }
+  - { label: Docs, href: /docs/ }
+  - { label: Blog, href: /blog }
+
+footer:
+  about: >-
+    nvoi runs the coding agent you already use on a machine of its own for every branch, with a live
+    preview of the app it runs. Pushes and pull requests wait for your approval, and nvoi makes them
+    with a GitHub credential the machine never holds.
+  columns:
+    - title: Product
+      links:
+        - { label: Sessions, href: /product/sessions, route: true, live: true }
+        - { label: Agents and sub-agents, href: /product/agents, route: true, live: true }
+        - { label: Approvals, href: /product/approvals, route: true, live: true }
+        - { label: Previews, href: /product/previews, route: true, live: true }
+        - { label: Environments and machines, href: /product/environments, route: true, live: true }
+        - { label: Skills and library, href: /product/skills, route: true, live: true }
+        - { label: Artifacts, href: /product/artifacts, route: true, live: true }
+        - { label: CLI and API, href: /product/cli, route: true, live: true }
+        - { label: Pricing, href: /pricing, route: true, live: true }
+    - title: Resources
+      links:
+        - { label: Docs, href: /docs/ }
+        - { label: Getting started, href: /docs/nvoi/getting-started/ }
+        - { label: Self-host, href: /docs/nvoi/self-hosting/ }
+        - { label: API reference, href: /docs/reference/api/overview/ }
+        - { label: CLI reference, href: /docs/reference/cli/ }
+        - { label: Changelog, href: /changelog, route: true, live: true }
+        - { label: Blog, href: /blog, route: true, live: true }
+        - { label: llms.txt, href: /llms.txt, route: true, live: true }
+    - title: Compare
+      links:
+        - { label: All comparisons, href: /compare, route: true, live: true }
+        - { label: nvoi and Replicas, href: /compare/replicas, route: true, live: true }
+        - { label: nvoi and Claude Code on the web, href: /compare/claude-code-on-the-web, route: true, live: true }
+        - { label: nvoi and Codex, href: /compare/codex, route: true, live: true }
+        - { label: nvoi and Cursor, href: /compare/cursor, route: true, live: true }
+        - { label: nvoi and Devin, href: /compare/devin, route: true, live: true }
+        - { label: GitHub integration, href: /integrations/github, route: true }
+    - title: Company
+      links:
+        - { label: Security, href: /security, route: true }
+        - { label: Contact, href: "mailto:contact@nvoi.to" }
+        - { label: Terms, href: /terms, route: true, live: true }
+        - { label: Privacy, href: /privacy, route: true, live: true }
+        - { label: Subprocessors, href: /subprocessors, route: true, live: true }
+        - { label: Mentions légales, href: /legal, route: true, live: true }

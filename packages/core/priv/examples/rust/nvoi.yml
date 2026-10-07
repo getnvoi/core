@@ -1,0 +1,36 @@
+# Rust, Postgres through diesel, a worker binary and live updates: a job's progress reaches the page while it
+# runs. The binaries are built in setup, so a fork starts compiled; watchexec rebuilds on change.
+detect:
+- Cargo.toml
+ignore:
+- target/debug/
+- target/release/
+env:
+  PATH: "/usr/lib/postgresql/16/bin:$PATH"
+  PGDATA: "$HOME/.local/pgdata"
+  PGHOST: 127.0.0.1
+  PGUSER: postgres
+  PGDATABASE: seed_development
+  DATABASE_URL: postgres://postgres@127.0.0.1:5432/seed_development
+# The toolchain, installed before setup, even when an environment types its own setup commands.
+tools:
+- mise use -g rust@stable watchexec aqua:tailwindlabs/tailwindcss@latest
+setup:
+- test -x /usr/lib/postgresql/16/bin/initdb || { sudo apt-get update -qq && sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq postgresql-16 libpq-dev && { sudo systemctl disable -q --now postgresql 2>/dev/null; sudo pg_ctlcluster 16 main stop 2>/dev/null; true; }; }
+- cargo build --bins
+- tailwindcss -i assets/app.css -o public/app.css
+services:
+- name: postgres
+  command: '{ test -d "$PGDATA" || initdb --username=postgres --auth=trust --encoding=UTF8 --locale=C "$PGDATA"; } && exec postgres -D "$PGDATA" -p $PORT -k /tmp'
+  port: 5432
+- name: css
+  command: exec tailwindcss -i assets/app.css -o public/app.css --watch=always
+- name: jobs
+  before:
+  - psql -tAd postgres -c "select 1 from pg_database where datname = '$PGDATABASE'" | grep -q 1 || createdb "$PGDATABASE"
+  command: exec watchexec -r -e rs,html,toml -- cargo run --bin worker
+- name: app
+  before:
+  - psql -tAd postgres -c "select 1 from pg_database where datname = '$PGDATABASE'" | grep -q 1 || createdb "$PGDATABASE"
+  command: exec watchexec -r -e rs,html,toml -- cargo run --bin web
+  port: 3000

@@ -1,0 +1,205 @@
+/* Design system tokens. Greys are neutral oklch steps. Families are fixed pastel pairs: --f fills the disc, --i draws on it. Remapped under .dark. */
+:root {
+  --ds-g1: oklch(99.1% 0 0);
+  --ds-g2: oklch(98.2% 0 0);
+  --ds-g3: oklch(95.5% 0 0);
+  --ds-g4: oklch(93.1% 0 0);
+  --ds-g5: oklch(90.7% 0 0);
+  --ds-g6: oklch(88.5% 0 0);
+  --ds-g7: oklch(85.1% 0 0);
+  --ds-g8: oklch(79.2% 0 0);
+  --ds-g9: oklch(55% 0 0);
+  --ds-g10: oklch(53% 0 0);
+  --ds-g11: oklch(50.3% 0 0);
+  --ds-g12: oklch(24.4% 0 0);
+  --ds-ga3: oklch(24.4% 0 0 / 0.06);
+  --ds-ga4: oklch(24.4% 0 0 / 0.09);
+
+  --ds-bg: #ffffff;
+  --ds-surface: #ffffff;
+  --ds-paper: #f3efe9;
+  --ds-ink: #1f1e1a;
+  --ds-ink-2: #6b6a62;
+  /* A page from outside the system (an artifact, a preview) sits on white in both modes, as in a browser. */
+  --ds-web: #ffffff;
+  /* Text on a signal fill (danger button, error mark), white in both modes. */
+  --ds-on-fill: #ffffff;
+
+  /* Signals: a dot and a word, never a fill. */
+  /* Syntax colours for ds/code and the docs' code blocks: muted, readable on g2. */
+  --ds-code-keyword: oklch(48% 0.14 262);
+  --ds-code-string: oklch(50% 0.11 150);
+  --ds-code-number: oklch(55% 0.13 55);
+  --ds-code-comment: var(--ds-g9);
+  --ds-code-function: oklch(48% 0.14 305);
+  --ds-code-variable: var(--ds-g12);
+  --ds-code-punctuation: var(--ds-g10);
+  --ds-ok: #30a46c;
+  --ds-busy: #ffc53d;
+  --ds-bad: #e5484d;
+  /* Focus ring: 5.2:1 on white, 4.5:1 on paper. The danger fill carries white text at 5.3:1. */
+  --ds-focus: #2f6fb8;
+  --ds-bad-fill: #cd2b31;
+  /* Signal colours as text: the dot hues are too light for 4.5:1 on white. */
+  --ds-bad-text: #cd2b31;
+  --ds-ok-text: #1f7a4f;
+
+  /* The terminal (ds/terminal): the page's ground and ink, a selection wash and the 16 ANSI colours, 0 to 7
+     then their bright forms. Each reaches 4.5:1 on the ground but 0 and 8, the ones a program draws as
+     background. */
+  --ds-term-bg: var(--ds-bg);
+  --ds-term-ink: var(--ds-g12);
+  --ds-term-selection: oklch(24.4% 0 0 / 0.14);
+  --ds-term-0: #242424;  --ds-term-1: #c1363b;  --ds-term-2: #2f7d52;  --ds-term-3: #8a6510;
+  --ds-term-4: #2f67ad;  --ds-term-5: #8f3f78;  --ds-term-6: #1f7a72;  --ds-term-7: #6e6e6e;
+  --ds-term-8: #5c5c5c;  --ds-term-9: #cd2b31;  --ds-term-10: #1f7a4f; --ds-term-11: #7a5a0c;
+  --ds-term-12: #2f6fb8; --ds-term-13: #9c4a86; --ds-term-14: #16786e; --ds-term-15: #1a1a1a;
+
+  /* Families. */
+  --ds-blue-f: #bee0ef;   --ds-blue-i: #113264;
+  --ds-olive-f: #e4ead2;  --ds-olive-i: #2a3312;
+  --ds-green-f: #d6f1df;  --ds-green-i: #193b2d;
+  --ds-orange-f: #ffdfb5; --ds-orange-i: #582d1d;
+  --ds-amber-f: #fff0bd;  --ds-amber-i: #2e2000;
+  --ds-pink-f: #fbdcef;   --ds-pink-i: #651249;
+  --ds-purple-f: #eaddf3; --ds-purple-i: #402060;
+  --ds-teal-f: #ccf3ea;   --ds-teal-i: #0d3d38;
+  --ds-yellow-f: #fff394; --ds-yellow-i: #473b1f;
+  /* A note: the team's words, never sent to the agent. The yellow family's fill and ink, a pale wash and
+     an edge. */
+  --ds-note-f: var(--ds-yellow-f); --ds-note-i: var(--ds-yellow-i);
+  --ds-note-soft: #fffbd6; --ds-note-edge: #e9d55a;
+  --ds-gray-f: #e9e9e9;   --ds-gray-i: #202020;
+
+  --ds-display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --ds-serif: "Instrument Serif", Georgia, serif;
+  --ds-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --ds-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ds-pixel: "Silkscreen", ui-monospace, monospace;
+  /* Type scale. Display clamps and 14/16px reading text sit outside it. */
+  --ds-fs-9: 9px;
+  --ds-fs-11: 11px;
+  --ds-fs-12: 12px;
+  --ds-fs-13: 13px;
+  --ds-fs-15: 15px;
+  --ds-fs-17: 17px;
+  --ds-fs-20: 20px;
+
+  /* The app's bars, border included: the sidebar's head and every page head, so their bottoms meet. */
+  --ds-bar: 52px;
+  /* The edge of a section card, which an agent's turn shares. */
+  --ds-edge-section: var(--ds-g7);
+  /* Heights: head, row, tab, badge. */
+  --ds-h-head: 28px;
+  --ds-h-row: 24px;
+  --ds-h-tab: 20px;
+  --ds-h-badge: 16px;
+  --ds-h-control: 28px;
+  --ds-h-control-sm: 24px;
+  --ds-h-control-lg: 40px;
+  /* Leading marks sit centred in one 28px column, so a head icon and the row icons under it share a centre. */
+  --ds-lead: 28px;
+
+  --ds-round: 9999px;
+
+  /* Dimming: a control that is working stays readable, one that cannot be used fades further. */
+  --ds-dim-busy: 0.72;
+  --ds-dim-off: 0.5;
+
+  /* Motion: strong ease-out for entering and responding, ease-in-out for moving on screen, the drawer
+     curve for panels. Press 140ms, hover 120ms, small popovers 160ms, menus 200ms, dialogs 240ms. */
+  --ds-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ds-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ds-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ds-dur-press: 140ms;
+  --ds-dur-hover: 120ms;
+  --ds-dur-pop: 160ms;
+  --ds-dur-menu: 200ms;
+  --ds-dur-dialog: 240ms;
+  --ds-sh-neutral: 0 1px 1px 0 rgb(0 0 0 / 0.06);
+  --ds-sh-float: 0 0 1px 0 rgb(24 26 27 / 0.04), 0 3px 6px 0 rgb(24 26 27 / 0.08), 0 9px 24px 0 rgb(24 26 27 / 0.16), 0 0 0 1px rgb(141 141 141 / 0.24);
+  --ds-backdrop: rgb(255 255 255 / 0.6);
+
+  --ds-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.2 0 0 0 0 0.15 0 0 0 0 0.1 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.dark {
+  color-scheme: dark;
+  --ds-code-keyword: oklch(78% 0.10 262);
+  --ds-code-string: oklch(80% 0.10 150);
+  --ds-code-number: oklch(80% 0.10 60);
+  --ds-code-function: oklch(80% 0.09 305);
+  --ds-g1: oklch(17.8% 0 0);
+  --ds-g2: oklch(21.3% 0 0);
+  --ds-g3: oklch(25.2% 0 0);
+  --ds-g4: oklch(28.5% 0 0);
+  --ds-g5: oklch(31.3% 0 0);
+  --ds-g6: oklch(34.8% 0 0);
+  --ds-g7: oklch(40.2% 0 0);
+  --ds-g8: oklch(48.9% 0 0);
+  --ds-g9: oklch(64% 0 0);
+  --ds-g10: oklch(70% 0 0);
+  --ds-g11: oklch(77% 0 0);
+  --ds-g12: oklch(94.9% 0 0);
+  --ds-ga3: oklch(100% 0 0 / 0.06);
+  --ds-ga4: oklch(100% 0 0 / 0.09);
+
+  --ds-bg: var(--ds-g1);
+  --ds-surface: var(--ds-g2);
+  --ds-paper: #1c1b19;
+  --ds-ink: #f3efe9;
+  --ds-ink-2: #a8a69c;
+
+  --ds-blue-f: #1b2f45;   --ds-blue-i: #bee0ef;
+  --ds-olive-f: #2a3018;  --ds-olive-i: #e4ead2;
+  --ds-green-f: #183327;  --ds-green-i: #d6f1df;
+  --ds-orange-f: #3d2716; --ds-orange-i: #ffdfb5;
+  --ds-amber-f: #352a0d;  --ds-amber-i: #fff0bd;
+  --ds-pink-f: #3d1a31;   --ds-pink-i: #fbdcef;
+  --ds-purple-f: #2e2140; --ds-purple-i: #eaddf3;
+  --ds-teal-f: #11332f;   --ds-teal-i: #ccf3ea;
+  --ds-yellow-f: #37300d; --ds-yellow-i: #fff394;
+  --ds-note-f: var(--ds-yellow-f); --ds-note-i: var(--ds-yellow-i);
+  --ds-note-soft: #3a3312; --ds-note-edge: #8a7520;
+  --ds-gray-f: #2d2d2d;   --ds-gray-i: #eeeeee;
+
+  --ds-sh-neutral: 0 1px 1px 0 rgb(0 0 0 / 0.4);
+  --ds-sh-float: 0 3px 6px 0 rgb(0 0 0 / 0.4), 0 9px 24px 0 rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.1);
+  --ds-backdrop: rgb(0 0 0 / 0.5);
+  --ds-focus: #8ec8f6;
+  --ds-bad-text: #ff6369;
+  --ds-ok-text: #3dd68c;
+
+  --ds-term-selection: oklch(100% 0 0 / 0.18);
+  --ds-term-0: #3a3a3a;  --ds-term-1: #f2787c;  --ds-term-2: #7fcf9b;  --ds-term-3: #e8c26a;
+  --ds-term-4: #8ab4e8;  --ds-term-5: #d99ac4;  --ds-term-6: #7fcfc4;  --ds-term-7: #d6d6d6;
+  --ds-term-8: #707070;  --ds-term-9: #ff9ca0;  --ds-term-10: #a3e5b9; --ds-term-11: #f5d68f;
+  --ds-term-12: #aecbf2; --ds-term-13: #ebb8da; --ds-term-14: #a3e5dc; --ds-term-15: #ffffff;
+}
+
+/* A finger needs a larger target than a pointer: controls grow on touch screens, and still fit the bar. */
+@media (pointer: coarse) {
+  :root { --ds-h-control: 40px; --ds-h-control-sm: 32px; --ds-h-control-lg: 48px; }
+}
+
+/* A family on any element: .ds-f-blue sets --f and --i for what is inside. */
+.ds-f-blue { --f: var(--ds-blue-f); --i: var(--ds-blue-i); }
+.ds-f-olive { --f: var(--ds-olive-f); --i: var(--ds-olive-i); }
+.ds-f-green { --f: var(--ds-green-f); --i: var(--ds-green-i); }
+.ds-f-orange { --f: var(--ds-orange-f); --i: var(--ds-orange-i); }
+.ds-f-amber { --f: var(--ds-amber-f); --i: var(--ds-amber-i); }
+.ds-f-pink { --f: var(--ds-pink-f); --i: var(--ds-pink-i); }
+.ds-f-purple { --f: var(--ds-purple-f); --i: var(--ds-purple-i); }
+.ds-f-teal { --f: var(--ds-teal-f); --i: var(--ds-teal-i); }
+.ds-f-yellow { --f: var(--ds-yellow-f); --i: var(--ds-yellow-i); }
+.ds-f-gray { --f: var(--ds-gray-f); --i: var(--ds-gray-i); }
+.ds-f-off { --f: var(--ds-g3); --i: var(--ds-g9); }
+
+/* The one spinner turn, shared by every component that spins. */
+@keyframes ds-spin { to { transform: rotate(360deg); } }
+
+/* The lead column: a 24px row icon or tile centred where the 28px head icon sits. */
+.ds-lead { display: inline-grid; place-items: center; flex: none; width: var(--ds-lead); min-width: var(--ds-lead); }
+
+/* Search fields draw their own clear control; the browser's is hidden. */
+input[type="search"]::-webkit-search-cancel-button, input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; display: none; }

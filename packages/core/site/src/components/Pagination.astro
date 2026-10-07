@@ -1,0 +1,24 @@
+---
+// Previous and next in ds/pager's markup: an ink-edged box per link, a mono
+// caption over the title in the display face.
+const { prev, next } = Astro.locals.starlightRoute.pagination;
+---
+
+{
+  (prev || next) && (
+    <nav class="ds-pager print:hidden" aria-label="Pages">
+      {prev && (
+        <a class="ds-pager-link" href={prev.href} rel="prev">
+          <span>Previous</span>
+          <b>{prev.label}</b>
+        </a>
+      )}
+      {next && (
+        <a class="ds-pager-link is-next" href={next.href} rel="next">
+          <span>Next</span>
+          <b>{next.label}</b>
+        </a>
+      )}
+    </nav>
+  )
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@nvoi/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The docs site: Astro Starlight, built into packages/core/priv/static/docs and served by the core under /docs. The API pages are rendered from the core's priv/openapi.yaml.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "test": "astro build"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "^0.4.1",
+    "@astrojs/starlight": "latest",
+    "@hotwired/stimulus": "^3.2.2",
+    "astro": "latest",
+    "js-yaml": "^4.1.1",
+    "sharp": "latest",
+    "shiki": "^4.4.3",
+    "starlight-links-validator": "latest",
+    "starlight-llms-txt": "^0.11.0",
+    "starlight-openapi": "latest"
+  }
+}

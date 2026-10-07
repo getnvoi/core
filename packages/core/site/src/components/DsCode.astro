@@ -1,0 +1,19 @@
+---
+// Starlight's <Code> for the API pages' samples, drawn as ds/code by the same builder as the Markdown
+// fences (src/lib/code.mjs). astro.config aliases astro-expressive-code/components here.
+import { codeBlock, toHtml } from "../lib/code.mjs";
+
+interface Props {
+  code: string;
+  lang?: string;
+  title?: string;
+  // Expressive Code's frame option: "none" asks for no bar, where the container already has one.
+  frame?: string;
+}
+
+const { code, lang, title, frame } = Astro.props;
+// Request samples repeat every operation's URL and headers; search reads the operation's text instead.
+const html = toHtml(await codeBlock(code, lang, title, frame !== "none"));
+---
+
+<div data-pagefind-ignore><Fragment set:html={html} /></div>

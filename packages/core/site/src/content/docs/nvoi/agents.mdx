@@ -1,0 +1,65 @@
+---
+title: Agents
+description: Model, instructions, tool levels, attached skills.
+---
+
+## What it is
+
+An agent is a named configuration of the coding agent: the model it runs on, the instructions that open its system prompt, the level of every tool it may call and the skills it carries. A session runs with one agent. A workspace has one to begin with and as many as it wants.
+
+## How it behaves
+
+### A tool has a level
+
+The levels apply to nvoi's own tools, the actions nvoi performs for the agent with credentials the machine never holds: `set_title`, `create_screenshot`, `push_branch` and `create_pull_request`. `ask_user` puts one to four questions to you, each with its options and a field for your own words; it always waits for your answer, so it takes `approval` or `deny`, never `auto`. Your answers reach the agent as its next message. The agent sets, per tool, `auto`, `approval` or `deny`. `auto` runs; `approval` is the gate: the call parks the turn until a person answers on the session page; `deny` is not offered to the model at all. A tool absent from the map runs on `auto`. The coding agent's built-in tools (the shell, file edits, search) run on the machine without a gate.
+
+### The model is a vendor's alias
+
+`model` is one of the ids the workspace's [providers](/docs/nvoi/llm) list, or empty for the credential's default. Never free text.
+
+### A skill is carried by slug
+
+The skills an agent names are staged onto the machine when a checkout is built. See [Skills](/docs/nvoi/skills).
+
+### Archived, never deleted
+
+Archiving hides an agent and stops it being chosen. Every session it ran keeps naming it.
+
+## In the app
+
+The agents page lists them. An agent's page is the form (name, tagline, model, instructions, skills) and every tool with its level.
+
+## From the CLI
+
+### Create and update
+
+```bash
+nvoi agent create --name Reviewer --tagline "Reads before it writes."
+nvoi agent update <agent-id> --instructions "Run the tests before every answer." --model sonnet
+nvoi agent update <agent-id> --skill_ids <skill-id>,<skill-id>
+```
+
+`--skill_ids` replaces the list.
+
+### Tool levels
+
+```bash
+nvoi agent update <agent-id> --tools '{"push_branch":"approval","create_pull_request":"approval","create_screenshot":"auto"}'
+```
+
+`--tools` replaces the map; an unknown tool or level is refused.
+
+### Read, archive, restore
+
+```bash
+nvoi agent list --table
+nvoi agent list --archived true --table
+nvoi agent show <agent-id>
+nvoi agent archive <agent-id>
+nvoi agent restore <agent-id>
+```
+
+## Related
+
+- [Skills](/docs/nvoi/skills): what an agent carries onto the machine.
+- [Sessions](/docs/nvoi/sessions): where a gated call waits.

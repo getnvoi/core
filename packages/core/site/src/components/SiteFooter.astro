@@ -1,0 +1,36 @@
+---
+// The site's footer: ds/footer's markup and CSS, with the content
+// of site.yml (src/lib/site.ts). The wordmark is decoration, hidden from assistive technology.
+import { brand } from "../lib/design";
+import { about, columns, legal } from "../lib/site";
+---
+
+<footer class="ds-footer">
+  <div class="ds-footer-in">
+    <div class="ds-footer-top">
+      <div class="ds-footer-about">
+        <a aria-label="nvoi" class="ds-footer-home" href="/">
+          <Fragment set:html={brand("mark", 'class="ds-footer-logo is-light"')} />
+          <Fragment set:html={brand("mark-paper", 'class="ds-footer-logo is-dark"')} />
+        </a>
+        <p class="ds-footer-text">{about}</p>
+      </div>
+      <nav class="ds-footer-cols" aria-label="Footer">
+        {
+          columns.map((column) => (
+            <div class="ds-footer-col">
+              <h2 class="ds-footer-title">{column.title}</h2>
+              <ul>
+                {column.links.map(([label, href]) => (
+                  <li><a class="ds-footer-link" href={href}>{label}</a></li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </div>
+    <div class="ds-footer-legal"><span>{legal}</span></div>
+    <div class="ds-footer-mark" aria-hidden="true"><Fragment set:html={brand("wordmark")} /></div>
+  </div>
+</footer>

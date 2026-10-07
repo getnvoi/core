@@ -1,0 +1,44 @@
+[package]
+name = "seed"
+version = "0.1.0"
+edition = "2021"
+
+# TWO BINARIES, BECAUSE THERE ARE TWO PROCESSES.
+#
+# The web server and the job worker are separate services in the manifest —
+# started apart, followed apart, restartable apart — so they are separate
+# binaries here rather than one binary with a `--worker` flag. A flag would put
+# the split in an argument string; this puts it where the build already is.
+[[bin]]
+name = "web"
+path = "src/bin/web.rs"
+
+[[bin]]
+name = "worker"
+path = "src/bin/worker.rs"
+
+[dependencies]
+actix-web = "4"
+# The stylesheet is served FROM DISK, not embedded: the `css` process rewrites
+# `public/app.css` while the server runs, and a compiled-in copy would freeze
+# whatever existed at build time — so editing a template would change nothing
+# until the binary was rebuilt, which is the opposite of what a watcher is for.
+actix-files = "0.6"
+actix-ws = "0.3"
+apalis = { version = "0.6", features = ["limit"] }
+apalis-sql = { version = "0.6", features = ["postgres"] }
+chrono = { version = "0.4", features = ["serde"] }
+# DIESEL OWNS THE TABLE. `r2d2` because actix is multi-threaded and diesel's
+# connection is not shareable; `chrono` for the timestamp column.
+diesel = { version = "2.2", features = ["postgres", "r2d2", "chrono"] }
+# Migrations compiled INTO the binary, so they run at boot with no CLI in the
+# image and no schema step in the manifest.
+diesel_migrations = { version = "2.2", features = ["postgres"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# ONLY BECAUSE APALIS IS BUILT ON IT. `apalis-sql` takes a `PgPool` and owns
+# its own tables — this is the queue's private connection, never a second way to
+# read this app's data.
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

@@ -1,0 +1,28 @@
+/* A frame: one g6 edge, an optional g3 bar, the code on g2. Round copy button in the corner. */
+.ds-code { position: relative; border: 1px solid var(--ds-g6); background: var(--ds-g2); min-width: 0; }
+.ds-code-bar { display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 12px; background: var(--ds-g3); border-bottom: 1px solid var(--ds-g6); }
+.ds-code-dots { display: inline-flex; gap: 6px; }
+.ds-code-dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--ds-g7); }
+.ds-code-title { font: var(--ds-fs-12) var(--ds-mono); color: var(--ds-g11); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ds-code-body { overflow-x: auto; }
+.ds-code pre { margin: 0; padding: 14px 16px; font: var(--ds-fs-12)/1.7 var(--ds-mono); color: var(--ds-g12); white-space: pre; width: max-content; min-width: 100%; }
+.ds-code pre code { font: inherit; background: none; padding: 0; }
+
+/* The copy button sits on the body's top right, shown on hover or focus; always on touch screens. */
+.ds-code-copy { position: absolute; right: 8px; bottom: auto; top: 8px; background: var(--ds-g2); border: 1px solid var(--ds-g7); opacity: 0; transition: opacity var(--ds-dur-hover) var(--ds-ease-out); }
+.ds-code.has-bar .ds-code-copy { top: 40px; }
+.ds-code:hover .ds-code-copy, .ds-code-copy:focus-visible, .ds-code-copy.is-done { opacity: 1; }
+@media (hover: none) { .ds-code-copy { opacity: 1; } }
+.ds-code-copy.is-done { color: var(--ds-ok-text); }
+
+/* Syntax: tokens only. */
+.ds-code-keyword { color: var(--ds-code-keyword); }
+.ds-code-string { color: var(--ds-code-string); }
+.ds-code-number { color: var(--ds-code-number); }
+.ds-code-comment { color: var(--ds-code-comment); }
+.ds-code-function { color: var(--ds-code-function); }
+.ds-code-variable { color: var(--ds-code-variable); }
+.ds-code-punctuation { color: var(--ds-code-punctuation); }
+
+/* Public pages read larger: inside the site container the code is 13px. */
+@container site (min-width: 0) { .ds-code pre { font-size: var(--ds-fs-13); } }

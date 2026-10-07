@@ -1,0 +1,64 @@
+---
+title: Skills
+description: Files the agent carries into the machine.
+---
+
+## What it is
+
+A skill is a folder: a `SKILL.md`, which says what it is called, when to use it and what to do, and whatever files it needs. It is staged into the agent's own directory on the machine when a checkout is built, and the agent reads it as it reads any skill. An [agent](/docs/nvoi/agents) names the skills it carries.
+
+## How it behaves
+
+### The description is the selection criterion
+
+The model reads every skill's description and decides which to load. "Fills PDF forms" is useless; "Use when the user asks to fill in a PDF form" fires.
+
+### The slug is set once
+
+The folder on the machine is `skills/<slug>/`, derived from the name at creation and never renamed.
+
+### Outside the checkout, always
+
+A skill lives under the agent's home on the machine, never inside the repository's tree, so nothing of nvoi's reaches a pull request.
+
+### Default skills are read only
+
+A skill shipped with the platform has `source: default`. It is carried like any other and edited by nobody.
+
+### Files have an order
+
+The files are listed in the order the folder is written. Archiving a skill archives its files with it.
+
+## In the app
+
+The skills page lists them. A skill's page is its description, its body and its files, uploaded and ordered.
+
+## From the CLI
+
+### Create
+
+```bash
+nvoi skill create --name "Release notes" --description "Use when asked to write release notes for this repository." --body "…"
+```
+
+### Add and remove files
+
+```bash
+nvoi skill-file create <skill-id> --files notes/format.md
+nvoi skill-file archive <skill-id> <file-id>
+```
+
+### Read, update, archive
+
+```bash
+nvoi skill list --table
+nvoi skill show <skill-id>
+nvoi skill update <skill-id> --description "…"
+nvoi skill archive <skill-id>
+nvoi skill restore <skill-id>
+```
+
+## Related
+
+- [Agents](/docs/nvoi/agents): `--skill_ids` names what an agent carries.
+- [Library](/docs/nvoi/library): the workspace's other files.
